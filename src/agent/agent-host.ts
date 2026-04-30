@@ -629,6 +629,16 @@ export class AgentHost {
     });
   }
 
+  /**
+   * Cancel the in-flight turn. Pi settles the run with `stopReason: "aborted"`
+   * and emits `agent_end`, so the renderer's existing `busy` reset still fires.
+   * No-op when there's no active session or no run in flight.
+   */
+  async interrupt(): Promise<void> {
+    if (!this.active) return;
+    await this.active.session.abort();
+  }
+
   async setModel(selection: ModelSelection): Promise<void> {
     const model = this.modelRegistry.find(selection.provider, selection.modelId);
     if (!model) {

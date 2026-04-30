@@ -127,6 +127,10 @@ ipcMain.handle('modmixer:agent:send', async (_evt, text: string) => {
   await host.send(text);
 });
 
+ipcMain.handle('modmixer:agent:interrupt', async () => {
+  await host.interrupt();
+});
+
 ipcMain.handle('modmixer:consent:get', () => ({
   required: CURRENT_CONSENT_VERSION,
   accepted: loadSettings().consent,

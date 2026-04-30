@@ -77,6 +77,9 @@ const api = {
   send(text: string): Promise<void> {
     return ipcRenderer.invoke('modmixer:agent:send', text);
   },
+  interrupt(): Promise<void> {
+    return ipcRenderer.invoke('modmixer:agent:interrupt');
+  },
   onEvent(handler: (envelope: AgentEventEnvelope) => void): () => void {
     const wrapped = (_e: unknown, env: AgentEventEnvelope) => handler(env);
     ipcRenderer.on('modmixer:agent:event', wrapped);

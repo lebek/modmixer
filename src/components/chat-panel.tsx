@@ -115,6 +115,38 @@ export function ChatPanel({
     }
   };
 
+  const interrupt = async () => {
+    if (!busy) return;
+    try {
+      await window.modmixer.interrupt();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  // Esc cancels the in-flight turn. Skipped while typing in inputs/textareas
+  // (so Esc still does its usual thing in the editor) — only fires when focus
+  // is outside an editable element.
+  useEffect(() => {
+    if (!busy) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      if (
+        tag === 'INPUT' ||
+        tag === 'TEXTAREA' ||
+        target?.isContentEditable
+      ) {
+        return;
+      }
+      e.preventDefault();
+      void interrupt();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [busy]);
+
   const visible = useMemo(
     () => (streaming ? [...messages, streaming] : messages),
     [messages, streaming],
@@ -164,20 +196,40 @@ export function ChatPanel({
                 ) {
                   e.preventDefault();
                   void submit();
+                  return;
+                }
+                if (e.key === 'Escape' && busy) {
+                  e.preventDefault();
+                  void interrupt();
                 }
               }}
               placeholder={placeholderForScope(conversation.scope.type)}
               className="block h-20 w-full resize-none bg-transparent text-sm text-ink placeholder:text-subtle focus:outline-none"
             />
-            <div className="mt-2 flex items-center justify-end">
-              <button
-                onClick={() => void submit()}
-                disabled={!input.trim() || busy}
-                className="group inline-flex items-center gap-2 rounded-md bg-accent px-4 py-2 font-mono text-[11px] uppercase tracking-[0.18em] text-accent-foreground shadow-sm transition-all hover:bg-accent-soft hover:shadow-md active:translate-y-px disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
-              >
-                {busy ? 'Working…' : 'Send'}
-                {!busy && <SendIcon />}
-              </button>
+            <div className="mt-2 flex items-center justify-end gap-2">
+              {busy && (
+                <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-subtle">
+                  esc to stop
+                </span>
+              )}
+              {busy ? (
+                <button
+                  onClick={() => void interrupt()}
+                  className="group inline-flex items-center gap-2 rounded-md border border-failed/50 bg-failed/10 px-4 py-2 font-mono text-[11px] uppercase tracking-[0.18em] text-failed shadow-sm transition-all hover:bg-failed/20 active:translate-y-px"
+                >
+                  Stop
+                  <StopIcon />
+                </button>
+              ) : (
+                <button
+                  onClick={() => void submit()}
+                  disabled={!input.trim()}
+                  className="group inline-flex items-center gap-2 rounded-md bg-accent px-4 py-2 font-mono text-[11px] uppercase tracking-[0.18em] text-accent-foreground shadow-sm transition-all hover:bg-accent-soft hover:shadow-md active:translate-y-px disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
+                >
+                  Send
+                  <SendIcon />
+                </button>
+              )}
             </div>
           </div>
         ) : (
@@ -207,6 +259,19 @@ function SendIcon() {
       fill="currentColor"
     >
       <path d="M3 11.5 21 3l-8.5 18-2.2-7.3L3 11.5z" />
+    </svg>
+  );
+}
+
+function StopIcon() {
+  return (
+    <svg
+      aria-hidden
+      className="h-3 w-3"
+      viewBox="0 0 24 24"
+      fill="currentColor"
+    >
+      <rect x="6" y="6" width="12" height="12" rx="1" />
     </svg>
   );
 }
