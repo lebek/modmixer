@@ -5,6 +5,7 @@ import type { AgentEventEnvelope } from '../preload';
 import { cn } from '@/lib/cn';
 import { extractText, extractToolCalls } from '@/lib/agent-utils';
 import { Markdown } from './markdown';
+import { ToolResultBubble } from './tool-result-renderer';
 
 type ToolStatus = 'running' | 'done' | 'error';
 
@@ -130,6 +131,11 @@ export function ChatPanel({
             key={`${(m as { timestamp?: number }).timestamp ?? i}-${i}`}
             message={m}
             toolStates={toolStates}
+            toolCallArgs={
+              m.role === 'toolResult'
+                ? findToolCallArgs(visible, i, m.toolCallId)
+                : undefined
+            }
           />
         ))}
         {compacting && (
@@ -225,12 +231,29 @@ function ScopeEmptyState({ scope }: { scope: 'mod' | 'new' }) {
   );
 }
 
+function findToolCallArgs(
+  msgs: AgentMessage[],
+  idx: number,
+  toolCallId: string,
+): Record<string, unknown> | undefined {
+  for (let j = idx - 1; j >= 0; j--) {
+    const m = msgs[j];
+    if (m.role !== 'assistant') continue;
+    const calls = extractToolCalls(m.content);
+    const hit = calls.find((c) => c.id === toolCallId);
+    if (hit) return hit.arguments;
+  }
+  return undefined;
+}
+
 function MessageBubble({
   message,
   toolStates,
+  toolCallArgs,
 }: {
   message: AgentMessage;
   toolStates: Record<string, { name: string; status: ToolStatus }>;
+  toolCallArgs?: Record<string, unknown>;
 }) {
   if (message.role === 'user') {
     return (
@@ -266,23 +289,7 @@ function MessageBubble({
   }
 
   if (message.role === 'toolResult') {
-    return (
-      <div
-        className={cn(
-          'rounded-md border px-3 py-2 text-xs',
-          message.isError
-            ? 'border-failed/40 bg-failed/5 text-failed'
-            : 'border-ready/40 bg-ready/5 text-ink',
-        )}
-      >
-        <span className="mr-2 font-mono text-[10px] uppercase tracking-[0.18em] text-muted">
-          {message.toolName} {message.isError ? '✗' : '✓'}
-        </span>
-        <span className="whitespace-pre-wrap">
-          {extractText(message.content)}
-        </span>
-      </div>
-    );
+    return <ToolResultBubble message={message} args={toolCallArgs} />;
   }
 
   if (message.role === 'compactionSummary') {
