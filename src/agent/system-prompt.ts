@@ -1,6 +1,7 @@
 import { detectRimWorldPaths } from './paths.js';
 import { getWorkspacePaths } from './workspace.js';
 import { loadSettings } from './settings.js';
+import { buildIndexSync, LORE_TOPICS } from './lore.js';
 import type { ConversationScope } from './conversations.js';
 
 interface PromptContext {
@@ -56,11 +57,32 @@ const TOOL_LIST_BLOCK = `Custom tools:
 - tail_player_log: pull recent lines from Player.log on demand. Use for ad-hoc diagnostics, NOT for live monitoring.
 - list_installed_mods: survey of every installed mod (local + Workshop), cross-referenced with ModsConfig.xml. Pass activeOnly=true for the running modlist in load order.
 - decompile_dll: decompile a .NET DLL with ilspycmd to read C# source — Harmony patches, Mod entrypoints, etc. ALWAYS use this tool to run ilspycmd — never invoke ilspycmd through bash, since the bash path triggers a user approval prompt while decompile_dll is path-policy-guarded and runs without one.
+- read_lore: read transferable RimWorld-modding lessons for a topic. Three tiers merge here: repo (ships with modmixer), user (this user's cross-mod lessons), and mod (this mod's quirks, when scoped). Mod > user > repo on conflicts. Call this BEFORE attempting anything in an unfamiliar area — most lessons document non-obvious gotchas that took a long time to discover the first time.
+- save_lore: persist a lesson into the user or mod tier so future sessions inherit it. Save sparingly: only when the lesson would NOT be obvious to an agent reading the code cold. Strong signals are "the obvious approach failed", "the error message was distinctive", "the user corrected my assumption", or "the fix was in a different system than I first searched". Engine-level lessons → tier=user. Mod-specific quirks → tier=mod.
 
 Standard coding tools (rooted at the workspace cwd):
 - read, write, edit: file I/O. Use to populate Defs, Patches, and Source files. Accepts both relative and absolute paths.
 - bash: shell commands.
 - grep, find, ls: search and listing.`;
+
+function loreBlock(modFolder: string | null): string {
+  const rows = buildIndexSync(modFolder);
+  const populated = rows.filter(
+    (r) => r.counts.repo + r.counts.user + r.counts.mod > 0,
+  );
+  if (populated.length === 0) {
+    return `Modding lore: no entries yet across ${LORE_TOPICS.length} topics. See the read_lore / save_lore tool descriptions for the topic catalogue. Save lessons via save_lore as you discover them.`;
+  }
+  const lines = populated.map((r) => {
+    const parts: string[] = [];
+    if (r.counts.repo) parts.push(`repo:${r.counts.repo}`);
+    if (r.counts.user) parts.push(`user:${r.counts.user}`);
+    if (r.counts.mod) parts.push(`mod:${r.counts.mod}`);
+    return `- ${r.topic} (${parts.join(', ')})`;
+  });
+  return `Modding lore index — call read_lore <topic> when you start work in one of these areas. Counts show entries per tier; mod > user > repo on conflicts. ${LORE_TOPICS.length - populated.length} topics have no entries yet (full catalogue is in read_lore / save_lore tool descriptions).
+${lines.join('\n')}`;
+}
 
 function pathsBlock(ctx: PromptContext): string {
   return `Workspace (cwd): ${ctx.workspaceDir}
@@ -169,9 +191,11 @@ ${pathsBlock(ctx)}
 
 ${TOOL_LIST_BLOCK}`;
   let scopeBlock: string;
+  let modFolder: string | null = null;
   switch (scope.type) {
     case 'mod':
       scopeBlock = modScopeBlock(scope.modFolder, ctx);
+      modFolder = scope.modFolder;
       break;
     case 'new':
       scopeBlock = NEW_MOD_BLOCK;
@@ -180,6 +204,8 @@ ${TOOL_LIST_BLOCK}`;
   return `${head}
 
 ${scopeBlock}
+
+${loreBlock(modFolder)}
 
 ${SHARED_RULES}`;
 }

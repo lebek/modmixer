@@ -31,6 +31,8 @@ import { launchRimWorldTool } from './tools/launch-rimworld.js';
 import { tailPlayerLogTool } from './tools/tail-player-log.js';
 import { listInstalledModsTool } from './tools/list-installed-mods.js';
 import { decompileDllTool } from './tools/decompile-dll.js';
+import { readLoreTool } from './tools/read-lore.js';
+import { saveLoreTool } from './tools/save-lore.js';
 import { createGuardedBashTool } from './tools/bash.js';
 import {
   createGuardedEditTool,
@@ -103,6 +105,8 @@ function buildCustomTools(cwd: string): AgentTool<any>[] {
     tailPlayerLogTool,
     listInstalledModsTool,
     decompileDllTool,
+    readLoreTool,
+    saveLoreTool,
     // bash is the catch-all for arbitrary shell exec. The path-policy guard
     // is the safety net; the confirmation prompt is the user-facing brake.
     withConfirmation(createGuardedBashTool(cwd), {

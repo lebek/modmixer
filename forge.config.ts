@@ -27,7 +27,7 @@ const config: ForgeConfig = {
     // process.resourcesPath at runtime. node_modules/steamworks.js/dist/
     // already contains the per-platform binaries for win-x64, mac-x64,
     // mac-arm64, and linux-x64, so a single copy works on every target.
-    extraResource: ['node_modules/steamworks.js', 'dist/LICENSES.txt'],
+    extraResource: ['node_modules/steamworks.js', 'dist/LICENSES.txt', 'lore'],
   },
   hooks: {
     generateAssets: async () => {

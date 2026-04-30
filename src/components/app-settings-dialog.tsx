@@ -155,21 +155,33 @@ export function AppSettingsDialog({
                       </label>
                     </div>
 
-                    <div className="flex justify-end gap-2 pt-2">
+                    <div className="flex items-center justify-between pt-2">
                       <button
-                        onClick={onClose}
-                        disabled={saving}
-                        className="rounded-md border border-line bg-paper px-3 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-muted transition-colors hover:border-ink/30 hover:text-ink disabled:opacity-40"
+                        type="button"
+                        onClick={() =>
+                          void window.modmixer.revealLoreDir({ tier: 'user' })
+                        }
+                        title="Reveal the folder where Modmixer stores cross-mod modding lessons learned during your sessions."
+                        className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted/70 transition-colors hover:text-ink"
                       >
-                        Cancel
+                        Reveal lore folder
                       </button>
-                      <button
-                        onClick={() => void save()}
-                        disabled={saving || preview === ''}
-                        className="rounded-md bg-accent px-3 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-accent-foreground transition-opacity hover:bg-accent-soft disabled:cursor-not-allowed disabled:opacity-40"
-                      >
-                        {saving ? 'Saving…' : 'Save'}
-                      </button>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={onClose}
+                          disabled={saving}
+                          className="rounded-md border border-line bg-paper px-3 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-muted transition-colors hover:border-ink/30 hover:text-ink disabled:opacity-40"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          onClick={() => void save()}
+                          disabled={saving || preview === ''}
+                          className="rounded-md bg-accent px-3 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-accent-foreground transition-opacity hover:bg-accent-soft disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          {saving ? 'Saving…' : 'Save'}
+                        </button>
+                      </div>
                     </div>
                   </div>
                 )}

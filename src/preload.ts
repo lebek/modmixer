@@ -301,6 +301,14 @@ const api = {
     return ipcRenderer.invoke('modmixer:shell:open-external', url);
   },
 
+  // Lore (power-user reveal)
+  revealLoreDir(args: {
+    tier: 'user' | 'mod';
+    modFolder?: string;
+  }): Promise<string | null> {
+    return ipcRenderer.invoke('modmixer:lore:reveal', args);
+  },
+
   // Confirmation gate (sensitive agent actions)
   onConfirmRequest(handler: (req: ConfirmationRequest) => void): () => void {
     const wrapped = (_e: unknown, req: ConfirmationRequest) => handler(req);

@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, shell } from 'electron';
 import path from 'node:path';
+import fsp from 'node:fs/promises';
 import started from 'electron-squirrel-startup';
 import { updateElectronApp } from 'update-electron-app';
 import { initSentry } from './agent/sentry.js';
@@ -42,6 +43,7 @@ import {
   type AboutMetadata,
 } from './agent/workspace.js';
 import { readSchematic } from './agent/schematic.js';
+import { userLoreDir, modLoreDir } from './agent/lore.js';
 import { scanDefs } from './agent/defs-scan.js';
 import { buildDefGraph } from './agent/def-graph.js';
 import { onModChanged, emitModChanged } from './agent/mod-events.js';
@@ -425,6 +427,28 @@ ipcMain.handle('modmixer:shell:open-external', async (_evt, url: string) => {
   if (!/^(https?|steam):\/\//i.test(url)) return;
   await shell.openExternal(url);
 });
+
+// Power-user escape hatch from Settings → reveal the user-tier or mod-tier
+// lore directory in Finder/Explorer. Returns null on success (matches
+// shell.openPath's empty-string convention) or an error string for the
+// renderer to surface.
+ipcMain.handle(
+  'modmixer:lore:reveal',
+  async (_evt, args: { tier: 'user' | 'mod'; modFolder?: string }) => {
+    let dir: string;
+    if (args.tier === 'user') {
+      dir = userLoreDir();
+    } else {
+      if (!args.modFolder) return 'modFolder is required for mod-tier lore';
+      dir = modLoreDir(args.modFolder);
+    }
+    // Materialize the directory on first reveal so the user lands inside
+    // it instead of seeing "folder does not exist".
+    await fsp.mkdir(dir, { recursive: true });
+    const err = await shell.openPath(dir);
+    return err === '' ? null : err;
+  },
+);
 
 const createWindow = () => {
   // In dev, the .icns/.ico baked in by Forge isn't available, so set the
