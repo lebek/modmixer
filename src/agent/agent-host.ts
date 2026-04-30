@@ -50,6 +50,7 @@ import {
   disableModInGameTool,
 } from './tools/enable-mod-in-game.js';
 import { quitRimWorldTool } from './tools/quit-rimworld.js';
+import { prepareDebugSessionTool } from './tools/prepare-debug-session.js';
 import { isRimWorldRunningTool } from './tools/is-rimworld-running.js';
 import { watchPlayerLogTool } from './tools/watch-player-log.js';
 import { notifyTestStatusTool } from './tools/notify-test-status.js';
@@ -92,6 +93,7 @@ function buildCustomTools(cwd: string): AgentTool<any>[] {
     unsyncFromGameTool,
     enableModInGameTool,
     disableModInGameTool,
+    prepareDebugSessionTool,
     buildModTool,
     launchRimWorldTool,
     // quit_rimworld may drop unsaved game progress.

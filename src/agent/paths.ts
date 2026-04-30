@@ -13,6 +13,8 @@ export interface RimWorldPaths {
   playerLog: string | null;
   /** ModsConfig.xml — RimWorld's active mod list and load order, if found. */
   modsConfig: string | null;
+  /** Prefs.xml — dev mode flag, debug action palette, and other user prefs, if found. */
+  prefsXml: string | null;
 }
 
 export function detectRimWorldPaths(): RimWorldPaths {
@@ -97,6 +99,14 @@ export function detectRimWorldPaths(): RimWorldPaths {
     modsConfigCandidates = [path.join(linuxBase, 'Config/ModsConfig.xml')];
   }
 
+  const modsConfig = modsConfigCandidates.find((p) => fs.existsSync(p)) ?? null;
+  // Prefs.xml lives next to ModsConfig.xml in the same Config/ dir on every
+  // platform. The user may not have it yet (game never launched), in which
+  // case we still report a candidate path so the prepare-debug-session tool
+  // can surface a clear error rather than no-oping silently.
+  const prefsCandidate = modsConfig
+    ? path.join(path.dirname(modsConfig), 'Prefs.xml')
+    : null;
   return {
     modsDir,
     managedDir: managedCandidates.find((p) => fs.existsSync(p)) ?? null,
@@ -105,7 +115,8 @@ export function detectRimWorldPaths(): RimWorldPaths {
       playerLogCandidate && fs.existsSync(playerLogCandidate)
         ? playerLogCandidate
         : null,
-    modsConfig:
-      modsConfigCandidates.find((p) => fs.existsSync(p)) ?? null,
+    modsConfig,
+    prefsXml:
+      prefsCandidate && fs.existsSync(prefsCandidate) ? prefsCandidate : null,
   };
 }
