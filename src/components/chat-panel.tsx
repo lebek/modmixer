@@ -29,8 +29,12 @@ export function ChatPanel({
   const [compacting, setCompacting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [input, setInput] = useState('');
+  const [pinned, setPinned] = useState(true);
+  const [hasNewBelow, setHasNewBelow] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const justSwitchedRef = useRef(true);
+  const programmaticScrollRef = useRef(false);
+  const programmaticTimerRef = useRef<number | null>(null);
 
   // Reset on conversation switch.
   useEffect(() => {
@@ -40,6 +44,8 @@ export function ChatPanel({
     setBusy(false);
     setCompacting(false);
     setError(null);
+    setPinned(true);
+    setHasNewBelow(false);
     justSwitchedRef.current = true;
   }, [conversation.id, initialMessages]);
 
@@ -92,16 +98,90 @@ export function ChatPanel({
     });
   }, [conversation.id]);
 
+  // Track whether the user is "pinned" to the bottom. A user-initiated scroll
+  // away from the bottom unpins; scrolling back re-pins. Programmatic scrolls
+  // we trigger ourselves are flagged so we don't react to them — except for
+  // wheel/touch/keyboard events, which are unambiguously user input and cancel
+  // any in-flight auto-scroll (otherwise streaming chunks would yank the user
+  // back down mid-animation when they try to read older content).
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+
+    const updatePinned = () => {
+      const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+      const atBottom = distance < 64;
+      setPinned(atBottom);
+      if (atBottom) setHasNewBelow(false);
+    };
+
+    const onScroll = () => {
+      if (programmaticScrollRef.current) return;
+      updatePinned();
+    };
+
+    const onUserGesture = () => {
+      // A real user gesture cancels our programmatic scroll-following so the
+      // next scroll event is honored even if it lands inside our settle window.
+      programmaticScrollRef.current = false;
+      if (programmaticTimerRef.current !== null) {
+        window.clearTimeout(programmaticTimerRef.current);
+        programmaticTimerRef.current = null;
+      }
+      updatePinned();
+    };
+
+    el.addEventListener('scroll', onScroll, { passive: true });
+    el.addEventListener('wheel', onUserGesture, { passive: true });
+    el.addEventListener('touchstart', onUserGesture, { passive: true });
+    el.addEventListener('touchmove', onUserGesture, { passive: true });
+    el.addEventListener('keydown', onUserGesture);
+    return () => {
+      el.removeEventListener('scroll', onScroll);
+      el.removeEventListener('wheel', onUserGesture);
+      el.removeEventListener('touchstart', onUserGesture);
+      el.removeEventListener('touchmove', onUserGesture);
+      el.removeEventListener('keydown', onUserGesture);
+    };
+  }, []);
+
+  const scrollToBottom = (smooth: boolean) => {
+    const el = scrollRef.current;
+    if (!el) return;
+    programmaticScrollRef.current = true;
+    el.scrollTo({
+      top: el.scrollHeight,
+      behavior: smooth ? 'smooth' : 'auto',
+    });
+    // Smooth scrolls can take a few hundred ms to settle; instant scrolls
+    // settle within a frame. Hold the flag long enough to cover both so the
+    // scroll listener doesn't mistake our own animation for a user gesture.
+    if (programmaticTimerRef.current !== null) {
+      window.clearTimeout(programmaticTimerRef.current);
+    }
+    programmaticTimerRef.current = window.setTimeout(() => {
+      programmaticScrollRef.current = false;
+      programmaticTimerRef.current = null;
+    }, smooth ? 600 : 50);
+  };
+
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     const instant = justSwitchedRef.current;
     justSwitchedRef.current = false;
-    el.scrollTo({
-      top: el.scrollHeight,
-      behavior: instant ? 'auto' : 'smooth',
-    });
+    if (instant || pinned) {
+      scrollToBottom(!instant);
+    } else {
+      setHasNewBelow(true);
+    }
   }, [messages, streaming, toolStates, compacting]);
+
+  const jumpToBottom = () => {
+    scrollToBottom(true);
+    setPinned(true);
+    setHasNewBelow(false);
+  };
 
   const submit = async () => {
     const text = input.trim();
@@ -154,7 +234,8 @@ export function ChatPanel({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div ref={scrollRef} className="flex-1 space-y-3 overflow-auto px-6 py-4">
+      <div className="relative min-h-0 flex-1">
+      <div ref={scrollRef} className="absolute inset-0 space-y-3 overflow-auto px-6 py-4">
         {visible.length === 0 && (
           <ScopeEmptyState scope={conversation.scope.type} />
         )}
@@ -180,6 +261,16 @@ export function ChatPanel({
             {error}
           </div>
         )}
+      </div>
+      {!pinned && hasNewBelow && (
+        <button
+          onClick={jumpToBottom}
+          className="absolute left-1/2 bottom-3 z-10 inline-flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-line bg-paper px-3 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-muted shadow-md transition-colors hover:bg-surface hover:text-ink"
+        >
+          <span>New messages</span>
+          <DownArrowIcon />
+        </button>
+      )}
       </div>
       <div className="border-t border-line px-6 py-3">
         {hasAi ? (
@@ -259,6 +350,24 @@ function SendIcon() {
       fill="currentColor"
     >
       <path d="M3 11.5 21 3l-8.5 18-2.2-7.3L3 11.5z" />
+    </svg>
+  );
+}
+
+function DownArrowIcon() {
+  return (
+    <svg
+      aria-hidden
+      className="h-3 w-3"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M12 5v14" />
+      <path d="m6 13 6 6 6-6" />
     </svg>
   );
 }
