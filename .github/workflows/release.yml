@@ -1,0 +1,50 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  publish:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            arch: x64
+          - os: macos-14
+            arch: arm64
+          - os: ubuntu-latest
+            arch: x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install Linux build deps
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends fakeroot dpkg
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Publish
+        env:
+          # PAT with write access to the public modmixer-releases repo.
+          GITHUB_TOKEN: ${{ secrets.RELEASES_GH_TOKEN }}
+          # Baked into the bundle at build time via Vite's `define`. Empty in
+          # forks / dev builds where these secrets aren't configured, in which
+          # case both SDKs no-op cleanly.
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          POSTHOG_KEY: ${{ secrets.POSTHOG_KEY }}
+        run: npm run publish -- --arch=${{ matrix.arch }}

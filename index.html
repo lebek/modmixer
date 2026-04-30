@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; font-src 'self' data:;" />
+    <title>Modmixer</title>
+    <script>
+      // Apply theme synchronously before paint so the first frame uses the
+      // right colours. Source of truth is settings.json (read by the main
+      // process); we mirror it to localStorage so this boot script can read
+      // it without an IPC round-trip.
+      (function () {
+        try {
+          var pref = localStorage.getItem('modmixer:theme') || 'dark';
+          var dark =
+            pref === 'dark' ||
+            (pref === 'auto' &&
+              window.matchMedia('(prefers-color-scheme: dark)').matches);
+          document.documentElement.setAttribute(
+            'data-theme',
+            dark ? 'dark' : 'light',
+          );
+        } catch (_) {
+          document.documentElement.setAttribute('data-theme', 'dark');
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/renderer.tsx"></script>
+  </body>
+</html>

@@ -1,0 +1,38 @@
+Modmixer
+Copyright (c) 2026 Peter Le Bek
+
+This product includes software developed by third parties. License texts for
+runtime dependencies are aggregated into `dist/LICENSES.txt` at build time
+(see `scripts/generate-licenses.mjs`). The list below summarises the major
+components and where to find their full licenses.
+
+JavaScript / TypeScript runtime dependencies
+--------------------------------------------
+Bundled via npm. Full license texts are aggregated into
+`dist/LICENSES.txt` at build time. Notable components:
+
+  * @mariozechner/pi-agent-core, @mariozechner/pi-ai,
+    @mariozechner/pi-coding-agent
+      MIT License — https://github.com/badlogic/pi-mono
+  * Electron (MIT) — https://github.com/electron/electron
+  * React, React DOM (MIT) — https://github.com/facebook/react
+  * @sentry/electron (MIT) — https://github.com/getsentry/sentry-electron
+  * posthog-node (MIT) — https://github.com/PostHog/posthog-js-lite
+  * @xyflow/react (MIT) — https://github.com/xyflow/xyflow
+  * Inter and JetBrains Mono fonts via @fontsource (OFL-1.1)
+
+C# bridge (vendor/modmixer-bridge)
+----------------------------------
+The ModMixer Bridge is a small RimWorld mod that streams diagnostics over
+localhost TCP. It links against:
+
+  * Lib.Harmony 2.3.3 — MIT License
+      https://github.com/pardeike/Harmony
+  * RimWorld game assemblies (Assembly-CSharp, UnityEngine, etc.)
+      Referenced at compile time only; not redistributed.
+
+Trademarks
+----------
+RimWorld® is a trademark of Ludeon Studios. Modmixer is not affiliated with
+or endorsed by Ludeon Studios, Re-Logic, ConcernedApe, Wube Software, or
+Mojang.

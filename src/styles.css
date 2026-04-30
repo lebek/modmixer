@@ -1,0 +1,128 @@
+@import "tailwindcss";
+
+@import "@fontsource/inter/400.css";
+@import "@fontsource/inter/500.css";
+@import "@fontsource/inter/600.css";
+@import "@fontsource/jetbrains-mono/400.css";
+@import "@fontsource/jetbrains-mono/500.css";
+
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+}
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-surface: var(--surface);
+  --color-raised: var(--raised);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-subtle: var(--subtle);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-ready: var(--ready);
+  --color-pending: var(--pending);
+  --color-failed: var(--failed);
+  --color-line: var(--line);
+
+  --color-background: var(--paper);
+  --color-foreground: var(--ink);
+  --color-card: var(--surface);
+  --color-card-foreground: var(--ink);
+  --color-popover: var(--paper);
+  --color-popover-foreground: var(--ink);
+  --color-primary: var(--accent);
+  --color-primary-foreground: var(--accent-foreground);
+  --color-secondary: var(--raised);
+  --color-secondary-foreground: var(--ink);
+  --color-muted-foreground: var(--muted);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--failed);
+  --color-destructive-foreground: var(--accent-foreground);
+  --color-border: var(--line);
+  --color-input: var(--line);
+  --color-ring: var(--accent);
+
+  --font-display: "JetBrains Mono", ui-monospace, monospace;
+  --font-sans: "Inter", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --radius: 0.5rem;
+}
+
+:root,
+[data-theme="light"] {
+  color-scheme: light;
+  --paper: #f4f4f0;
+  --surface: #ecece7;
+  --raised: #e1e1db;
+  --ink: #0f1114;
+  --muted: #5c6168;
+  --subtle: #9aa0a6;
+  --accent: #e8341b;
+  --accent-soft: #c42410;
+  --accent-foreground: #f4f4f0;
+  --ready: #16876c;
+  --pending: #8b9197;
+  --failed: #b91c2e;
+  --line: #d6d6cf;
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --paper: #131417;
+  --surface: #1a1c20;
+  --raised: #23262c;
+  --ink: #ececea;
+  --muted: #9097a0;
+  --subtle: #6b727b;
+  --accent: #ff5a3f;
+  --accent-soft: #e8341b;
+  --accent-foreground: #131417;
+  --ready: #3ec79f;
+  --pending: #6b727b;
+  --failed: #ff5566;
+  --line: #2c2f36;
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+
+@keyframes gridmark-pulse {
+  0%,
+  100% {
+    opacity: 0.2;
+  }
+  45% {
+    opacity: 1;
+  }
+}
+
+.gridmark-loading .gridmark-cell {
+  animation: gridmark-pulse 1.4s ease-in-out infinite;
+  animation-delay: calc(var(--i, 0) * 80ms);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gridmark-loading .gridmark-cell {
+    animation: none;
+    opacity: 0.55;
+  }
+}
