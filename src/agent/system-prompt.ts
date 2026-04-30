@@ -55,7 +55,7 @@ const TOOL_LIST_BLOCK = `Custom tools:
 - notify_test_status: push a native OS toast (over the game) with a one-line status. Use after triaging errors during a test session — the user is in fullscreen RimWorld and won't see the chat until they alt-tab.
 - tail_player_log: pull recent lines from Player.log on demand. Use for ad-hoc diagnostics, NOT for live monitoring.
 - list_installed_mods: survey of every installed mod (local + Workshop), cross-referenced with ModsConfig.xml. Pass activeOnly=true for the running modlist in load order.
-- decompile_dll: decompile a .NET DLL with ilspycmd to read C# source — Harmony patches, Mod entrypoints, etc.
+- decompile_dll: decompile a .NET DLL with ilspycmd to read C# source — Harmony patches, Mod entrypoints, etc. ALWAYS use this tool to run ilspycmd — never invoke ilspycmd through bash, since the bash path triggers a user approval prompt while decompile_dll is path-policy-guarded and runs without one.
 
 Standard coding tools (rooted at the workspace cwd):
 - read, write, edit: file I/O. Use to populate Defs, Patches, and Source files. Accepts both relative and absolute paths.

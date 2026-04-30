@@ -212,4 +212,26 @@ export function assertCommandAllowed(command: string): void {
       );
     }
   }
+  for (const { re, message } of REDIRECTED_COMMAND_PATTERNS) {
+    if (re.test(command)) {
+      throw new PathPolicyError(message, 'denylist');
+    }
+  }
 }
+
+/**
+ * Commands that have a dedicated, path-policy-guarded tool. Running them
+ * through bash works but forces a user approval prompt every time, so we
+ * reject the bash path and tell the model to use the proper tool instead.
+ * The match is a word-boundary check on the executable name; we don't try
+ * to defeat shell tricks like `il""spycmd` — the model has no incentive to
+ * obfuscate, and a hostile prompt that did would still be bounded by the
+ * bash tool's confirmation gate.
+ */
+const REDIRECTED_COMMAND_PATTERNS: readonly { re: RegExp; message: string }[] = [
+  {
+    re: /(?<![A-Za-z0-9_./-])ilspycmd(?![A-Za-z0-9_-])/,
+    message:
+      'Use the decompile_dll tool to run ilspycmd, not bash. decompile_dll enforces the same path policy without prompting the user for approval on every call.',
+  },
+];

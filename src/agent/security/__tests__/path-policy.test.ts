@@ -160,4 +160,26 @@ describe('assertCommandAllowed', () => {
       assertCommandAllowed('grep ssh Source/MyMod.csproj'),
     );
   });
+
+  it('rejects bash invocations of ilspycmd and points at decompile_dll', () => {
+    assert.throws(
+      () => assertCommandAllowed('ilspycmd /path/to/Some.dll'),
+      (err: unknown) =>
+        err instanceof PathPolicyError &&
+        /decompile_dll/.test(err.message),
+    );
+    assert.throws(
+      () => assertCommandAllowed('ilspycmd -t SomeType /path/to/Some.dll'),
+      (err: unknown) => err instanceof PathPolicyError,
+    );
+  });
+
+  it('does not reject substrings that merely contain "ilspycmd"', () => {
+    assert.doesNotThrow(() =>
+      assertCommandAllowed('grep ilspycmd-notes Source/README.md'),
+    );
+    assert.doesNotThrow(() =>
+      assertCommandAllowed('echo not-ilspycmd-here'),
+    );
+  });
 });
