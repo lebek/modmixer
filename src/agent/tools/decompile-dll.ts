@@ -2,6 +2,8 @@ import { Type } from 'typebox';
 import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { assertPathAllowed } from '../security/path-policy.js';
 import { getPathPolicyRoots } from '../security/policy-roots.js';
 
@@ -46,8 +48,8 @@ export const decompileDllTool: AgentTool<typeof Params, DecompileDllDetails> = {
       throw new Error(`DLL not found: ${safeDllPath}`);
     }
 
-    const check = await runCommand('ilspycmd', ['--help'], signal);
-    if (check.exitCode !== 0) {
+    const ilspycmd = resolveIlspycmd();
+    if (!ilspycmd) {
       return {
         content: [{ type: 'text', text: INSTALL_HINT }],
         details: { output: '', truncated: false, exitCode: -1 },
@@ -57,7 +59,7 @@ export const decompileDllTool: AgentTool<typeof Params, DecompileDllDetails> = {
     const args = params.type
       ? ['-t', params.type, safeDllPath]
       : [safeDllPath];
-    const result = await runCommand('ilspycmd', args, signal);
+    const result = await runCommand(ilspycmd, args, signal);
 
     let output = result.stdout || result.stderr || '(empty output)';
     let truncated = false;
@@ -75,6 +77,39 @@ export const decompileDllTool: AgentTool<typeof Params, DecompileDllDetails> = {
     };
   },
 };
+
+function resolveIlspycmd(): string | null {
+  const exe = process.platform === 'win32' ? 'ilspycmd.exe' : 'ilspycmd';
+  const home = os.homedir();
+  const candidates: string[] = [path.join(home, '.dotnet', 'tools', exe)];
+  if (process.env.DOTNET_CLI_HOME) {
+    candidates.push(
+      path.join(process.env.DOTNET_CLI_HOME, '.dotnet', 'tools', exe),
+    );
+  }
+  // Walk PATH ourselves so tilde'd entries (e.g. literal "~/.dotnet/tools")
+  // still resolve — Node's spawn doesn't expand ~.
+  const pathEnv = process.env.PATH ?? '';
+  for (const entry of pathEnv.split(path.delimiter)) {
+    if (!entry) continue;
+    const expanded = entry.startsWith('~')
+      ? path.join(home, entry.slice(1))
+      : entry;
+    candidates.push(path.join(expanded, exe));
+  }
+  for (const c of candidates) {
+    try {
+      // X_OK isn't meaningful on Windows — fall back to existence check there.
+      const mode =
+        process.platform === 'win32' ? fs.constants.F_OK : fs.constants.X_OK;
+      fs.accessSync(c, mode);
+      return c;
+    } catch {
+      // try next
+    }
+  }
+  return null;
+}
 
 function runCommand(
   cmd: string,
