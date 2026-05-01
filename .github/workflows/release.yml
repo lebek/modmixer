@@ -35,8 +35,23 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends fakeroot dpkg
 
+      - name: Set up .NET SDK
+        # Required to build the vendored ilspycmd binary for this OS/arch.
+        # ILSpy v10.x's ILSpyCmd csproj targets net8.0. Bumping needs to
+        # track the upstream tag pinned in scripts/fetch-ilspycmd.mjs.
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
       - name: Install dependencies
         run: npm ci
+
+      - name: Build vendored ilspycmd for this host
+        # Drops a self-contained binary at
+        # resources/ilspycmd/<platform>-<arch>/ilspycmd[.exe]. Forge ships
+        # whatever's in resources/ilspycmd into the installer's
+        # extraResource, so each runner contributes its own platform.
+        run: npm run fetch:ilspycmd
 
       - name: Publish
         env:

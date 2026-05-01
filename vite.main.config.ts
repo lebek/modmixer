@@ -13,6 +13,14 @@ export default defineConfig({
       external: [
         'electron',
         'steamworks.js',
+        // Native module — .node binding can't be bundled by Rollup. Loaded
+        // from process.resourcesPath/better-sqlite3 in packaged builds.
+        'better-sqlite3',
+        // Pure-WASM but ships the .wasm file as a sibling asset; let Node
+        // resolve it from node_modules instead of trying to inline.
+        'web-tree-sitter',
+        // Bundles platform-specific ripgrep binaries.
+        '@vscode/ripgrep',
         /^node:/,
       ],
     },

@@ -4,7 +4,7 @@ import type { OAuthEvent, OAuthLink } from '@/agent/agent-host';
 import type { ThemePreference } from '@/agent/settings';
 import { applyTheme } from '@/lib/theme';
 
-export type SettingsSection = 'providers' | 'general' | 'appearance';
+export type SettingsSection = 'providers' | 'general' | 'appearance' | 'index';
 
 export function AppSettingsDialog({
   onClose,
@@ -61,7 +61,9 @@ export function AppSettingsDialog({
       ? 'AI providers'
       : section === 'appearance'
         ? 'Appearance'
-        : 'General';
+        : section === 'index'
+          ? 'RimWorld index'
+          : 'General';
 
   return (
     <div
@@ -82,6 +84,11 @@ export function AppSettingsDialog({
             label="Appearance"
             active={section === 'appearance'}
             onClick={() => setSection('appearance')}
+          />
+          <SectionTab
+            label="RimWorld index"
+            active={section === 'index'}
+            onClick={() => setSection('index')}
           />
           <SectionTab
             label="General"
@@ -108,6 +115,7 @@ export function AppSettingsDialog({
             {section === 'appearance' && (
               <AppearanceSection theme={theme} onChange={changeTheme} />
             )}
+            {section === 'index' && <IndexSection />}
             {section === 'general' && (
               <>
                 {!loaded ? (
@@ -493,6 +501,142 @@ function ProviderRow({
       )}
     </div>
   );
+}
+
+function IndexSection() {
+  const [snapshot, setSnapshot] = useState<
+    Awaited<ReturnType<typeof window.modmixer.getIndexSnapshot>> | null
+  >(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void window.modmixer.getIndexSnapshot().then((s) => {
+      if (!cancelled) setSnapshot(s);
+    });
+    const unsub = window.modmixer.onIndexProgress(() => {
+      void window.modmixer.getIndexSnapshot().then((s) => {
+        if (!cancelled) setSnapshot(s);
+      });
+    });
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, []);
+
+  if (!snapshot) {
+    return <p className="text-sm text-muted">Loading…</p>;
+  }
+
+  const { status, rebuilding } = snapshot;
+  const meta = 'meta' in status ? status.meta : null;
+
+  const startRebuild = () => {
+    void window.modmixer.rebuildIndex({ force: true });
+  };
+
+  return (
+    <div className="space-y-5">
+      <p className="text-sm text-muted">
+        The RimWorld index powers the agent's def lookups and C# source
+        search. It's built from your local install on first launch and
+        rebuilt automatically when RimWorld updates.
+      </p>
+
+      <div className="rounded-md border border-line bg-surface/40 p-3">
+        <div className="flex items-center justify-between">
+          <h3 className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted">
+            Status
+          </h3>
+          <StatusBadge status={status.type} rebuilding={rebuilding} />
+        </div>
+        {status.type === 'no-rimworld' && (
+          <p className="mt-2 text-sm text-ink">
+            RimWorld install not detected — the index can't be built. Make
+            sure RimWorld is installed via Steam, then return here.
+          </p>
+        )}
+        {status.type === 'absent' && (
+          <p className="mt-2 text-sm text-ink">
+            No index yet. Click <strong>Rebuild</strong> below to build it
+            (~30-90s on first run).
+          </p>
+        )}
+        {status.type === 'stale' && (
+          <p className="mt-2 text-sm text-ink">
+            Index is out of date — {status.reason}. Rebuild to refresh.
+          </p>
+        )}
+        {status.type === 'fresh' && meta && (
+          <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-sm text-ink">
+            <dt className="text-muted">RimWorld</dt>
+            <dd className="font-mono text-xs">{meta.rimworldVersion}</dd>
+            <dt className="text-muted">DLC packs</dt>
+            <dd className="font-mono text-xs">
+              {meta.dlcs.length > 0 ? meta.dlcs.join(', ') : '(none)'}
+            </dd>
+            <dt className="text-muted">Defs</dt>
+            <dd className="font-mono text-xs">{meta.defCount.toLocaleString()}</dd>
+            <dt className="text-muted">C# symbols</dt>
+            <dd className="font-mono text-xs">
+              {meta.symbolCount.toLocaleString()}
+            </dd>
+            <dt className="text-muted">Source size</dt>
+            <dd className="font-mono text-xs">{formatBytes(meta.sourceBytes)}</dd>
+            <dt className="text-muted">Built</dt>
+            <dd className="font-mono text-xs">
+              {new Date(meta.builtAt).toLocaleString()}
+            </dd>
+          </dl>
+        )}
+      </div>
+
+      <div className="flex justify-end gap-2">
+        <button
+          type="button"
+          onClick={startRebuild}
+          disabled={rebuilding || status.type === 'no-rimworld'}
+          className="rounded-md bg-accent px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-accent-foreground transition-opacity hover:bg-accent-soft disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {rebuilding ? 'Building…' : 'Rebuild'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function StatusBadge({
+  status,
+  rebuilding,
+}: {
+  status: 'fresh' | 'stale' | 'absent' | 'no-rimworld' | 'building';
+  rebuilding: boolean;
+}) {
+  if (rebuilding) {
+    return (
+      <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-accent">
+        building
+      </span>
+    );
+  }
+  const tone =
+    status === 'fresh'
+      ? 'text-ready'
+      : status === 'no-rimworld'
+        ? 'text-muted'
+        : 'text-warning';
+  return (
+    <span className={`font-mono text-[10px] uppercase tracking-[0.18em] ${tone}`}>
+      {status}
+    </span>
+  );
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
 
 function StatusPill({ link }: { link: OAuthLink }) {

@@ -48,21 +48,32 @@ const TOOL_LIST_BLOCK = `Custom tools:
 - update_schematic: patch the agent-owned Schematic for the active mod. Two fields: shortDescription (one sentence shown in the mod browser and chat header) and body (markdown notes covering every feature added and how it works). The Schematic is read-only to the user — it's your scratchpad/spec, not theirs. Update it whenever the mod gains or meaningfully changes a feature so the body tracks reality. The Definitions section on the Schematic page is generated live from the mod's Defs/ folder; do NOT restate raw XML in body.
 - sync_to_game / unsync_from_game: symlink the mod into RimWorld's Mods/ so it loads, or remove the symlink. sync_to_game also writes placeholder PNGs/OGGs for any asset paths the user hasn't filled in yet, so the mod always loads even with incomplete assets.
 - enable_mod_in_game / disable_mod_in_game: add or remove the mod's packageId from RimWorld's ModsConfig.xml <activeMods>. Required for the game to actually load the mod. RimWorld must be closed when these run.
-- prepare_debug_session: edit Prefs.xml to enable dev mode, auto-open the debug action palette on launch, and pin specific palette entries. Use this in the test flow to give the user a one-click trigger for the mod's main behavior — e.g. for an IncidentDef, pin "Actions\\Do incident\\<YourIncidentDef>" so they can fire the event without starting a colony or waiting on the storyteller. RimWorld must be closed.
+- ship_and_launch: one-shot bundle of sync_to_game + enable_mod_in_game + launch_rimworld. Use this in the test-in-game flow instead of calling the three separately — it's a single round-trip and matches the order the chain has to run in. RimWorld must be closed first; pair with quit_rimworld when it isn't.
+- prepare_debug_session: edit Prefs.xml to enable dev mode, auto-open the debug action palette on launch, and pin specific palette entries. Use this in the test flow to give the user a one-click trigger for the mod's main behavior — e.g. for an IncidentDef, pin "Actions\\Do incident\\<YourIncidentDef>" so they can fire the event without starting a colony or waiting on the storyteller. RimWorld must be closed. Run this BEFORE ship_and_launch so the prefs are in place when RimWorld starts.
 - build_mod: dotnet build inside a mod's Source/. Surfaces compile errors.
-- launch_rimworld: cold-start the game via Steam. NO-OP if RimWorld is already running (the Steam URL only focuses an existing instance — it does NOT reload mods).
-- quit_rimworld: force-quit RimWorld. Use only after the user confirms, since they may have unsaved progress.
+- launch_rimworld: cold-start the game via Steam. NO-OP if RimWorld is already running (the Steam URL only focuses an existing instance — it does NOT reload mods). Prefer ship_and_launch when you're shipping a mod; only use this directly if the mod is already synced and enabled.
+- quit_rimworld: force-quit RimWorld and BLOCK until the OS has reaped the process. Returns once RimWorld is actually gone, so it is safe to call ship_and_launch / enable_mod_in_game / launch_rimworld immediately afterwards — do NOT sleep before the next call. Use only after the user confirms, since they may have unsaved progress.
 - is_rimworld_running: read-only check of whether RimWorld is currently running. Call this BEFORE asking the user — never ask "is RimWorld open?" when you can check yourself.
 - watch_player_log: start a BACKGROUND watch on Player.log. Returns immediately. If errors arrive during the user's test session, you'll be prompted automatically and can investigate without the user re-asking. Stops on first error batch / RimWorld close / conversation switch. Use this right after launch_rimworld — do NOT block.
 - notify_test_status: push a native OS toast (over the game) with a one-line status. Use after triaging errors during a test session — the user is in fullscreen RimWorld and won't see the chat until they alt-tab.
 - tail_player_log: pull recent lines from Player.log on demand. Use for ad-hoc diagnostics, NOT for live monitoring.
 - list_installed_mods: survey of every installed mod (local + Workshop), cross-referenced with ModsConfig.xml. Pass activeOnly=true for the running modlist in load order.
-- decompile_dll: decompile a .NET DLL with ilspycmd to read C# source — Harmony patches, Mod entrypoints, etc. ALWAYS use this tool to run ilspycmd — never invoke ilspycmd through bash, since the bash path triggers a user approval prompt while decompile_dll is path-policy-guarded and runs without one.
+- decompile_dll: decompile a .NET DLL with ilspycmd to read C# source — Harmony patches, Mod entrypoints, etc. ALWAYS use this tool to run ilspycmd — never invoke ilspycmd through bash, since the bash path triggers a user approval prompt while decompile_dll is path-policy-guarded and runs without one. Prefer the rimsage-style tools below for VANILLA RimWorld code lookups — decompile_dll is for ad-hoc inspection of a third-party mod DLL the agent doesn't already have indexed.
+
+RimWorld source/def index (built from the user's install at startup; no network access):
+- search_defs: find Core/DLC defs by defName, label, or description. Returns small summaries — pair with get_def_details to read the full XML. Always reach for this BEFORE \`bash strings ... | grep\` against the game's DLLs or XML.
+- get_def_details: full XML for a defName. Pass merged=true to fold ParentName inheritance into one resolved view (essential when looking at any ThingDef whose real fields live on an abstract base).
+- list_def_descendants: enumerate every def that extends a given parent via ParentName. Use for "what extends BaseFilth?", "what builds on BaseHumanGun?". Pass recursive=true to walk transitive children.
+- read_csharp_symbol: read a class/method/property by short name or FQN from the decompiled vanilla source. Far cheaper than \`read\`-ing the whole file. Pass an FQN ("RimWorld.StealAIUtility.TryFindBestItemToSteal") for a precise hit, or a short name to see every match.
+- search_source: ripgrep over the decompiled C# corpus. Use for finding call sites, patch targets, or anything that isn't a clean type name. Output is line-bounded — narrow the query or pass filePattern when results truncate.
+- who_uses_def: list every C# location that string-references a given defName. Bridges the def index to source ("what code reads this def?") without manual grepping.
 - read_lore: read transferable RimWorld-modding lessons for a topic. Three tiers merge here: repo (ships with modmixer), user (this user's cross-mod lessons), and mod (this mod's quirks, when scoped). Mod > user > repo on conflicts. Call this BEFORE attempting anything in an unfamiliar area — most lessons document non-obvious gotchas that took a long time to discover the first time.
 - save_lore: persist a lesson into the user or mod tier so future sessions inherit it. Save sparingly: only when the lesson would NOT be obvious to an agent reading the code cold. Strong signals are "the obvious approach failed", "the error message was distinctive", "the user corrected my assumption", or "the fix was in a different system than I first searched". Engine-level lessons → tier=user. Mod-specific quirks → tier=mod.
 
 Standard coding tools (rooted at the workspace cwd):
-- read, write, edit: file I/O. Use to populate Defs, Patches, and Source files. Accepts both relative and absolute paths.
+- read, write, edit: file I/O. Accepts both relative and absolute paths.
+  - Use \`write\` ONLY to create a new file. Writing over an existing file is rejected — re-streaming the whole file every time burns 5–10× the tokens of a diff.
+  - Use \`edit\` for ALL changes to existing files, regardless of how much you're changing. If you genuinely need a full rewrite, edit with the entire current contents as oldText and the new contents as newText.
 - bash: shell commands.
 - grep, find, ls: search and listing.`;
 
@@ -130,14 +141,12 @@ Rules for these comments:
 - Editing an existing path? Update the adjacent comment too if the meaning changed.
 
 Test-in-game flow when the user wants to run their mod:
-1. is_rimworld_running. If running, tell the user RimWorld must be closed and ASK whether to quit_rimworld (they may have unsaved progress). Wait for confirmation before quitting.
-2. sync_to_game folder="${modFolder}".
-3. enable_mod_in_game folder="${modFolder}".
-4. prepare_debug_session — almost always do this so the user has a one-click trigger in-game instead of grinding through colony setup. Pin the most direct way to exercise what just changed: for an IncidentDef "FooIncident", pin "Actions\\\\Do incident\\\\FooIncident"; for a WeatherDef "BarWeather", pin "Actions\\\\Change weather...\\\\BarWeather"; for a ThingDef "BazThing", pin "Actions\\\\Spawn thing...\\\\BazThing"; for custom [DebugAction] methods you wrote, pin "<your category>\\\\<your label>". Default autoOpenPalette=true so the palette is on screen at startup. Skip this only if there's genuinely no in-game action to bind (e.g. a pure UI-skin mod) — say so in one line and move on.
-5. launch_rimworld.
-6. In one short paragraph, tell the user EXACTLY what to do in-game. If you pinned palette entries, lead with that ("the palette is open in the top-left — click <pinned entry name> to fire the new event"). Otherwise describe the manual path. The user is about to alt-tab to the game.
-7. Call watch_player_log. This returns immediately — your turn ends here. The user goes off and tests.
-8. If errors arrive in the background, you'll be auto-prompted with the error content (a system-injected user message starting with "[automated]"). The user is still in fullscreen RimWorld — they will NOT see the chat until they alt-tab. So your first job is to triage and push a toast via notify_test_status. Categories:
+1. is_rimworld_running. If running, tell the user RimWorld must be closed and ASK whether to quit_rimworld (they may have unsaved progress). Wait for confirmation before quitting. quit_rimworld blocks until the process has exited, so the next step can run immediately — do NOT sleep between quit and ship_and_launch.
+2. prepare_debug_session — almost always do this so the user has a one-click trigger in-game instead of grinding through colony setup. Pin the most direct way to exercise what just changed: for an IncidentDef "FooIncident", pin "Actions\\\\Do incident\\\\FooIncident"; for a WeatherDef "BarWeather", pin "Actions\\\\Change weather...\\\\BarWeather"; for a ThingDef "BazThing", pin "Actions\\\\Spawn thing...\\\\BazThing"; for custom [DebugAction] methods you wrote, pin "<your category>\\\\<your label>". Default autoOpenPalette=true so the palette is on screen at startup. Skip this only if there's genuinely no in-game action to bind (e.g. a pure UI-skin mod) — say so in one line and move on.
+3. ship_and_launch folder="${modFolder}". This is the one-shot replacement for sync_to_game + enable_mod_in_game + launch_rimworld; use it instead of the three separate calls.
+4. In one short paragraph, tell the user EXACTLY what to do in-game. If you pinned palette entries, lead with that ("the palette is open in the top-left — click <pinned entry name> to fire the new event"). Otherwise describe the manual path. The user is about to alt-tab to the game.
+5. Call watch_player_log. This returns immediately — your turn ends here. The user goes off and tests.
+6. If errors arrive in the background, you'll be auto-prompted with the error content (a system-injected user message starting with "[automated]"). The user is still in fullscreen RimWorld — they will NOT see the chat until they alt-tab. So your first job is to triage and push a toast via notify_test_status. Categories:
 
    **Unrelated** — the stack trace, types, file paths, or asset paths point to RimWorld core or to another mod, NOT to "${modFolder}":
      - notify_test_status severity="info", e.g. "Non-fatal error in <mod>, ignoring — keep testing."
@@ -164,7 +173,7 @@ Test-in-game flow when the user wants to run their mod:
      - In the chat, summarize the cause, propose a SPECIFIC fix (e.g. "rename <durationTicks> to <defaultDuration> in Defs/.../X.xml"), and ask "Apply the fix?" — DO NOT edit files until they say yes.
      - Do NOT auto-resume watch_player_log; testing is blocked until the fix lands.
 
-9. If no auto-prompt arrives, the user will message you when they're done. Be ready.
+7. If no auto-prompt arrives, the user will message you when they're done. Be ready.
 
 Build → launch loop for code changes:
 1. build_mod folder="${modFolder}". Read compiler output.

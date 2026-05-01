@@ -1,11 +1,9 @@
 import { Type } from 'typebox';
 import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
-import { spawn } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import { assertPathAllowed } from '../security/path-policy.js';
 import { getPathPolicyRoots } from '../security/policy-roots.js';
+import { resolveIlspycmd, runIlspycmd } from '../index/ilspycmd.js';
 
 const Params = Type.Object({
   dllPath: Type.String({
@@ -59,7 +57,7 @@ export const decompileDllTool: AgentTool<typeof Params, DecompileDllDetails> = {
     const args = params.type
       ? ['-t', params.type, safeDllPath]
       : [safeDllPath];
-    const result = await runCommand(ilspycmd, args, signal);
+    const result = await runIlspycmd(ilspycmd, args, signal);
 
     let output = result.stdout || result.stderr || '(empty output)';
     let truncated = false;
@@ -78,68 +76,3 @@ export const decompileDllTool: AgentTool<typeof Params, DecompileDllDetails> = {
   },
 };
 
-function resolveIlspycmd(): string | null {
-  const exe = process.platform === 'win32' ? 'ilspycmd.exe' : 'ilspycmd';
-  const home = os.homedir();
-  const candidates: string[] = [path.join(home, '.dotnet', 'tools', exe)];
-  if (process.env.DOTNET_CLI_HOME) {
-    candidates.push(
-      path.join(process.env.DOTNET_CLI_HOME, '.dotnet', 'tools', exe),
-    );
-  }
-  // Walk PATH ourselves so tilde'd entries (e.g. literal "~/.dotnet/tools")
-  // still resolve — Node's spawn doesn't expand ~.
-  const pathEnv = process.env.PATH ?? '';
-  for (const entry of pathEnv.split(path.delimiter)) {
-    if (!entry) continue;
-    const expanded = entry.startsWith('~')
-      ? path.join(home, entry.slice(1))
-      : entry;
-    candidates.push(path.join(expanded, exe));
-  }
-  for (const c of candidates) {
-    try {
-      // X_OK isn't meaningful on Windows — fall back to existence check there.
-      const mode =
-        process.platform === 'win32' ? fs.constants.F_OK : fs.constants.X_OK;
-      fs.accessSync(c, mode);
-      return c;
-    } catch {
-      // try next
-    }
-  }
-  return null;
-}
-
-function runCommand(
-  cmd: string,
-  args: string[],
-  signal?: AbortSignal,
-): Promise<{ exitCode: number; stdout: string; stderr: string }> {
-  return new Promise((resolve) => {
-    const proc = spawn(cmd, args);
-    let stdout = '';
-    let stderr = '';
-    proc.stdout?.on('data', (d: Buffer) => {
-      stdout += d.toString();
-    });
-    proc.stderr?.on('data', (d: Buffer) => {
-      stderr += d.toString();
-    });
-    const onAbort = () => proc.kill();
-    signal?.addEventListener('abort', onAbort);
-    proc.on('close', (code) => {
-      signal?.removeEventListener('abort', onAbort);
-      resolve({ exitCode: code ?? -1, stdout, stderr });
-    });
-    proc.on('error', (err) => {
-      signal?.removeEventListener('abort', onAbort);
-      resolve({
-        exitCode: -1,
-        stdout,
-        stderr:
-          stderr + (err instanceof Error ? err.message : String(err)),
-      });
-    });
-  });
-}

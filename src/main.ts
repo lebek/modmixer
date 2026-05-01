@@ -78,6 +78,14 @@ import {
   CONFIRM_CHANNEL_RESOLVE,
   initConfirmationGate,
 } from './agent/security/confirmation-gate.js';
+import {
+  cancelActiveRebuild,
+  ensureIndexAtStartup,
+  getIndexSnapshot,
+  pipeProgressToWindow,
+  startRebuild,
+} from './agent/index/main-bridge.js';
+import { closeIndexDb } from './agent/index/db.js';
 
 if (started) {
   app.quit();
@@ -179,6 +187,20 @@ ipcMain.handle(
 );
 
 ipcMain.handle('modmixer:models:list', () => host.listAvailableModels());
+
+// RimWorld source/def index. The renderer pulls a snapshot on demand and
+// listens for progress events; the main process kicks off the build at
+// startup and on user request from Settings.
+ipcMain.handle('modmixer:index:get-snapshot', () => getIndexSnapshot());
+
+ipcMain.handle('modmixer:index:rebuild', async (_evt, options: { force?: boolean } = {}) => {
+  return startRebuild(options);
+});
+
+ipcMain.handle('modmixer:index:cancel', () => {
+  cancelActiveRebuild();
+  return getIndexSnapshot();
+});
 
 ipcMain.handle('modmixer:oauth:list', () => host.listOAuthLinks());
 
@@ -499,12 +521,20 @@ app.on('ready', () => {
   // so previously-stored OAuth creds become visible to the model picker.
   host.primeAfterReady();
   createWindow();
+  // Pipe index progress events to the renderer. Subscribed once for the
+  // process lifetime — the listener filters by mainWindow internally.
+  pipeProgressToWindow(() => mainWindow);
+  // Kick off the index rebuild if the cache is stale/missing. Fire-and-
+  // forget — the renderer modal will surface progress as it streams in.
+  void ensureIndexAtStartup();
 });
 
 app.on('window-all-closed', async () => {
   stopAllWatches();
   monitor.stop();
   confirmGate.cancelAll();
+  cancelActiveRebuild();
+  closeIndexDb();
   await host.shutdown();
   await shutdownTelemetry();
   if (process.platform !== 'darwin') {

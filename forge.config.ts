@@ -27,7 +27,26 @@ const config: ForgeConfig = {
     // process.resourcesPath at runtime. node_modules/steamworks.js/dist/
     // already contains the per-platform binaries for win-x64, mac-x64,
     // mac-arm64, and linux-x64, so a single copy works on every target.
-    extraResource: ['node_modules/steamworks.js', 'dist/LICENSES.txt', 'lore'],
+    extraResource: [
+      'node_modules/steamworks.js',
+      'dist/LICENSES.txt',
+      'lore',
+      // Index engine assets. ilspycmd binaries are ~30-50 MB per platform;
+      // only the matching <platform>-<arch> subdir for the build host needs
+      // a binary present (see resources/ilspycmd/README.md). The tree-sitter
+      // C# grammar wasm (~1 MB) is fetched at install time by
+      // scripts/fetch-tree-sitter-csharp.mjs.
+      'resources/ilspycmd',
+      'resources/tree-sitter',
+      // Bundled ripgrep — used by search_source against the decompiled
+      // RimWorld source corpus. @vscode/ripgrep installs platform binaries
+      // under node_modules/@vscode/ripgrep/bin/, which we ship as-is.
+      'node_modules/@vscode/ripgrep',
+      // better-sqlite3 native binding for the index DB. Like steamworks.js,
+      // the .node file can't be bundled by Rollup, so we ship the whole
+      // module and resolve it from resourcesPath at runtime.
+      'node_modules/better-sqlite3',
+    ],
   },
   hooks: {
     generateAssets: async () => {

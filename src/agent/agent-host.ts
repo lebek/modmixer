@@ -31,6 +31,12 @@ import { launchRimWorldTool } from './tools/launch-rimworld.js';
 import { tailPlayerLogTool } from './tools/tail-player-log.js';
 import { listInstalledModsTool } from './tools/list-installed-mods.js';
 import { decompileDllTool } from './tools/decompile-dll.js';
+import { searchDefsTool } from './tools/search-defs.js';
+import { getDefDetailsTool } from './tools/get-def-details.js';
+import { listDefDescendantsTool } from './tools/list-def-descendants.js';
+import { readCsharpSymbolTool } from './tools/read-csharp-symbol.js';
+import { searchSourceTool } from './tools/search-source.js';
+import { whoUsesDefTool } from './tools/who-uses-def.js';
 import { readLoreTool } from './tools/read-lore.js';
 import { saveLoreTool } from './tools/save-lore.js';
 import { createGuardedBashTool } from './tools/bash.js';
@@ -43,6 +49,7 @@ import {
   createGuardedWriteTool,
 } from './tools/path-guarded.js';
 import { syncToGameTool, unsyncFromGameTool } from './tools/sync-to-game.js';
+import { shipAndLaunchTool } from './tools/ship-and-launch.js';
 import { withConfirmation } from './security/with-confirmation.js';
 import { SafeStorageAuthBackend } from './security/secure-auth-storage.js';
 import {
@@ -96,6 +103,7 @@ function buildCustomTools(cwd: string): AgentTool<any>[] {
     prepareDebugSessionTool,
     buildModTool,
     launchRimWorldTool,
+    shipAndLaunchTool,
     // quit_rimworld may drop unsaved game progress.
     withConfirmation(quitRimWorldTool, {
       label: 'Force-quit RimWorld',
@@ -107,6 +115,13 @@ function buildCustomTools(cwd: string): AgentTool<any>[] {
     tailPlayerLogTool,
     listInstalledModsTool,
     decompileDllTool,
+    // RimWorld source/def index — read-only lookups against $MM/index/*.
+    searchDefsTool,
+    getDefDetailsTool,
+    listDefDescendantsTool,
+    readCsharpSymbolTool,
+    searchSourceTool,
+    whoUsesDefTool,
     readLoreTool,
     saveLoreTool,
     // bash is the catch-all for arbitrary shell exec. The path-policy guard

@@ -33,6 +33,10 @@ import type {
   PublishResult,
 } from './agent/workshop';
 import type { ConfirmationRequest } from './agent/security/confirmation-gate';
+import type {
+  IndexSnapshot,
+} from './agent/index/main-bridge';
+import type { IndexProgressEvent } from './agent/index/progress';
 export interface AssetsChangedEnvelope {
   folder: string;
 }
@@ -325,6 +329,22 @@ const api = {
       approved,
       alwaysAllowForSession,
     });
+  },
+
+  // RimWorld source/def index
+  getIndexSnapshot(): Promise<IndexSnapshot> {
+    return ipcRenderer.invoke('modmixer:index:get-snapshot');
+  },
+  rebuildIndex(options: { force?: boolean } = {}): Promise<IndexSnapshot> {
+    return ipcRenderer.invoke('modmixer:index:rebuild', options);
+  },
+  cancelIndexRebuild(): Promise<IndexSnapshot> {
+    return ipcRenderer.invoke('modmixer:index:cancel');
+  },
+  onIndexProgress(handler: (event: IndexProgressEvent) => void): () => void {
+    const wrapped = (_e: unknown, event: IndexProgressEvent) => handler(event);
+    ipcRenderer.on('modmixer:index:progress', wrapped);
+    return () => ipcRenderer.off('modmixer:index:progress', wrapped);
   },
 
   // Workshop

@@ -8,6 +8,7 @@ import type { ModelSelection } from './agent/settings';
 import { GridMark } from './components/grid-mark';
 import { ModelPicker } from './components/model-picker';
 import { AppSettingsDialog, type SettingsSection } from './components/app-settings-dialog';
+import { IndexProgressModal } from './components/index-progress-modal';
 import { TabNav, type Tab } from './components/tab-nav';
 import { BuildView } from './components/build-view';
 import { ModsView } from './components/mods-view';
@@ -308,6 +309,8 @@ export function App() {
           onClose={() => setSettingsSection(null)}
         />
       )}
+
+      <IndexProgressModal />
     </div>
   );
 }

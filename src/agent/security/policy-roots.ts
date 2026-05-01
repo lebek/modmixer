@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { detectRimWorldPaths } from '../paths.js';
 import { getWorkspacePaths } from '../workspace.js';
+import { getIndexPaths } from '../index/paths.js';
 import type { PathPolicyRoots } from './path-policy.js';
 
 /**
@@ -18,12 +19,14 @@ export function getPathPolicyRoots(): PathPolicyRoots {
   if (cached) return cached;
   const { workspaceDir } = getWorkspacePaths();
   const rim = detectRimWorldPaths();
+  const idx = getIndexPaths();
   cached = {
     workspaceDir,
     managedDir: rim.managedDir,
     workshopDir: rim.workshopDir,
     rimworldModsDir: rim.modsDir,
     playerLogDir: rim.playerLog ? path.dirname(rim.playerLog) : null,
+    indexDir: idx.root,
   };
   return cached;
 }

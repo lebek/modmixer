@@ -29,6 +29,7 @@ const ROOTS: PathPolicyRoots = {
     HOME,
     'Library/Logs/Ludeon Studios/RimWorld by Ludeon Studios',
   ),
+  indexDir: path.join(HOME, 'Library/Application Support/Modmixer/index'),
 };
 
 describe('assertPathAllowed', () => {

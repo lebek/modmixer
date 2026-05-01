@@ -13,7 +13,9 @@
     "lint": "eslint --ext .ts,.tsx .",
     "test": "tsx --test \"src/**/__tests__/*.test.ts\"",
     "typecheck": "tsc --noEmit",
-    "postinstall": "node scripts/patch-electron-name.mjs"
+    "fetch:ilspycmd": "node scripts/fetch-ilspycmd.mjs",
+    "fetch:tree-sitter": "node scripts/fetch-tree-sitter-csharp.mjs",
+    "postinstall": "node scripts/patch-electron-name.mjs && node scripts/fetch-tree-sitter-csharp.mjs"
   },
   "keywords": [],
   "author": {
@@ -34,6 +36,8 @@
     "@electron/fuses": "^1.8.0",
     "@electron/notarize": "^3.1.1",
     "@tailwindcss/vite": "^4.2.4",
+    "@electron/rebuild": "^3.6.1",
+    "@types/better-sqlite3": "^7.6.12",
     "@types/electron-squirrel-startup": "^1.0.2",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
@@ -56,7 +60,9 @@
     "@mariozechner/pi-coding-agent": "^0.70.6",
     "@sentry/electron": "^7.12.0",
     "@types/dagre": "^0.7.54",
+    "@vscode/ripgrep": "^1.15.9",
     "@xyflow/react": "^12.10.2",
+    "better-sqlite3": "^12.9.0",
     "clsx": "^2.1.1",
     "dagre": "^0.8.5",
     "electron-squirrel-startup": "^1.0.1",
@@ -68,6 +74,7 @@
     "remark-gfm": "^4.0.1",
     "steamworks.js": "^0.4.0",
     "tailwind-merge": "^3.5.0",
-    "update-electron-app": "^3.1.2"
+    "update-electron-app": "^3.1.2",
+    "web-tree-sitter": "^0.24.5"
   }
 }
