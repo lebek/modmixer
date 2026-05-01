@@ -13,6 +13,12 @@ permissions:
 
 jobs:
   publish:
+    # Scopes the OIDC token's `sub` claim to repo:lebek/modmixer:environment:release,
+    # which is what the Azure federated identity credential matches against.
+    # Applies to all matrix variants — only Windows actually uses OIDC, but the
+    # shared environment is harmless for the others and lets us hang protection
+    # rules (e.g. required reviewer) off it later.
+    environment: release
     strategy:
       fail-fast: false
       matrix:

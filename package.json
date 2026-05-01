@@ -1,7 +1,7 @@
 {
   "name": "modmixer",
   "productName": "Modmixer",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Agent-driven mod creation and diagnostics for RimWorld and beyond",
   "main": ".vite/build/main.js",
   "private": true,
@@ -35,8 +35,8 @@
     "@electron-forge/publisher-github": "^7.11.1",
     "@electron/fuses": "^1.8.0",
     "@electron/notarize": "^3.1.1",
-    "@tailwindcss/vite": "^4.2.4",
     "@electron/rebuild": "^3.6.1",
+    "@tailwindcss/vite": "^4.2.4",
     "@types/better-sqlite3": "^7.6.12",
     "@types/electron-squirrel-startup": "^1.0.2",
     "@types/react": "^19.2.14",
