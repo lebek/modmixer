@@ -4,6 +4,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { spawn } from 'node:child_process';
 import { getWorkspacePaths } from '../workspace.js';
+import { lintMod, formatFindings, type LintFinding } from '../build-lint.js';
 
 const Params = Type.Object({
   modFolder: Type.String({
@@ -16,6 +17,12 @@ export interface BuildModDetails {
   stdout: string;
   stderr: string;
   sourceDir: string;
+  /**
+   * Non-fatal RimWorld-specific lint findings (e.g. CompTickRare without
+   * tickerType). These are advisory — they do not affect the build's
+   * exit code.
+   */
+  lintFindings: LintFinding[];
 }
 
 export const buildModTool: AgentTool<typeof Params, BuildModDetails> = {
@@ -26,7 +33,8 @@ export const buildModTool: AgentTool<typeof Params, BuildModDetails> = {
   parameters: Params,
   async execute(_id, params, signal): Promise<AgentToolResult<BuildModDetails>> {
     const { workspaceDir } = getWorkspacePaths();
-    const sourceDir = path.join(workspaceDir, params.modFolder, 'Source');
+    const modDir = path.join(workspaceDir, params.modFolder);
+    const sourceDir = path.join(modDir, 'Source');
     if (!fs.existsSync(sourceDir)) {
       throw new Error(
         `Source folder not found: ${sourceDir}. Use scaffold_mod with withCSharp=true or write a .csproj first.`,
@@ -38,16 +46,27 @@ export const buildModTool: AgentTool<typeof Params, BuildModDetails> = {
       sourceDir,
       signal,
     );
+    // Run lints even on a failed build — most lint findings (tickerType,
+    // wrong TFM) are diagnoseable from source alone, and surfacing them
+    // alongside compile errors gives the agent a head start.
+    let lintFindings: LintFinding[] = [];
+    try {
+      lintFindings = await lintMod(modDir);
+    } catch (err) {
+      // Lint failures should never block the build; log and continue.
+      console.warn('[build_mod] lint failed:', err);
+    }
     const status =
       result.exitCode === 0
         ? 'BUILD SUCCEEDED'
         : `BUILD FAILED (exit ${result.exitCode})`;
-    const text = `${status}\n\n${result.stdout}${
-      result.stderr ? '\n--- stderr ---\n' + result.stderr : ''
-    }`;
+    const text =
+      `${status}\n\n${result.stdout}${
+        result.stderr ? '\n--- stderr ---\n' + result.stderr : ''
+      }` + formatFindings(lintFindings);
     return {
       content: [{ type: 'text', text }],
-      details: { ...result, sourceDir },
+      details: { ...result, sourceDir, lintFindings },
     };
   },
 };

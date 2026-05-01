@@ -33,21 +33,49 @@ export async function isRimWorldRunning(): Promise<boolean> {
   return false;
 }
 
-export async function quitRimWorld(): Promise<{ killed: boolean }> {
+/**
+ * Wait until `isRimWorldRunning()` reports false, polling every 250ms up to
+ * `timeoutMs`. The kill signal returns immediately on every platform we
+ * support, but the OS still needs a moment to reap the process — without
+ * this wait, callers race `enable_mod_in_game` (which refuses to run while
+ * RimWorld is up) and `launch_rimworld` (which becomes a no-op if the prior
+ * process is still alive). Returns true when the process is gone, false on
+ * timeout.
+ */
+async function waitForRimWorldExit(timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!(await isRimWorldRunning())) return true;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  return !(await isRimWorldRunning());
+}
+
+export interface QuitResult {
+  killed: boolean;
+  /** True if the process was confirmed gone within the wait window. */
+  exited: boolean;
+}
+
+export async function quitRimWorld(
+  waitTimeoutMs = 10_000,
+): Promise<QuitResult> {
   const os = platform();
+  let killed = false;
   try {
     if (os === 'darwin' || os === 'linux') {
       await execAsync('pkill -i rimworld');
-      return { killed: true };
-    }
-    if (os === 'win32') {
+      killed = true;
+    } else if (os === 'win32') {
       await execAsync('taskkill /IM RimWorldWin64.exe /F');
-      return { killed: true };
+      killed = true;
     }
   } catch {
-    return { killed: false };
+    killed = false;
   }
-  return { killed: false };
+  if (!killed) return { killed: false, exited: false };
+  const exited = await waitForRimWorldExit(waitTimeoutMs);
+  return { killed, exited };
 }
 
 export async function getModPackageId(folder: string): Promise<string> {

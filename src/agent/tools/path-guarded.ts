@@ -15,6 +15,7 @@ import path from 'node:path';
 import { homedir } from 'node:os';
 import { assertPathAllowed } from '../security/path-policy.js';
 import { getPathPolicyRoots } from '../security/policy-roots.js';
+import { assertWriteTargetIsNew } from './write-overwrite-guard.js';
 
 /**
  * Built-in pi tools (`read`, `write`, `edit`, `grep`, `find`, `ls`) accept
@@ -97,8 +98,32 @@ export function createGuardedReadTool(cwd: string): AgentTool<any> {
   return wrapPathTool(createReadTool(cwd), cwd, ['path', 'file_path']);
 }
 
+/**
+ * Wrap pi's write tool so it refuses to overwrite an existing file. The agent
+ * regularly reaches for `write` to apply small changes to files it just
+ * authored — that streams the entire new contents through the model on every
+ * iteration, costing 5–10× the tokens an `edit` would. Forcing the redirect
+ * adds at most one extra `read` when the agent really does want a full
+ * rewrite (it can `edit` with the whole file as the replacement). New files
+ * still go through `write` unchanged.
+ */
 export function createGuardedWriteTool(cwd: string): AgentTool<any> {
-  return wrapPathTool(createWriteTool(cwd), cwd, ['path']);
+  const inner = wrapPathTool(createWriteTool(cwd), cwd, ['path']);
+  return {
+    ...inner,
+    async execute(
+      toolCallId: string,
+      params: unknown,
+      signal?: AbortSignal,
+      onUpdate?: AgentToolUpdateCallback<unknown>,
+    ): Promise<AgentToolResult<unknown>> {
+      const raw = getStringField(params, 'path');
+      if (raw !== null) {
+        assertWriteTargetIsNew(raw, cwd);
+      }
+      return inner.execute(toolCallId, params as any, signal, onUpdate);
+    },
+  };
 }
 
 export function createGuardedEditTool(cwd: string): AgentTool<any> {
