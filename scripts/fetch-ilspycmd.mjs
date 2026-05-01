@@ -76,6 +76,10 @@ execFileSync(
     'true',
     '-p:PublishSingleFile=true',
     '-p:PublishTrimmed=false',
+    // ILSpy ships packages.lock.json. Newer SDKs on the GH runner rewrite the
+    // TFM and bump some referenced packages, which trips locked-mode restore.
+    // We don't care about preserving the lock for an ephemeral build clone.
+    '-p:RestoreLockedMode=false',
   ],
   { cwd: repoDir, stdio: 'inherit' },
 );
