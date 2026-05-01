@@ -29,9 +29,12 @@ const RELEASE_WORKFLOW = 'release.yml';
 const isWin = process.platform === 'win32';
 
 function exec(cmd, args, opts = {}) {
-  // npm/npx are .cmd shims on Windows; spawnSync needs the explicit extension.
-  const actualCmd = isWin && (cmd === 'npm' || cmd === 'npx') ? `${cmd}.cmd` : cmd;
-  return spawnSync(actualCmd, args, { cwd: repoRoot, ...opts });
+  // npm/npx are .cmd shims on Windows; Node ≥20.12 (CVE-2024-27980) blocks
+  // spawning .cmd/.bat without shell:true, so we route them via the shell.
+  const isShim = isWin && (cmd === 'npm' || cmd === 'npx');
+  const actualCmd = isShim ? `${cmd}.cmd` : cmd;
+  const shellOpt = isShim ? { shell: true } : {};
+  return spawnSync(actualCmd, args, { cwd: repoRoot, ...shellOpt, ...opts });
 }
 
 function run(cmd, args, opts = {}) {
