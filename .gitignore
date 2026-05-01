@@ -94,8 +94,9 @@ out/
 # Stray Vite renderer output (Forge runs Vite into .vite/, not dist/)
 dist/
 
-# Local Claude Code settings
-.claude/
+# Local Claude Code settings — track shared commands, ignore everything else
+.claude/*
+!.claude/commands/
 
 # Local design mockups / scratch
 .mockups/
