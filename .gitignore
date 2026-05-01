@@ -97,6 +97,9 @@ dist/
 # Local Claude Code settings
 .claude/
 
+# Local design mockups / scratch
+.mockups/
+
 # C# build artifacts (vendor/modmixer-bridge)
 bin/
 obj/
