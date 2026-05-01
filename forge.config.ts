@@ -12,10 +12,26 @@ import { FuseV1Options, FuseVersion } from '@electron/fuses';
 
 const ICON_BASE = path.resolve(__dirname, 'assets/icon');
 
+// Azure Trusted Signing wiring. The release workflow installs the
+// Microsoft.Trusted.Signing.Client NuGet package on Windows runners and writes
+// a metadata file describing the cert profile, then exposes both paths via
+// these env vars. When unset (local dev, non-Windows CI) signing is skipped.
+const WINDOWS_SIGN_DLIB = process.env.WINDOWS_SIGN_DLIB;
+const WINDOWS_SIGN_METADATA = process.env.WINDOWS_SIGN_METADATA;
+const windowsSign = WINDOWS_SIGN_DLIB && WINDOWS_SIGN_METADATA
+  ? {
+      // Trusted Signing certs are short-lived (~3 days), so an RFC 3161
+      // timestamp from Microsoft's TSA is required for the signature to stay
+      // valid after the cert expires.
+      signWithParams: `/v /fd SHA256 /tr http://timestamp.acs.microsoft.com /td SHA256 /dlib "${WINDOWS_SIGN_DLIB}" /dmdf "${WINDOWS_SIGN_METADATA}"`,
+    }
+  : undefined;
+
 const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
     icon: ICON_BASE,
+    windowsSign,
     // Lowercase to match package.json#name. maker-deb derives the binary
     // name it looks for from package.json#name, so without this it can't
     // find a binary called "Modmixer" (driven by productName).
@@ -59,7 +75,7 @@ const config: ForgeConfig = {
   },
   rebuildConfig: {},
   makers: [
-    new MakerSquirrel({ setupIcon: `${ICON_BASE}.ico` }),
+    new MakerSquirrel({ setupIcon: `${ICON_BASE}.ico`, windowsSign }),
     // ZIP is required on darwin: Squirrel.Mac applies updates from a .zip.
     // Mac is currently unsigned so updates won't actually apply, but ship
     // the artifact anyway so we can flip to signed without changing makers.

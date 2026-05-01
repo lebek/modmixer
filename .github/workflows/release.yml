@@ -6,6 +6,11 @@ on:
       - 'v*'
   workflow_dispatch:
 
+# Required for Azure OIDC federated login on the Windows signing job.
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
   publish:
     strategy:
@@ -52,6 +57,36 @@ jobs:
         # whatever's in resources/ilspycmd into the installer's
         # extraResource, so each runner contributes its own platform.
         run: npm run fetch:ilspycmd
+
+      # Windows-only: Azure Trusted Signing setup. Logs in via GitHub OIDC
+      # (no long-lived secret), pulls the signing dlib from NuGet, and
+      # writes the cert profile metadata file. forge.config.ts picks both
+      # paths up via env vars and feeds them to signtool.
+      - name: Azure login (OIDC)
+        if: matrix.os == 'windows-latest'
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Install Trusted Signing dlib
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          nuget install Microsoft.Trusted.Signing.Client `
+            -Version 1.0.60 `
+            -OutputDirectory "$env:RUNNER_TEMP\tsclient" `
+            -ExcludeVersion `
+            -NonInteractive
+          $metadata = @{
+            Endpoint               = 'https://eus.codesigning.azure.net/'
+            CodeSigningAccountName = 'modmixer-signing'
+            CertificateProfileName = 'modmixer-release'
+          } | ConvertTo-Json
+          Set-Content -Path "$env:RUNNER_TEMP\trusted-signing-metadata.json" -Value $metadata -Encoding utf8
+          "WINDOWS_SIGN_DLIB=$env:RUNNER_TEMP\tsclient\Microsoft.Trusted.Signing.Client\bin\x64\Azure.CodeSigning.Dlib.dll" >> $env:GITHUB_ENV
+          "WINDOWS_SIGN_METADATA=$env:RUNNER_TEMP\trusted-signing-metadata.json" >> $env:GITHUB_ENV
 
       - name: Publish
         env:
