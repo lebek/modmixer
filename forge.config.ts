@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { ForgeConfig } from '@electron-forge/shared-types';
 import { MakerSquirrel } from '@electron-forge/maker-squirrel';
@@ -11,6 +12,29 @@ import { PublisherGithub } from '@electron-forge/publisher-github';
 import { FuseV1Options, FuseVersion } from '@electron/fuses';
 
 const ICON_BASE = path.resolve(__dirname, 'assets/icon');
+
+// Stage steamworks.js with only the host platform's native binding subdir.
+// node_modules/steamworks.js/dist/ ships {win64, osx, linux64}; signtool can
+// only sign Windows PE binaries, so leaving Linux/macOS .node files in the
+// Windows installer makes signing fail with "This file format cannot be
+// signed because it is not recognized." The runtime require() in
+// node_modules/steamworks.js/index.js only loads the matching subdir for
+// the current process.platform anyway, so the dropped subdirs are dead
+// weight on every platform.
+async function stagePrunedSteamworks() {
+  const src = path.resolve(__dirname, 'node_modules/steamworks.js');
+  const dest = path.resolve(__dirname, 'dist/steamworks.js');
+  const keep = process.platform === 'win32' ? 'win64'
+    : process.platform === 'darwin' ? 'osx'
+    : 'linux64';
+  await fs.rm(dest, { recursive: true, force: true });
+  await fs.cp(src, dest, { recursive: true });
+  for (const subdir of ['win64', 'osx', 'linux64']) {
+    if (subdir !== keep) {
+      await fs.rm(path.join(dest, 'dist', subdir), { recursive: true, force: true });
+    }
+  }
+}
 
 // Azure Trusted Signing wiring. The release workflow installs the
 // Microsoft.Trusted.Signing.Client NuGet package on Windows runners and writes
@@ -51,12 +75,14 @@ const config: ForgeConfig = {
     // The Forge Vite plugin bundles main/preload via Rollup and does not ship
     // node_modules. steamworks.js is a native module (Steam SDK redistributable
     // + .node binding sibling files) that can't be bundled by Rollup, so we
-    // copy the whole directory into Contents/Resources/ and require it from
-    // process.resourcesPath at runtime. node_modules/steamworks.js/dist/
-    // already contains the per-platform binaries for win-x64, mac-x64,
-    // mac-arm64, and linux-x64, so a single copy works on every target.
+    // copy a per-host-platform-pruned staging dir into Contents/Resources/
+    // and require it from process.resourcesPath at runtime. The staging dir
+    // is built in generateAssets — we drop foreign-platform .node files
+    // because (a) signtool can't sign Linux ELF / macOS Mach-O so the
+    // Windows installer fails to package them, and (b) shipping unused
+    // binaries just bloats every installer.
     extraResource: [
-      'node_modules/steamworks.js',
+      'dist/steamworks.js',
       'dist/LICENSES.txt',
       'lore',
       // Index engine assets. ilspycmd binaries are ~30-50 MB per platform;
@@ -83,6 +109,7 @@ const config: ForgeConfig = {
         [path.resolve(__dirname, 'scripts/generate-licenses.mjs')],
         { stdio: 'inherit' },
       );
+      await stagePrunedSteamworks();
     },
   },
   rebuildConfig: {},
