@@ -55,12 +55,12 @@ export function writeMeta(meta: IndexMeta): void {
  */
 export function detectFingerprint(modFingerprints: string[] = []): IndexFingerprint | null {
   const rim = detectRimWorldPaths();
-  if (!rim.managedDir) return null;
-  const dataDir = path.dirname(path.dirname(rim.managedDir));
-  // Look for Version.txt — sits at the install root one level up from Data/.
-  // On macOS, Managed/ is at .../RimWorldMac.app/Contents/Resources/Data/Managed,
-  // and Version.txt lives at .../RimWorldMac.app/Version.txt. The Data/ parent
-  // is the same shape on every platform (one level up = the install dir).
+  if (!rim.managedDir || !rim.dataDir) return null;
+  const dataDir = rim.dataDir;
+  // Version.txt sits near the install root. On Windows/Linux dataDir is
+  // <install>/Data, so Version.txt is one level up. On macOS dataDir is
+  // <bundle>/Contents/Resources, and Version.txt lives at <bundle>/Version.txt
+  // (two levels up). Probe both.
   const installRoot = path.dirname(dataDir);
   const versionCandidates = [
     path.join(installRoot, 'Version.txt'),

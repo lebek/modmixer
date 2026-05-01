@@ -7,6 +7,14 @@ export interface RimWorldPaths {
   modsDir: string;
   /** RimWorld install Managed/ folder (contains Assembly-CSharp.dll), if found. */
   managedDir: string | null;
+  /**
+   * Folder that holds DLC pack subdirs (Core/, Royalty/, Ideology/, …), each
+   * with their own Defs/. Layout differs by platform:
+   *   - Windows/Linux: <install>/Data/
+   *   - macOS:         <bundle>/Contents/Resources/
+   * Null when the install can't be found or has no recognisable DLC packs.
+   */
+  dataDir: string | null;
   /** Steam Workshop subscriptions for RimWorld (294100), if found. */
   workshopDir: string | null;
   /** Player.log location for diagnostics, if found. */
@@ -15,6 +23,25 @@ export interface RimWorldPaths {
   modsConfig: string | null;
   /** Prefs.xml — dev mode flag, debug action palette, and other user prefs, if found. */
   prefsXml: string | null;
+}
+
+/**
+ * Resolve the DLC-pack parent directory by probing the two known layouts.
+ * Windows/Linux put packs under a sibling Data/ folder of the engine's
+ * <Platform>_Data/Managed/ DLL dir; macOS puts Managed inside Resources/Data/
+ * with packs as siblings under Resources/. Returns null when neither shape
+ * has a Core/Defs/ where we expect it.
+ */
+function detectDataDir(managedDir: string): string | null {
+  const installRoot = path.dirname(path.dirname(managedDir));
+  const candidates = [
+    path.join(installRoot, 'Data'),
+    installRoot,
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(path.join(c, 'Core', 'Defs'))) return c;
+  }
+  return null;
 }
 
 export function detectRimWorldPaths(): RimWorldPaths {
@@ -107,9 +134,11 @@ export function detectRimWorldPaths(): RimWorldPaths {
   const prefsCandidate = modsConfig
     ? path.join(path.dirname(modsConfig), 'Prefs.xml')
     : null;
+  const managedDir = managedCandidates.find((p) => fs.existsSync(p)) ?? null;
   return {
     modsDir,
-    managedDir: managedCandidates.find((p) => fs.existsSync(p)) ?? null,
+    managedDir,
+    dataDir: managedDir ? detectDataDir(managedDir) : null,
     workshopDir: workshopCandidates.find((p) => fs.existsSync(p)) ?? null,
     playerLog:
       playerLogCandidate && fs.existsSync(playerLogCandidate)

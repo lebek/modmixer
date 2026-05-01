@@ -1,8 +1,7 @@
-import path from 'node:path';
 import fs from 'node:fs';
 import { detectRimWorldPaths } from '../paths.js';
 import { closeIndexDb, openIndexDb, resetSchema } from './db.js';
-import { decompileAssemblies, IlspycmdMissingError } from './decompile.js';
+import { decompileAssemblies } from './decompile.js';
 import { indexDefs } from './defs-indexer.js';
 import { indexCsharp } from './csharp-indexer.js';
 import {
@@ -57,6 +56,14 @@ export function getIndexStatus(): IndexStatus {
       reason = 'DLC set changed';
     return { type: 'stale', meta, reason };
   }
+  // A meta whose counts are zero is the signature of a previous build that
+  // ran against the wrong dataDir or with ilspycmd missing — RimWorld always
+  // has Core defs and an Assembly-CSharp.dll, so non-zero counts are an
+  // invariant of a real index. Treat the empty case as stale so startup
+  // re-runs the pipeline instead of trusting the broken cache.
+  if (meta.defCount === 0 || meta.symbolCount === 0) {
+    return { type: 'stale', meta, reason: 'previous build produced an empty index' };
+  }
   return { type: 'fresh', meta };
 }
 
@@ -96,7 +103,12 @@ export async function rebuildIndex(
     if (!rim.managedDir) {
       throw new Error('RimWorld install not found — cannot build index.');
     }
-    const dataDir = path.dirname(path.dirname(rim.managedDir));
+    if (!rim.dataDir) {
+      throw new Error(
+        `RimWorld DLC packs not found near ${rim.managedDir} — cannot build index.`,
+      );
+    }
+    const dataDir = rim.dataDir;
     const fp = detectFingerprint(/* modFingerprints */ []);
     if (!fp) throw new Error('RimWorld install not found.');
 
@@ -134,45 +146,25 @@ export async function rebuildIndex(
       phase: 'decompile',
       message: 'Decompiling RimWorld assemblies (one-time, ~30-90s)…',
     });
-    let symbolCount = 0;
-    let defReferenceCount = 0;
-    let sourceBytes = 0;
-    try {
-      await decompileAssemblies(
-        { managedDir: rim.managedDir, sourceRoot: paths.sourceRoot },
-        onProgress,
-        ctrl.signal,
-      );
+    await decompileAssemblies(
+      { managedDir: rim.managedDir, sourceRoot: paths.sourceRoot },
+      onProgress,
+      ctrl.signal,
+    );
 
-      // Phase 3: C# symbols.
-      onProgress({
-        type: 'phase',
-        phase: 'symbols',
-        message: 'Indexing C# symbols…',
-      });
-      const csharpRes = await indexCsharp(
-        db,
-        { sourceRoot: paths.sourceRoot },
-        onProgress,
-        ctrl.signal,
-      );
-      symbolCount = csharpRes.symbolCount;
-      defReferenceCount = csharpRes.defReferenceCount;
-      sourceBytes = csharpRes.sourceBytes;
-    } catch (err) {
-      if (err instanceof IlspycmdMissingError) {
-        // Decompile is best-effort: ship a defs-only index when ilspycmd
-        // isn't available so search_defs / get_def_details still work.
-        onProgress({
-          type: 'phase',
-          phase: 'decompile',
-          message:
-            'ilspycmd not available — skipping C# index (search_defs and get_def_details will still work).',
-        });
-      } else {
-        throw err;
-      }
-    }
+    // Phase 3: C# symbols.
+    onProgress({
+      type: 'phase',
+      phase: 'symbols',
+      message: 'Indexing C# symbols…',
+    });
+    const csharpRes = await indexCsharp(
+      db,
+      { sourceRoot: paths.sourceRoot },
+      onProgress,
+      ctrl.signal,
+    );
+    const { symbolCount, defReferenceCount, sourceBytes } = csharpRes;
 
     const meta: IndexMeta = {
       schemaVersion: INDEX_SCHEMA_VERSION,

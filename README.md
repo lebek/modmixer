@@ -61,6 +61,33 @@ npm run package     # build an unsigned local app bundle
 npm run make        # build platform installers (.dmg, .exe, .deb, ...)
 ```
 
+### ilspycmd (dev only)
+
+The agent's C# index decompiles RimWorld's assemblies on first run so
+tools like `search_source` and `read_csharp_symbol` can answer Verse-API
+questions. The packaged release bundles a vendored ilspycmd binary, so
+**end users running a pre-built installer don't need to do anything**.
+
+When running from source (`npm start`), you need ilspycmd on PATH.
+Install it once per machine:
+
+1. Install the .NET 8 SDK
+   ([download](https://dotnet.microsoft.com/download), or
+   `winget install Microsoft.DotNet.SDK.8` on Windows,
+   `brew install --cask dotnet-sdk` on macOS).
+2. Install ilspycmd as a global dotnet tool:
+
+   ```sh
+   dotnet tool install -g ilspycmd --version 9.1.0.7988
+   ```
+
+   Pin to `9.1.0.7988` — the current `10.x` packages on nuget ship a
+   broken `DotnetToolSettings.xml` and won't install.
+
+If ilspycmd isn't found at startup, the index modal surfaces an error
+and the agent's C# tools won't work; the rest of the app (def search,
+scaffolding without C#, log triage) still functions.
+
 ## Architecture
 
 - `src/main.ts` — Electron main process, IPC, window lifecycle.

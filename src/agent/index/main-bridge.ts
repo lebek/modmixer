@@ -6,6 +6,7 @@ import {
   rebuildIndex,
   type IndexStatus,
 } from './rebuild.js';
+import { resolveIlspycmd } from './ilspycmd.js';
 import type { IndexProgressEvent } from './progress.js';
 
 /**
@@ -71,8 +72,24 @@ export function cancelActiveRebuild(): void {
 /**
  * Startup hook called by main.ts once the window is up. Triggers a rebuild
  * if the index is stale or absent. Idempotent — safe to call from anywhere.
+ *
+ * Pre-checks that ilspycmd is resolvable before doing anything else. C# symbol
+ * indexing is load-bearing for the agent (search_source, read_csharp_symbol,
+ * scaffolding against Verse APIs), so a missing decompiler is surfaced as an
+ * error event regardless of cache freshness — the modal renders it the same
+ * as a build failure.
  */
 export async function ensureIndexAtStartup(): Promise<void> {
+  if (!resolveIlspycmd()) {
+    emit({
+      type: 'error',
+      message:
+        'ilspycmd not found. Install the .NET SDK and run `dotnet tool install -g ilspycmd`, ' +
+        'or vendor a binary at resources/ilspycmd/<platform>-<arch>/. The C# symbol index ' +
+        '(search_source, read_csharp_symbol, scaffold-mod) cannot work without it.',
+    });
+    return;
+  }
   const status = getIndexStatus();
   if (status.type === 'fresh' || status.type === 'no-rimworld') return;
   await startRebuild();
