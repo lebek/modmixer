@@ -29,7 +29,10 @@ jobs:
       - name: Bump modmixer-src to latest main
         run: |
           set -euo pipefail
-          git submodule update --init --remote --merge modmixer-src
+          # Fast-forward submodule pointer to the tip of the upstream branch.
+          # We don't want a merge — just advance the recorded SHA.
+          git -C modmixer-src fetch origin main
+          git -C modmixer-src checkout -B main origin/main
           if git diff --quiet -- modmixer-src; then
             echo "Submodule already up to date; nothing to push."
             exit 0
