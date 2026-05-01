@@ -23,7 +23,10 @@ const windowsSign = WINDOWS_SIGN_DLIB && WINDOWS_SIGN_METADATA
       // Trusted Signing certs are short-lived (~3 days), so an RFC 3161
       // timestamp from Microsoft's TSA is required for the signature to stay
       // valid after the cert expires.
-      signWithParams: `/v /fd SHA256 /tr http://timestamp.acs.microsoft.com /td SHA256 /dlib "${WINDOWS_SIGN_DLIB}" /dmdf "${WINDOWS_SIGN_METADATA}"`,
+      // /fd is injected by @electron/windows-sign from its `hashes` option
+      // (defaults to SHA256), so don't include it here or signtool errors with
+      // "You cannot use the /fd option twice."
+      signWithParams: `/v /tr http://timestamp.acs.microsoft.com /td SHA256 /dlib "${WINDOWS_SIGN_DLIB}" /dmdf "${WINDOWS_SIGN_METADATA}"`,
     }
   : undefined;
 
