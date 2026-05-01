@@ -1,7 +1,7 @@
 {
   "name": "modmixer",
   "productName": "Modmixer",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Agent-driven mod creation and diagnostics for RimWorld and beyond",
   "main": ".vite/build/main.js",
   "private": true,

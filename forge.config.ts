@@ -20,13 +20,16 @@ const WINDOWS_SIGN_DLIB = process.env.WINDOWS_SIGN_DLIB;
 const WINDOWS_SIGN_METADATA = process.env.WINDOWS_SIGN_METADATA;
 const windowsSign = WINDOWS_SIGN_DLIB && WINDOWS_SIGN_METADATA
   ? {
-      // Trusted Signing certs are short-lived (~3 days), so an RFC 3161
-      // timestamp from Microsoft's TSA is required for the signature to stay
-      // valid after the cert expires.
-      // /fd is injected by @electron/windows-sign from its `hashes` option
-      // (defaults to SHA256), so don't include it here or signtool errors with
-      // "You cannot use the /fd option twice."
-      signWithParams: `/v /tr http://timestamp.acs.microsoft.com /td SHA256 /dlib "${WINDOWS_SIGN_DLIB}" /dmdf "${WINDOWS_SIGN_METADATA}"`,
+      // SHA256-only. windows-sign defaults to dual-signing SHA1+SHA256, but
+      // Trusted Signing is SHA256-only and the SHA1 pass uses the legacy /t
+      // timestamp flag which collides with /tr from the TSA below.
+      hashes: ['sha256'] as never,
+      // Trusted Signing requires Microsoft's RFC 3161 timestamp server.
+      // windows-sign emits this as `/tr <url> /td <hash>` automatically — do
+      // NOT also pass /tr, /td, or /fd in signWithParams (signtool rejects
+      // any of those options twice).
+      timestampServer: 'http://timestamp.acs.microsoft.com',
+      signWithParams: `/v /dlib "${WINDOWS_SIGN_DLIB}" /dmdf "${WINDOWS_SIGN_METADATA}"`,
     }
   : undefined;
 
