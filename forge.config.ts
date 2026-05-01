@@ -29,7 +29,13 @@ const windowsSign = WINDOWS_SIGN_DLIB && WINDOWS_SIGN_METADATA
       // NOT also pass /tr, /td, or /fd in signWithParams (signtool rejects
       // any of those options twice).
       timestampServer: 'http://timestamp.acs.microsoft.com',
-      signWithParams: `/v /dlib "${WINDOWS_SIGN_DLIB}" /dmdf "${WINDOWS_SIGN_METADATA}"`,
+      // No quotes around the paths: @electron/windows-sign splits this string
+      // by whitespace (preserving any quote chars literally) and passes the
+      // resulting tokens to signtool via spawn — no shell to strip quotes,
+      // so quoted paths get the quotes embedded in the arg and signtool
+      // can't find the file. The CI runner paths (D:\a\_temp\...) don't
+      // contain spaces, so unquoted is safe.
+      signWithParams: `/v /dlib ${WINDOWS_SIGN_DLIB} /dmdf ${WINDOWS_SIGN_METADATA}`,
     }
   : undefined;
 
