@@ -49,6 +49,11 @@ jobs:
           dotnet-version: '8.0.x'
 
       - name: Install dependencies
+        env:
+          # @vscode/ripgrep's postinstall hits api.github.com to find the
+          # prebuilt binary; the anonymous 60/hr limit gets exhausted by
+          # parallel matrix jobs. Token raises it to 5000/hr.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm ci
 
       - name: Build vendored ilspycmd for this host

@@ -56,6 +56,12 @@ execFileSync(
   { stdio: 'inherit' },
 );
 
+// ILSpy's global.json pins an exact older 8.0 patch that isn't pre-installed
+// on current GitHub runner images. Drop it so dotnet falls back to whatever
+// SDK is available locally — net8.0 projects build fine under newer SDKs.
+const ilspyGlobalJson = path.join(repoDir, 'global.json');
+if (fs.existsSync(ilspyGlobalJson)) fs.unlinkSync(ilspyGlobalJson);
+
 console.log(`Publishing self-contained ilspycmd for ${rid}...`);
 execFileSync(
   'dotnet',
