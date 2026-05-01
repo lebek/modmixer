@@ -132,11 +132,13 @@ export function assertPathAllowed(
   label = 'path',
 ): string {
   const abs = canonicalize(input);
+  // Patterns are forward-slash; normalize so the same denylist works on Windows.
+  const absForward = abs.split(path.sep).join('/');
 
   // Denylist runs first so we don't leak which roots are allowed for an
   // explicitly-sensitive path.
   for (const pat of SENSITIVE_PATH_PATTERNS) {
-    if (abs.includes(pat)) {
+    if (absForward.includes(pat)) {
       throw new PathPolicyError(
         `${label} ${abs} is in a sensitive system location and cannot be accessed by the agent.`,
         'denylist',
