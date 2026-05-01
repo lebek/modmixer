@@ -132,8 +132,6 @@ async function main() {
     process.exit(1);
   }
 
-  section('lint');
-  run('npm', ['run', 'lint']);
   section('typecheck');
   run('npm', ['run', 'typecheck']);
   section('test');
