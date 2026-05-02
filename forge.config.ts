@@ -100,6 +100,11 @@ const config: ForgeConfig = {
       // the .node file can't be bundled by Rollup, so we ship the whole
       // module and resolve it from resourcesPath at runtime.
       'node_modules/better-sqlite3',
+      // web-tree-sitter is marked external in vite.main.config.ts (it ships
+      // a .wasm sibling that Rollup can't inline), so the bundled main.js
+      // does require('web-tree-sitter') at runtime — needs the module on
+      // disk. csharp-indexer.ts loads it via the dual-resolve pattern.
+      'node_modules/web-tree-sitter',
     ],
   },
   hooks: {

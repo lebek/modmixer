@@ -3,9 +3,11 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import type Database from 'better-sqlite3';
 // web-tree-sitter is `export = Parser` (a class with a sibling namespace
-// holding the inner types like Language and SyntaxNode). The default import
-// gives us both the runtime constructor and the namespace via TS interop.
-import Parser from 'web-tree-sitter';
+// holding the inner types like Language and SyntaxNode). Type-only import
+// is erased at compile time; the runtime constructor is loaded via
+// loadParser() below since the bundled main.js can't satisfy a bare
+// `require('web-tree-sitter')` in packaged builds (node_modules stripped).
+import type Parser from 'web-tree-sitter';
 import { resolveTreeSitterCsharpWasm } from './paths.js';
 import type { IndexProgressListener } from './progress.js';
 
@@ -37,6 +39,36 @@ interface Symbol {
 
 let parserPromise: Promise<Language> | null = null;
 
+// Narrow interface — only the bits of the web-tree-sitter runtime we use.
+// Avoids `typeof Parser` which TS rejects when Parser is a type-only import.
+interface ParserInstance {
+  setLanguage(lang: Language): void;
+  parse(input: string): { rootNode: SyntaxNode };
+}
+interface ParserModule {
+  new (): ParserInstance;
+  init(): Promise<void>;
+  Language: { load(path: string): Promise<Language> };
+}
+
+// Mirrors the dual-resolve pattern in src/agent/index/db.ts: bare require for
+// dev (where node_modules is on disk), resourcesPath fallback for packaged
+// builds where Forge ships node_modules/web-tree-sitter via extraResource.
+function loadParser(): ParserModule {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require('web-tree-sitter') as ParserModule;
+  } catch (devErr) {
+    try {
+      const resolved = path.join(process.resourcesPath, 'web-tree-sitter');
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      return require(resolved) as ParserModule;
+    } catch (prodErr) {
+      throw prodErr instanceof Error ? prodErr : devErr;
+    }
+  }
+}
+
 async function loadCSharpLanguage(): Promise<Language> {
   if (parserPromise) return parserPromise;
   parserPromise = (async () => {
@@ -46,8 +78,9 @@ async function loadCSharpLanguage(): Promise<Language> {
         'tree-sitter-c-sharp.wasm is missing. Run `npm run fetch:tree-sitter`.',
       );
     }
-    await Parser.init();
-    return Parser.Language.load(wasmPath);
+    const ParserCtor = loadParser();
+    await ParserCtor.init();
+    return ParserCtor.Language.load(wasmPath);
   })();
   return parserPromise;
 }
@@ -64,7 +97,8 @@ export async function indexCsharp(
   signal?: AbortSignal,
 ): Promise<{ symbolCount: number; defReferenceCount: number; sourceBytes: number }> {
   const CSharp = await loadCSharpLanguage();
-  const parser = new Parser();
+  const ParserCtor = loadParser();
+  const parser = new ParserCtor();
   parser.setLanguage(CSharp);
 
   const insertSymbol = db.prepare(`
