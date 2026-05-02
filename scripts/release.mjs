@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 // Cut a release: bump version, commit, tag, push, watch the GitHub Actions
-// build, then overwrite the auto-generated release notes on
-// lebek/modmixer-releases with the curated notes.
+// build, then overwrite the auto-generated release notes with the curated
+// notes.
 //
 // Usage:
 //   node scripts/release.mjs --notes-file <path> [--major | --minor | --patch | --version X.Y.Z]
 //
 // Notes:
-// - Tag is pushed to the dev repo (lebek/modmixer); CI publishes the release
-//   to lebek/modmixer-releases via electron-forge's PublisherGithub. We then
-//   edit that release's body to replace whatever the publisher wrote.
+// - Tag is pushed to lebek/modmixer; CI publishes the release back to the
+//   same repo via electron-forge's PublisherGithub. We then edit that
+//   release's body to replace whatever the publisher wrote.
 // - Requires `gh` on PATH and `gh auth login` completed.
 // - Run from a clean working tree on `main` that's in sync with origin.
 
@@ -22,8 +22,7 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
 
-const DEV_REPO = 'lebek/modmixer';
-const RELEASES_REPO = 'lebek/modmixer-releases';
+const REPO = 'lebek/modmixer';
 const RELEASE_WORKFLOW = 'release.yml';
 
 const isWin = process.platform === 'win32';
@@ -197,11 +196,11 @@ async function main() {
   }
   if (!runId) {
     console.error(
-      `\nerror: could not find workflow run for ${tag} after ~60s. Check https://github.com/${DEV_REPO}/actions`,
+      `\nerror: could not find workflow run for ${tag} after ~60s. Check https://github.com/${REPO}/actions`,
     );
     process.exit(1);
   }
-  console.log(`\nrun id: ${runId} — https://github.com/${DEV_REPO}/actions/runs/${runId}`);
+  console.log(`\nrun id: ${runId} — https://github.com/${REPO}/actions/runs/${runId}`);
 
   section(`watching build (this takes ~10-15 min)`);
   const watch = exec(
@@ -211,7 +210,7 @@ async function main() {
   );
   if (watch.status !== 0) {
     console.error(
-      `\nerror: build failed. See https://github.com/${DEV_REPO}/actions/runs/${runId}`,
+      `\nerror: build failed. See https://github.com/${REPO}/actions/runs/${runId}`,
     );
     console.error(
       `tag ${tag} is still in place. Once you fix the issue, you can re-run the workflow from the Actions UI.`,
@@ -230,14 +229,14 @@ async function main() {
       'view',
       tag,
       '--repo',
-      RELEASES_REPO,
+      REPO,
     ]);
     if (view.ok) { releaseExists = true; break; }
     await sleep(2000);
   }
   if (!releaseExists) {
     console.error(
-      `error: release ${tag} not found in ${RELEASES_REPO} after ~30s. Edit the notes manually.`,
+      `error: release ${tag} not found in ${REPO} after ~30s. Edit the notes manually.`,
     );
     process.exit(1);
   }
@@ -247,7 +246,7 @@ async function main() {
     'edit',
     tag,
     '--repo',
-    RELEASES_REPO,
+    REPO,
     '--notes-file',
     notesFile,
   ]);
@@ -257,7 +256,7 @@ async function main() {
     'view',
     tag,
     '--repo',
-    RELEASES_REPO,
+    REPO,
     '--json',
     'url',
     '-q',

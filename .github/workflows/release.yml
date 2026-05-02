@@ -6,10 +6,12 @@ on:
       - 'v*'
   workflow_dispatch:
 
-# Required for Azure OIDC federated login on the Windows signing job.
+# id-token: Azure OIDC federated login on the Windows signing job.
+# contents: write so PublisherGithub can create the release using the
+# built-in GITHUB_TOKEN (no PAT needed).
 permissions:
   id-token: write
-  contents: read
+  contents: write
 
 jobs:
   publish:
@@ -132,8 +134,7 @@ jobs:
 
       - name: Publish
         env:
-          # PAT with write access to the public modmixer-releases repo.
-          GITHUB_TOKEN: ${{ secrets.RELEASES_GH_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Baked into the bundle at build time via Vite's `define`. Empty in
           # forks / dev builds where these secrets aren't configured, in which
           # case both SDKs no-op cleanly.

@@ -74,7 +74,7 @@ The script will:
 2. Bump version in `package.json` + `package-lock.json`.
 3. Commit `Release vX.Y.Z`, tag, push main and tag.
 4. Find and watch the GitHub Actions release workflow (~10–15 min).
-5. Overwrite the release body in `lebek/modmixer-releases` with the curated notes.
+5. Overwrite the release body in `lebek/modmixer` with the curated notes.
 
 Stream the script's output so the user sees build progress.
 

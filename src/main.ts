@@ -100,10 +100,10 @@ if (started) {
 // About menu, and userData paths match the packaged app.
 app.setName('Modmixer');
 
-// Auto-update from the public modmixer-releases repo. No-ops in dev and on
-// unsigned mac builds; logs but won't throw if the feed is unreachable.
+// Auto-update from GitHub releases. No-ops in dev and on unsigned mac
+// builds; logs but won't throw if the feed is unreachable.
 updateElectronApp({
-  repo: 'lebek/modmixer-releases',
+  repo: 'lebek/modmixer',
   updateInterval: '1 hour',
 });
 

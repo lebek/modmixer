@@ -33,7 +33,7 @@ Early. Expect rough edges. Issues and PRs welcome.
 ## Install
 
 Pre-built releases (Windows, macOS, Linux) live at
-<https://github.com/lebek/modmixer-releases/releases>.
+<https://github.com/lebek/modmixer/releases>.
 
 ## Build from source
 

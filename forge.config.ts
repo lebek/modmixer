@@ -131,7 +131,7 @@ const config: ForgeConfig = {
     new PublisherGithub({
       repository: {
         owner: 'lebek',
-        name: 'modmixer-releases',
+        name: 'modmixer',
       },
       prerelease: false,
       draft: false,
