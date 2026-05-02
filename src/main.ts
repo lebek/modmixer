@@ -1,3 +1,7 @@
+// MUST be the first import: installs uncaughtException/unhandledRejection
+// handlers before any other module body runs. Catches startup crashes that
+// happen during bundled require() — too early for initSentry() to help.
+import { SMOKE_TEST } from './agent/early-error.js';
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, shell } from 'electron';
 import path from 'node:path';
 import fsp from 'node:fs/promises';
@@ -524,6 +528,15 @@ app.on('ready', () => {
   // Pipe index progress events to the renderer. Subscribed once for the
   // process lifetime — the listener filters by mainWindow internally.
   pipeProgressToWindow(() => mainWindow);
+  if (SMOKE_TEST) {
+    // CI smoke test: we got past every import + ready handler + window
+    // creation without throwing. Skip the index rebuild (fire-and-forget,
+    // would dominate CI time) and exit cleanly.
+    // eslint-disable-next-line no-console
+    console.log('[smoke-test] startup OK, exiting');
+    app.exit(0);
+    return;
+  }
   // Kick off the index rebuild if the cache is stale/missing. Fire-and-
   // forget — the renderer modal will surface progress as it streams in.
   void ensureIndexAtStartup();

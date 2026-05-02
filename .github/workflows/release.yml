@@ -69,6 +69,37 @@ jobs:
         # extraResource, so each runner contributes its own platform.
         run: npm run fetch:ilspycmd
 
+      # Smoke test the packaged app BEFORE signing/publishing. Catches the
+      # class of bug where an external in vite.main.config.ts isn't shipped
+      # via extraResource (the v0.4.4 web-tree-sitter crash). Runs unsigned
+      # — the failure modes we care about are independent of code signing,
+      # and skipping signing here saves wear on the Trusted Signing quota.
+      # Windows-only for now: the same forge.config.ts ships extraResource
+      # to all platforms, so a Windows smoke test catches the same class of
+      # bug across the matrix. The downstream Publish step re-runs the
+      # package step (electron-forge has no skip-package mode) — wasted
+      # work, but cheaper than shipping a broken release.
+      - name: Smoke-test packaged app
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        timeout-minutes: 5
+        run: |
+          npx electron-forge package -- --arch=${{ matrix.arch }}
+          $exe = Get-ChildItem -Path out -Recurse -Filter modmixer.exe |
+                 Where-Object { $_.FullName -like "*Modmixer-win32-${{ matrix.arch }}*" } |
+                 Select-Object -First 1
+          if (-not $exe) { throw "modmixer.exe not found under out/" }
+          Write-Output "Launching: $($exe.FullName) --smoke-test"
+          $proc = Start-Process -FilePath $exe.FullName -ArgumentList '--smoke-test' -PassThru
+          if (-not $proc.WaitForExit(60000)) {
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            throw "Smoke test did not exit within 60s — likely hung in startup"
+          }
+          if ($proc.ExitCode -ne 0) {
+            throw "Smoke test failed with exit code $($proc.ExitCode)"
+          }
+          Write-Output "Smoke test passed"
+
       # Windows-only: Azure Trusted Signing setup. Logs in via GitHub OIDC
       # (no long-lived secret), pulls the signing dlib from NuGet, and
       # writes the cert profile metadata file. forge.config.ts picks both
