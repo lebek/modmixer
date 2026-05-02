@@ -139,6 +139,12 @@ async function main() {
   run('npm', ['run', 'typecheck']);
   section('test');
   run('npm', ['run', 'test']);
+  // Catches the v0.4.4-class bug where a vite external isn't shipped via
+  // forge extraResource — would otherwise crash on packaged startup before
+  // the smoke test in release.yml has a chance to run, so we'd burn a CI
+  // cycle (and a version bump) on something a 30-line lint catches locally.
+  section('lint:externals');
+  run('npm', ['run', 'lint:externals']);
 
   // ---- version bump ----
   const pkgPath = path.join(repoRoot, 'package.json');

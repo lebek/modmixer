@@ -15,6 +15,7 @@
     "typecheck": "tsc --noEmit",
     "fetch:ilspycmd": "node scripts/fetch-ilspycmd.mjs",
     "fetch:tree-sitter": "node scripts/fetch-tree-sitter-csharp.mjs",
+    "lint:externals": "node scripts/check-extra-resources.mjs",
     "postinstall": "node scripts/patch-electron-name.mjs && node scripts/fetch-tree-sitter-csharp.mjs"
   },
   "keywords": [],
