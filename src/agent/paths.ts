@@ -26,6 +26,13 @@ export interface RimWorldPaths {
   /** RimWorld install Managed/ folder (contains Assembly-CSharp.dll), if found. */
   managedDir: string | null;
   /**
+   * RimWorld game executable, if the install was found. We launch it directly
+   * (not via the Steam URL) so we can pass `-quicktest` and other dev flags.
+   * Steam still has to be running for the Steamworks API to initialize, but
+   * the launcher in the loop doesn't have to be Steam.
+   */
+  executable: string | null;
+  /**
    * Folder that holds DLC pack subdirs (Core/, Royalty/, Ideology/, …), each
    * with their own Defs/. Layout differs by platform:
    *   - Windows/Linux: <install>/Data/
@@ -50,6 +57,27 @@ export interface RimWorldPaths {
  * with packs as siblings under Resources/. Returns null when neither shape
  * has a Core/Defs/ where we expect it.
  */
+function detectExecutable(managedDir: string, os: NodeJS.Platform): string | null {
+  // managedDir is <install>/<Platform>_Data/Managed (Win/Linux) or
+  // <bundle>/Contents/Resources/Data/Managed (mac). The exe lives at the
+  // install root, not next to Managed/.
+  if (os === 'win32') {
+    const installRoot = path.dirname(path.dirname(managedDir));
+    const exe = path.join(installRoot, 'RimWorldWin64.exe');
+    return fs.existsSync(exe) ? exe : null;
+  }
+  if (os === 'linux') {
+    const installRoot = path.dirname(path.dirname(managedDir));
+    const exe = path.join(installRoot, 'RimWorldLinux');
+    return fs.existsSync(exe) ? exe : null;
+  }
+  // macOS: managedDir = <bundle>/Contents/Resources/Data/Managed.
+  // Walk up four levels to the .app bundle, then into Contents/MacOS/.
+  const bundle = path.dirname(path.dirname(path.dirname(path.dirname(managedDir))));
+  const exe = path.join(bundle, 'Contents', 'MacOS', 'RimWorldMac');
+  return fs.existsSync(exe) ? exe : null;
+}
+
 function detectDataDir(managedDir: string): string | null {
   const installRoot = path.dirname(path.dirname(managedDir));
   const candidates = [
@@ -192,6 +220,7 @@ export function detectRimWorldPaths(): RimWorldPaths {
   return {
     modsDir,
     managedDir,
+    executable: managedDir ? detectExecutable(managedDir, os) : null,
     dataDir: managedDir ? detectDataDir(managedDir) : null,
     workshopDir: workshopCandidates.find((p) => fs.existsSync(p)) ?? null,
     playerLog:

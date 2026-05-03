@@ -1,6 +1,6 @@
 import { Type } from 'typebox';
 import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
-import { isRimWorldRunning, launchRimWorldViaSteam } from '../game.js';
+import { isRimWorldRunning, launchRimWorld } from '../game.js';
 import { syncModToGame } from '../workspace.js';
 import {
   autosort,
@@ -13,6 +13,12 @@ const Params = Type.Object({
   folder: Type.String({
     description: 'Workspace mod folder name to ship to RimWorld and launch.',
   }),
+  quicktest: Type.Optional(
+    Type.Boolean({
+      description:
+        "Default true. Pass `-quicktest` so RimWorld bypasses the main menu and drops the user straight into a generated map — combined with prepare_debug_session this gives a one-keypress test loop. Set false ONLY when the test genuinely needs the menus (ScenarioDef in the scenario picker, custom main-menu UI, mod options, save-load flows).",
+    }),
+  ),
 });
 
 export interface ShipAndLaunchDetails {
@@ -35,6 +41,8 @@ export interface ShipAndLaunchDetails {
   conflicts: number;
   /** True if RimWorld was already running when we tried to launch. */
   alreadyRunning: boolean;
+  /** True when we passed `-quicktest` to the game. */
+  quicktest: boolean;
 }
 
 /**
@@ -60,7 +68,7 @@ export const shipAndLaunchTool: AgentTool<typeof Params, ShipAndLaunchDetails> =
   name: 'ship_and_launch',
   label: 'Ship mod & launch RimWorld',
   description:
-    "Symlink the mod into RimWorld's Mods/, walk <modDependencies> and add the target plus any installed transitive deps to <activeMods>, autosort the result, and cold-start the game via Steam — all in one call. RimWorld must be CLOSED when this runs (the game rewrites ModsConfig.xml on quit). Pair with quit_rimworld first if it's running. Surfaces declared deps that aren't installed (mod will fail to load until the user subscribes/installs them). After this returns, call watch_player_log to begin background error monitoring; do NOT block the user's turn waiting for them to test.",
+    "Symlink the mod into RimWorld's Mods/, walk <modDependencies> and add the target plus any installed transitive deps to <activeMods>, autosort the result, and cold-start the game by spawning RimWorldWin64.exe directly (Steam still has to be running for Steamworks; the launcher is not). Defaults to passing `-quicktest` so the user lands straight in a generated map — disable with quicktest=false only when the test needs the menus. RimWorld must be CLOSED when this runs (the game rewrites ModsConfig.xml on quit). Pair with quit_rimworld first if it's running. Surfaces declared deps that aren't installed (mod will fail to load until the user subscribes/installs them). After this returns, call watch_player_log to begin background error monitoring; do NOT block the user's turn waiting for them to test.",
   parameters: Params,
   async execute(_id, params): Promise<AgentToolResult<ShipAndLaunchDetails>> {
     if (await isRimWorldRunning()) {
@@ -154,8 +162,12 @@ export const shipAndLaunchTool: AgentTool<typeof Params, ShipAndLaunchDetails> =
       await registry.setActiveMods(sorted.order);
     }
 
-    // 5. Launch.
-    const launch = await launchRimWorldViaSteam();
+    // 5. Launch. Default to -quicktest so the user lands in-game without
+    // grinding through menus; agent can opt out for menu-driven tests.
+    const quicktest = params.quicktest !== false;
+    const launch = await launchRimWorld({
+      args: quicktest ? ['-quicktest'] : [],
+    });
 
     const lines: string[] = [];
     lines.push(`Synced ${params.folder} into RimWorld's Mods/.`);
@@ -180,10 +192,9 @@ export const shipAndLaunchTool: AgentTool<typeof Params, ShipAndLaunchDetails> =
     lines.push(
       launch.alreadyRunning
         ? // Should be unreachable given the precheck, but keep the message
-          // in case Steam launches a stray instance between the check and
-          // the open call.
-          'RimWorld was running again by launch time; Steam URL is a no-op. Tell the user to quit and retry.'
-        : 'Launched RimWorld via Steam.',
+          // in case a stray instance appears between the check and the spawn.
+          'RimWorld was running again by launch time; the spawn was a no-op. Tell the user to quit and retry.'
+        : `Launched RimWorld${quicktest ? ' with -quicktest (skipping menus into a generated map)' : ''}.`,
     );
 
     return {
@@ -197,6 +208,7 @@ export const shipAndLaunchTool: AgentTool<typeof Params, ShipAndLaunchDetails> =
         reordered,
         conflicts: sorted.conflicts.length,
         alreadyRunning: launch.alreadyRunning,
+        quicktest,
       },
     };
   },

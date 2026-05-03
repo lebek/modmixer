@@ -20,7 +20,7 @@ Wire the value through `ModSettings`, render `Widgets.HorizontalSlider` in the s
 
 `is_rimworld_running` → `quit_rimworld` (only if running) → `sync_to_game` → `enable_mod_in_game` → `launch_rimworld` → `watch_player_log`. Don't ask the user "is RimWorld open?" — check.
 
-*Why it's tricky:* Steam URL launches don't restart a running instance, so you have to quit first when iterating. `ModsConfig.xml` is rewritten on quit, so syncing while the game is open can re-disable your mod.
+*Why it's tricky:* a launch is a no-op when RimWorld is already running, so you have to quit first when iterating — the spawned process won't reload mods. `ModsConfig.xml` is rewritten on quit, so syncing while the game is open can re-disable your mod.
 
 ## Triage Player.log errors before fixing — many are from OTHER mods
 

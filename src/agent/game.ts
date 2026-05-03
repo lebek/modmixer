@@ -9,7 +9,6 @@ import { getWorkspacePaths } from './workspace.js';
 import { getLogWatcher } from './log-watcher.js';
 import { getRegistry } from './registry/index.js';
 
-const STEAM_URL = 'steam://rungameid/294100';
 const execAsync = promisify(exec);
 
 export async function isRimWorldRunning(): Promise<boolean> {
@@ -142,41 +141,55 @@ export async function disableModInGame(folder: string): Promise<DisableResult> {
   };
 }
 
+export interface LaunchOptions {
+  /**
+   * Extra command-line arguments to pass to the RimWorld executable. The
+   * canonical use is `['-quicktest']`, which makes the engine bypass the
+   * main menu and drop the user straight into a generated map (handy for
+   * testing a mod without grinding through colony setup).
+   */
+  args?: string[];
+}
+
 export interface LaunchResult {
-  url: string;
-  command: string;
+  /** Absolute path to the executable we spawned (or would have, if running). */
+  executable: string;
+  /** Args passed to the executable. */
+  args: string[];
   alreadyRunning: boolean;
 }
 
-export async function launchRimWorldViaSteam(): Promise<LaunchResult> {
+/**
+ * Cold-start RimWorld by spawning the game executable directly. We bypass
+ * Steam (`steam://rungameid/294100`) for two reasons:
+ *   1. Steam URLs silently swallow extra args on some configs, so passing
+ *      `-quicktest` and similar dev flags isn't reliable through the URL.
+ *   2. Direct spawn is just simpler — one code path on every OS.
+ *
+ * Steam itself still has to be running for the Steamworks API to initialize
+ * (RimWorld loads steam_api64.dll on startup); that's a precondition the
+ * user's existing Steam session covers.
+ */
+export async function launchRimWorld(
+  opts: LaunchOptions = {},
+): Promise<LaunchResult> {
+  const args = opts.args ?? [];
+  const { executable } = detectRimWorldPaths();
+  if (!executable) {
+    throw new Error(
+      'RimWorld executable not found. Check the install path in app settings.',
+    );
+  }
   if (await isRimWorldRunning()) {
-    return {
-      url: STEAM_URL,
-      command: '(skipped — RimWorld already running)',
-      alreadyRunning: true,
-    };
+    return { executable, args, alreadyRunning: true };
   }
   // Reset the log watcher's read position so monitor_player_log only surfaces
   // errors from THIS session, not residue from a prior run.
   getLogWatcher().resetForNewSession();
-  const os = platform();
-  let cmd: string;
-  let args: string[];
-  if (os === 'darwin') {
-    cmd = 'open';
-    args = [STEAM_URL];
-  } else if (os === 'win32') {
-    cmd = 'cmd';
-    args = ['/c', 'start', '', STEAM_URL];
-  } else {
-    cmd = 'xdg-open';
-    args = [STEAM_URL];
-  }
-  spawn(cmd, args, { detached: true, stdio: 'ignore' }).unref();
-  return {
-    url: STEAM_URL,
-    command: `${cmd} ${args.join(' ')}`,
-    alreadyRunning: false,
-  };
+  // Launch from the install dir so the engine resolves steam_api64.dll and
+  // its data folders relative to the exe — same cwd Steam would use.
+  const cwd = path.dirname(executable);
+  spawn(executable, args, { cwd, detached: true, stdio: 'ignore' }).unref();
+  return { executable, args, alreadyRunning: false };
 }
 
