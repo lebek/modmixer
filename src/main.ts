@@ -111,7 +111,7 @@ import {
   pipeProgressToWindow,
   startRebuild,
 } from './agent/index/main-bridge.js';
-import { closeIndexDb } from './agent/index/db.js';
+import { closeIndexDb, openIndexDb } from './agent/index/db.js';
 import {
   checkForUpdates,
   getUpdaterState,
@@ -928,8 +928,19 @@ app.on('ready', () => {
   pipeProgressToWindow(() => mainWindow);
   if (SMOKE_TEST) {
     // CI smoke test: we got past every import + ready handler + window
-    // creation without throwing. Skip the index rebuild (fire-and-forget,
-    // would dominate CI time) and exit cleanly.
+    // creation without throwing. Open + close the index DB to force the
+    // better-sqlite3 native binding to load (catches NODE_MODULE_VERSION
+    // mismatches that the rest of startup wouldn't trigger), then skip the
+    // index rebuild and exit cleanly.
+    try {
+      openIndexDb();
+      closeIndexDb();
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[smoke-test] index DB open failed:', err);
+      app.exit(1);
+      return;
+    }
     // eslint-disable-next-line no-console
     console.log('[smoke-test] startup OK, exiting');
     app.exit(0);

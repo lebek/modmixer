@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { promises as fs } from 'node:fs';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import type { ForgeConfig } from '@electron-forge/shared-types';
 import { MakerSquirrel } from '@electron-forge/maker-squirrel';
@@ -10,6 +11,9 @@ import { VitePlugin } from '@electron-forge/plugin-vite';
 import { FusesPlugin } from '@electron-forge/plugin-fuses';
 import { PublisherGithub } from '@electron-forge/publisher-github';
 import { FuseV1Options, FuseVersion } from '@electron/fuses';
+import { rebuild } from '@electron/rebuild';
+
+const requireCJS = createRequire(__filename);
 
 const ICON_BASE = path.resolve(__dirname, 'assets/icon');
 
@@ -18,7 +22,25 @@ const ICON_BASE = path.resolve(__dirname, 'assets/icon');
 // node_modules in dev, but we ship better-sqlite3 as a stand-alone
 // extraResource — without nesting them, lib/database.js's `require('bindings')`
 // fails in packaged builds with "Cannot find module 'bindings'".
+//
+// Also rebuilds the native binding against Electron's ABI before copying.
+// Forge's auto-rebuild via @electron/rebuild only touches node_modules/, so
+// without an explicit rebuild here the staged .node binary stays as whatever
+// prebuild-install fetched for Node at `npm ci` time — which fails at runtime
+// with "compiled against a different Node.js version using NODE_MODULE_VERSION
+// 115. This version of Node.js requires NODE_MODULE_VERSION 145."
 async function stageBetterSqlite() {
+  const electronVersion = (
+    requireCJS('electron/package.json') as { version: string }
+  ).version;
+  await rebuild({
+    buildPath: __dirname,
+    electronVersion,
+    arch: process.arch,
+    onlyModules: ['better-sqlite3'],
+    force: true,
+  });
+
   const src = path.resolve(__dirname, 'node_modules/better-sqlite3');
   const dest = path.resolve(__dirname, 'dist/better-sqlite3');
   await fs.rm(dest, { recursive: true, force: true });
