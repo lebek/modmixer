@@ -37,8 +37,6 @@ interface Symbol {
   signature: string | null;
 }
 
-let parserPromise: Promise<Language> | null = null;
-
 // Narrow interface — only the bits of the web-tree-sitter runtime we use.
 // Avoids `typeof Parser` which TS rejects when Parser is a type-only import.
 interface ParserInstance {
@@ -51,27 +49,38 @@ interface ParserModule {
   Language: { load(path: string): Promise<Language> };
 }
 
+// web-tree-sitter's bundled emscripten output reassigns its own
+// `module.exports = Module` from inside Parser.init(). After init runs, a
+// subsequent require('web-tree-sitter') returns the emscripten Module instead
+// of the Parser class — `new ParserCtor()` then throws "not a constructor".
+// Capture the constructor on first load and reuse it.
+let cachedParserCtor: ParserModule | null = null;
+
 // Mirrors the dual-resolve pattern in src/agent/index/db.ts: bare require for
 // dev (where node_modules is on disk), resourcesPath fallback for packaged
 // builds where Forge ships node_modules/web-tree-sitter via extraResource.
 function loadParser(): ParserModule {
+  if (cachedParserCtor) return cachedParserCtor;
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    return require('web-tree-sitter') as ParserModule;
+    cachedParserCtor = require('web-tree-sitter') as ParserModule;
   } catch (devErr) {
     try {
       const resolved = path.join(process.resourcesPath, 'web-tree-sitter');
       // eslint-disable-next-line @typescript-eslint/no-require-imports
-      return require(resolved) as ParserModule;
+      cachedParserCtor = require(resolved) as ParserModule;
     } catch (prodErr) {
       throw prodErr instanceof Error ? prodErr : devErr;
     }
   }
+  return cachedParserCtor;
 }
 
+let languagePromise: Promise<Language> | null = null;
+
 async function loadCSharpLanguage(): Promise<Language> {
-  if (parserPromise) return parserPromise;
-  parserPromise = (async () => {
+  if (languagePromise) return languagePromise;
+  languagePromise = (async () => {
     const wasmPath = resolveTreeSitterCsharpWasm();
     if (!wasmPath) {
       throw new Error(
@@ -82,7 +91,7 @@ async function loadCSharpLanguage(): Promise<Language> {
     await ParserCtor.init();
     return ParserCtor.Language.load(wasmPath);
   })();
-  return parserPromise;
+  return languagePromise;
 }
 
 export interface IndexCsharpInput {
