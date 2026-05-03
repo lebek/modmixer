@@ -5,6 +5,8 @@ import type { WorkspaceMod } from './agent/workspace';
 import type { MonitorConnectionState } from './agent/monitor/protocol';
 import type { ModelOption } from './agent/models';
 import type { ModelSelection } from './agent/settings';
+import type { ActiveSession } from './agent/registry';
+import type { RegistryEnvelope } from './preload';
 import { GridMark } from './components/grid-mark';
 import { ModelPicker } from './components/model-picker';
 import { AppSettingsDialog, type SettingsSection } from './components/app-settings-dialog';
@@ -13,8 +15,10 @@ import { TabNav, type Tab } from './components/tab-nav';
 import { BuildView } from './components/build-view';
 import { ModsView } from './components/mods-view';
 import { MonitorView } from './components/monitor-view';
+import { LibraryView } from './components/library-view';
+import { SessionRecoveryDialog } from './components/session-recovery-dialog';
 
-type BuildPanel = 'chat' | 'schematic' | 'assets' | 'publish';
+import type { BuildPanel } from './components/mod-build-sidebar';
 
 export function App() {
   const [tab, setTab] = useState<Tab>('mods');
@@ -33,6 +37,9 @@ export function App() {
     null,
   );
   const [appVersion, setAppVersion] = useState<string>('');
+  const [registryEnvelope, setRegistryEnvelope] = useState<RegistryEnvelope | null>(null);
+  const [session, setSession] = useState<ActiveSession | null>(null);
+  const [recoveryShown, setRecoveryShown] = useState(false);
 
   const hasAi = availableModels.length > 0;
 
@@ -110,6 +117,60 @@ export function App() {
     };
   }, [refreshMods]);
 
+  // Mod registry: subscribe to live updates + bootstrap snapshot.
+  useEffect(() => {
+    void window.modmixer.getRegistry().then(setRegistryEnvelope);
+    return window.modmixer.onRegistryChanged(setRegistryEnvelope);
+  }, []);
+
+  // Active session: bootstrap + live updates. If we boot with an active
+  // session it's a crash-orphan from a previous run — show the recovery
+  // dialog one time per launch.
+  useEffect(() => {
+    void window.modmixer.getActiveSession().then((s) => {
+      setSession(s);
+      if (s) setRecoveryShown(true);
+    });
+    return window.modmixer.onSessionChanged(setSession);
+  }, []);
+
+  const refreshRegistry = useCallback(async () => {
+    const env = await window.modmixer.refreshRegistry();
+    setRegistryEnvelope(env);
+  }, []);
+  const setActiveMods = useCallback(async (packageIds: string[]) => {
+    const env = await window.modmixer.setActiveMods(packageIds);
+    setRegistryEnvelope(env);
+  }, []);
+  const applyAutosort = useCallback(async () => {
+    const { envelope } = await window.modmixer.applyAutosort();
+    setRegistryEnvelope(envelope);
+  }, []);
+  const startFix = useCallback(async () => {
+    const res = await window.modmixer.startFixSession();
+    setSession(res.session);
+    setRegistryEnvelope(res.envelope);
+  }, []);
+  const applySession = useCallback(async () => {
+    const { envelope } = await window.modmixer.applySession();
+    setRegistryEnvelope(envelope);
+    setSession(null);
+  }, []);
+  const revertSession = useCallback(async () => {
+    const { envelope } = await window.modmixer.revertSession();
+    setRegistryEnvelope(envelope);
+    setSession(null);
+  }, []);
+  const startTestSession = useCallback(
+    async (folder: string, packageId: string) => {
+      const res = await window.modmixer.startTestSession({ folder, packageId });
+      setSession(res.session);
+      setRegistryEnvelope(res.envelope);
+      return res;
+    },
+    [],
+  );
+
   const setModel = useCallback(async (selection: ModelSelection) => {
     setCurrentModel(selection);
     await window.modmixer.setModel(selection);
@@ -139,10 +200,26 @@ export function App() {
     setBuildPanel('chat');
   }, [activeModFolder]);
 
+  // "Enable" for a workspace mod has to be atomic: create the symlink AND
+  // add the packageId to <activeMods>. If we did only one, RimWorld either
+  // can't find the packageId on disk (no symlink) or finds the folder but
+  // ignores it (not in active list). Same constraint for disable.
   const sync = async (folder: string) => {
     try {
       const next = await window.modmixer.syncModToGame(folder);
       setMods(next);
+      try {
+        await window.modmixer.enableModInGame(folder);
+      } catch (err) {
+        console.error(err);
+        window.alert(
+          err instanceof Error
+            ? err.message
+            : 'Mod synced, but adding to ModsConfig.xml failed.',
+        );
+      }
+      const env = await window.modmixer.refreshRegistry();
+      setRegistryEnvelope(env);
     } catch (err) {
       console.error(err);
       window.alert(
@@ -151,16 +228,22 @@ export function App() {
     }
   };
 
+  // Disable = remove from <activeMods> only. The symlink stays so the mod
+  // remains in RimWorld's installed-mod list as "inactive" — same behavior
+  // as a Workshop or local mod when disabled. Removing the symlink would
+  // make the mod disappear from RimWorld entirely, which is asymmetric and
+  // surprising.
   const unsync = async (folder: string) => {
     try {
-      const next = await window.modmixer.unsyncModFromGame(folder);
+      await window.modmixer.disableModInGame(folder);
+      const next = await window.modmixer.listWorkspaceMods();
       setMods(next);
+      const env = await window.modmixer.refreshRegistry();
+      setRegistryEnvelope(env);
     } catch (err) {
       console.error(err);
       window.alert(
-        err instanceof Error
-          ? err.message
-          : 'Failed to unsync mod from game.',
+        err instanceof Error ? err.message : 'Failed to disable mod.',
       );
     }
   };
@@ -223,6 +306,7 @@ export function App() {
             active={tab}
             onChange={setTab}
             monitorConnected={monitorState.kind === 'connected'}
+            sessionActive={!!session}
           />
         </div>
         <div className="flex items-center gap-3">
@@ -277,10 +361,31 @@ export function App() {
       {tab === 'mods' && (
         <ModsView
           mods={mods}
+          activeOrder={registryEnvelope?.snapshot.activeOrder ?? []}
           onOpen={openMod}
           onNewMod={newMod}
           onSync={sync}
           onUnsync={unsync}
+          onTestIsolated={async (folder, packageId) => {
+            try {
+              await startTestSession(folder, packageId);
+              setTab('library');
+            } catch (e) {
+              window.alert(e instanceof Error ? e.message : String(e));
+            }
+          }}
+        />
+      )}
+      {tab === 'library' && (
+        <LibraryView
+          envelope={registryEnvelope}
+          session={session}
+          onRefresh={refreshRegistry}
+          onAutosort={applyAutosort}
+          onSetActive={setActiveMods}
+          onStartFix={startFix}
+          onApplySession={applySession}
+          onRevertSession={revertSession}
         />
       )}
       {tab === 'build' && (
@@ -311,6 +416,30 @@ export function App() {
       )}
 
       <IndexProgressModal />
+
+      {recoveryShown && session && (
+        <SessionRecoveryDialog
+          session={session}
+          onApply={async () => {
+            try {
+              await applySession();
+            } finally {
+              setRecoveryShown(false);
+            }
+          }}
+          onRevert={async () => {
+            try {
+              await revertSession();
+            } finally {
+              setRecoveryShown(false);
+            }
+          }}
+          onDismiss={() => {
+            setRecoveryShown(false);
+            setTab('library');
+          }}
+        />
+      )}
     </div>
   );
 }

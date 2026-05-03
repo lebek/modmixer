@@ -28,12 +28,22 @@ function gatherContext(): PromptContext {
   };
 }
 
+const FIX_MODLIST_BLOCK = `Fix-my-modlist flow when the user reports a broken/crashing/erroring mod list (NOT for "this mod I'm building has a bug" — use the test flow above):
+1. Survey: call list_installed_mods activeOnly=true — review the order and any issue flags. Tail Player.log (tail_player_log) and bucket errors by mod (use the registry stack-trace mapping).
+2. Hypothesize: pick the most likely root cause (missing dep, incompat pair both active, mis-ordered load, version mismatch). Tell the user in one short paragraph what you saw and what you suspect.
+3. Ask permission to enter a fix session, then call start_fix_session. Inside the session you can mutate the active list freely with set_active_mods / autosort_mods — neither prompts the user. The session snapshot is your safety net.
+4. Iterate: change the list, ask the user to launch RimWorld, watch_player_log, read errors, change again. Keep iteration tight — don't shuffle 30 mods at once when the symptom points to one.
+5. When the symptom is gone (or you've exhausted the obvious suspects), STOP. Show the user a diff (added / removed / reordered) and a short narrative ("removed X because its DLL referenced a missing type from Y; reordered Z to load after W per community rules"). Ask them to apply_session or revert_session. NEVER call apply_session without an explicit user yes — even if the fix looks obviously right.
+6. If the user says revert, call revert_session. If they say apply, call apply_session. Either way the session snapshot is cleaned up.
+
+`;
+
 const SHARED_RULES = `RimWorld build conventions:
 - Target framework: net472. RimWorld runs on Unity Mono with .NET Framework 4.7.2 surface across versions 1.4 / 1.5 / 1.6. Do NOT use netstandard2.0 — RimWorld 1.6's Assembly-CSharp targets netstandard2.1 and the mismatch will surface as a build-time version conflict.
 - Cross-platform builds: include \`<PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />\`.
 - Reference Assembly-CSharp / UnityEngine DLLs from the user's install via <Reference><HintPath> with <Private>false</Private>.
 - Output path: ..\\Assemblies\\.
-- For Harmony patches: \`<PackageReference Include="Lib.Harmony" Version="2.3.3" PrivateAssets="all" />\`.
+- For Harmony patches: declare \`brrainz.harmony\` (Steam Workshop id 2009463077) as a hard \`<modDependencies>\` entry in About.xml AND add \`<PackageReference Include="Lib.Harmony" Version="2.3.3" PrivateAssets="all"><ExcludeAssets>runtime</ExcludeAssets></PackageReference>\` to the .csproj. The \`ExcludeAssets="runtime"\` is essential — it lets you compile against HarmonyLib but stops the build from copying \`0Harmony.dll\` into your \`Assemblies/\`. The Brrainz Harmony mod loads \`0Harmony.dll\` once before any user mod, so shipping your own copy creates version conflicts that crash other Harmony users. Read read_lore harmony before scaffolding anything that uses Harmony.
 
 Workspace lifecycle:
 - Mods live in the workspace dir. They are NOT loaded by the game until synced (a symlink into RimWorld's Mods/).
@@ -57,7 +67,12 @@ const TOOL_LIST_BLOCK = `Custom tools:
 - watch_player_log: start a BACKGROUND watch on Player.log. Returns immediately. If errors arrive during the user's test session, you'll be prompted automatically and can investigate without the user re-asking. Stops on first error batch / RimWorld close / conversation switch. Use this right after launch_rimworld — do NOT block.
 - notify_test_status: push a native OS toast (over the game) with a one-line status. Use after triaging errors during a test session — the user is in fullscreen RimWorld and won't see the chat until they alt-tab.
 - tail_player_log: pull recent lines from Player.log on demand. Use for ad-hoc diagnostics, NOT for live monitoring.
-- list_installed_mods: survey of every installed mod (local + Workshop), cross-referenced with ModsConfig.xml. Pass activeOnly=true for the running modlist in load order.
+- list_installed_mods: survey of every installed mod (Core/DLCs + local + Workshop + workspace), cross-referenced with ModsConfig.xml. Pass activeOnly=true for the running modlist in load order. Output includes the registry's derived issue flags per mod (missing-dependency, incompatible-mod-active, load-order-violation, version-incompat) — start with this when the user reports a "broken modlist" complaint.
+- set_active_mods: bulk-replace ModsConfig.xml's <activeMods>. Use when fixing a broken list or applying autosort manually. Outside a fix session this requires user confirmation; inside one it runs without prompt. RimWorld must be closed.
+- autosort_mods: compute a load order honoring About.xml deps + the RimSort Community Rules DB. Pass apply=true to write, otherwise returns a preview. Inside a fix session, prefer apply=true since the session itself is the safety net (apply/revert at end).
+- start_fix_session: snapshot ModsConfig.xml and enter fix mode. While active, set_active_mods/autosort_mods auto-approve. End with apply_session (keep changes) or revert_session (restore snapshot). Use this when the user asks to repair a broken modlist — gives the agent room to iterate without a prompt-storm.
+- start_test_session: snapshot ModsConfig.xml then write a reduced active list (Core + active DLCs + target workspace mod + transitive deps). Pair with launch_rimworld for an isolated test cycle. End with apply_session or revert_session. Use this when the user wants to test a workspace mod in isolation — far cleaner than ship_and_launch when the surrounding modlist is the suspected source of confounds.
+- apply_session / revert_session: end the active session. apply makes the current state permanent; revert restores the original snapshot. ALWAYS surface a diff to the user before calling apply — they get the final say.
 - decompile_dll: decompile a .NET DLL with ilspycmd to read C# source — Harmony patches, Mod entrypoints, etc. ALWAYS use this tool to run ilspycmd — never invoke ilspycmd through bash, since the bash path triggers a user approval prompt while decompile_dll is path-policy-guarded and runs without one. Prefer the rimsage-style tools below for VANILLA RimWorld code lookups — decompile_dll is for ad-hoc inspection of a third-party mod DLL the agent doesn't already have indexed.
 
 RimWorld source/def index (built from the user's install at startup; no network access):
@@ -218,5 +233,5 @@ ${scopeBlock}
 
 ${loreBlock(modFolder)}
 
-${SHARED_RULES}`;
+${FIX_MODLIST_BLOCK}${SHARED_RULES}`;
 }

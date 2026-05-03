@@ -37,6 +37,13 @@ import type {
   IndexSnapshot,
 } from './agent/index/main-bridge';
 import type { IndexProgressEvent } from './agent/index/progress';
+import type {
+  RegistrySnapshot,
+  AnalysisResult,
+  AutosortResult,
+  ActiveSession,
+  ActiveDiff,
+} from './agent/registry';
 export interface AssetsChangedEnvelope {
   folder: string;
 }
@@ -58,6 +65,18 @@ export interface HydratedConversation {
 export interface ScopeUpgradedEnvelope {
   conversationId: string;
   scope: ConversationScope;
+}
+
+export interface RegistryEnvelope {
+  snapshot: RegistrySnapshot;
+  analysis: AnalysisResult;
+}
+
+export interface CommunityRulesInfo {
+  fetchedAt: string | null;
+  source: 'cache' | 'fetched' | 'bundled' | 'empty';
+  count: number;
+  rules?: Record<string, unknown>;
 }
 
 const api = {
@@ -357,6 +376,90 @@ const api = {
     const wrapped = (_e: unknown, event: PublishProgressEvent) => handler(event);
     ipcRenderer.on('modmixer:workshop:progress', wrapped);
     return () => ipcRenderer.off('modmixer:workshop:progress', wrapped);
+  },
+
+  // Mod registry — full system view (DLCs + local + workshop + workspace).
+  getRegistry(): Promise<RegistryEnvelope> {
+    return ipcRenderer.invoke('modmixer:registry:get');
+  },
+  refreshRegistry(): Promise<RegistryEnvelope> {
+    return ipcRenderer.invoke('modmixer:registry:refresh');
+  },
+  setActiveMods(packageIds: string[]): Promise<RegistryEnvelope> {
+    return ipcRenderer.invoke('modmixer:registry:set-active', packageIds);
+  },
+  autosortMods(): Promise<AutosortResult> {
+    return ipcRenderer.invoke('modmixer:registry:autosort');
+  },
+  applyAutosort(): Promise<{
+    envelope: RegistryEnvelope;
+    conflicts: AutosortResult['conflicts'];
+  }> {
+    return ipcRenderer.invoke('modmixer:registry:apply-autosort');
+  },
+  getCommunityRulesInfo(): Promise<CommunityRulesInfo> {
+    return ipcRenderer.invoke('modmixer:registry:community-rules');
+  },
+  refreshCommunityRules(): Promise<CommunityRulesInfo> {
+    return ipcRenderer.invoke('modmixer:registry:refresh-community-rules');
+  },
+  onRegistryChanged(
+    handler: (env: RegistryEnvelope) => void,
+  ): () => void {
+    const wrapped = (_e: unknown, env: RegistryEnvelope) => handler(env);
+    ipcRenderer.on('modmixer:registry:changed', wrapped);
+    return () => ipcRenderer.off('modmixer:registry:changed', wrapped);
+  },
+
+  // Sessions — snapshot-restore for test mode and fix mode.
+  getActiveSession(): Promise<ActiveSession | null> {
+    return ipcRenderer.invoke('modmixer:session:get-active');
+  },
+  startTestSession(args: {
+    folder: string;
+    packageId: string;
+  }): Promise<{
+    session: ActiveSession;
+    testSet: { reducedActive: string[]; missing: string[] };
+    envelope: RegistryEnvelope;
+  }> {
+    return ipcRenderer.invoke('modmixer:session:start-test', args);
+  },
+  startFixSession(): Promise<{
+    session: ActiveSession;
+    envelope: RegistryEnvelope;
+  }> {
+    return ipcRenderer.invoke('modmixer:session:start-fix');
+  },
+  applySession(): Promise<{ envelope: RegistryEnvelope }> {
+    return ipcRenderer.invoke('modmixer:session:apply');
+  },
+  revertSession(): Promise<{ envelope: RegistryEnvelope }> {
+    return ipcRenderer.invoke('modmixer:session:revert');
+  },
+  getSessionDiff(): Promise<ActiveDiff | null> {
+    return ipcRenderer.invoke('modmixer:session:diff');
+  },
+  onSessionChanged(
+    handler: (session: ActiveSession | null) => void,
+  ): () => void {
+    const wrapped = (_e: unknown, session: ActiveSession | null) =>
+      handler(session);
+    ipcRenderer.on('modmixer:session:changed', wrapped);
+    return () => ipcRenderer.off('modmixer:session:changed', wrapped);
+  },
+
+  // Workspace mod deps — write-side helper for the UI dep editor.
+  writeModDeps(
+    folder: string,
+    deps: {
+      modDependencies: import('./agent/registry').ModDependency[];
+      loadAfter: string[];
+      loadBefore: string[];
+      incompatibleWith: string[];
+    },
+  ): Promise<WorkspaceMod | null> {
+    return ipcRenderer.invoke('modmixer:mods:write-deps', folder, deps);
   },
 };
 

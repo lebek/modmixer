@@ -97,11 +97,21 @@ export function detectRimWorldPaths(): RimWorldPaths {
       userProfile,
       'AppData/LocalLow/Ludeon Studios/RimWorld by Ludeon Studios',
     );
-    modsDir = path.join(userBase, 'Mods');
-    managedCandidates = [
-      'C:/Program Files (x86)/Steam/steamapps/common/RimWorld/RimWorldWin64_Data/Managed',
-      'C:/Program Files/Steam/steamapps/common/RimWorld/RimWorldWin64_Data/Managed',
+    // RimWorld 1.6 (Verse.ModLister.RebuildModList) scans exactly three
+    // locations: <install>/Data/ (official DLCs), <install>/Mods/ (user
+    // mods), and Steam Workshop. The LocalLow path many older guides cite
+    // is NOT scanned — symlinks dropped there are invisible to the game.
+    const winInstalls = [
+      'C:/Program Files (x86)/Steam/steamapps/common/RimWorld',
+      'C:/Program Files/Steam/steamapps/common/RimWorld',
     ];
+    const winInstall = winInstalls.find((p) => fs.existsSync(p));
+    modsDir = winInstall
+      ? path.join(winInstall, 'Mods')
+      : path.join(winInstalls[0], 'Mods');
+    managedCandidates = winInstalls.map((p) =>
+      path.join(p, 'RimWorldWin64_Data/Managed'),
+    );
     workshopCandidates = [
       'C:/Program Files (x86)/Steam/steamapps/workshop/content/294100',
       'C:/Program Files/Steam/steamapps/workshop/content/294100',
@@ -113,15 +123,22 @@ export function detectRimWorldPaths(): RimWorldPaths {
       home,
       '.config/unity3d/Ludeon Studios/RimWorld by Ludeon Studios',
     );
-    modsDir = path.join(linuxBase, 'Mods');
-    managedCandidates = [
-      path.join(
-        home,
-        '.steam/steam/steamapps/common/RimWorld/RimWorldLinux_Data/Managed',
-      ),
+    // Same as Windows: user mods belong in <install>/Mods/, not under
+    // ~/.config. RimWorld 1.6's ModLister only scans the install dir.
+    const linuxInstalls = [
+      path.join(home, '.steam/steam/steamapps/common/RimWorld'),
+      path.join(home, '.local/share/Steam/steamapps/common/RimWorld'),
     ];
+    const linuxInstall = linuxInstalls.find((p) => fs.existsSync(p));
+    modsDir = linuxInstall
+      ? path.join(linuxInstall, 'Mods')
+      : path.join(linuxInstalls[0], 'Mods');
+    managedCandidates = linuxInstalls.map((p) =>
+      path.join(p, 'RimWorldLinux_Data/Managed'),
+    );
     workshopCandidates = [
       path.join(home, '.steam/steam/steamapps/workshop/content/294100'),
+      path.join(home, '.local/share/Steam/steamapps/workshop/content/294100'),
     ];
     modsConfigCandidates = [path.join(linuxBase, 'Config/ModsConfig.xml')];
   }

@@ -4,7 +4,7 @@ import type { WorkspaceMod } from '../agent/workspace';
 import type { AssetCounts } from '../agent/assets/types';
 import { cn } from '@/lib/cn';
 
-export type BuildPanel = 'chat' | 'schematic' | 'assets' | 'publish';
+export type BuildPanel = 'chat' | 'schematic' | 'assets' | 'deps' | 'publish';
 
 export function ModBuildSidebar({
   mod,
@@ -106,6 +106,15 @@ export function ModBuildSidebar({
                   }
                 : undefined
             }
+          />
+        )}
+        {showAssets && (
+          <SidebarRow
+            label="Deps"
+            subtitle="What this mod needs"
+            icon={<DepsIcon />}
+            active={panel === 'deps'}
+            onClick={() => onSelectPanel('deps')}
           />
         )}
         {showAssets && (
@@ -244,6 +253,27 @@ function AssetsIcon() {
       <rect x="3" y="4" width="18" height="16" rx="2" />
       <circle cx="9" cy="10" r="1.75" />
       <path d="m4 18 5-5 4 4 3-3 4 4" />
+    </svg>
+  );
+}
+
+function DepsIcon() {
+  return (
+    <svg
+      aria-hidden
+      className="h-4 w-4"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="3" y="3" width="7" height="7" />
+      <rect x="14" y="3" width="7" height="7" />
+      <rect x="3" y="14" width="7" height="7" />
+      <path d="M14 17.5h7" />
+      <path d="M17.5 14v7" />
     </svg>
   );
 }

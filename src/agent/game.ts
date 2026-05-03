@@ -7,6 +7,7 @@ import { platform } from 'node:os';
 import { detectRimWorldPaths } from './paths.js';
 import { getWorkspacePaths } from './workspace.js';
 import { getLogWatcher } from './log-watcher.js';
+import { getRegistry } from './registry/index.js';
 
 const STEAM_URL = 'steam://rungameid/294100';
 const execAsync = promisify(exec);
@@ -104,27 +105,18 @@ export async function enableModInGame(folder: string): Promise<EnableResult> {
       'ModsConfig.xml not found. Launch RimWorld at least once first so it can create the file.',
     );
   }
-  if (await isRimWorldRunning()) {
-    throw new Error(
-      'RimWorld is currently running. Edits to ModsConfig.xml are overwritten when the game quits, and a running game won\'t pick up new mods. Quit RimWorld first, then retry.',
-    );
-  }
+  // Registry's writer enforces "RimWorld must be closed" + atomic write +
+  // backup. We just compute the packageId and delegate.
   const packageId = await getModPackageId(folder);
-  let xml = await fsp.readFile(modsConfig, 'utf8');
-  const checkRe = new RegExp(
-    `<li>\\s*${escapeRegex(packageId)}\\s*</li>`,
-    'i',
-  );
-  if (checkRe.test(xml)) {
-    return { packageId, alreadyEnabled: true, configPath: modsConfig };
-  }
-  const insertRe = /(\s*)<\/activeMods>/;
-  if (!insertRe.test(xml)) {
-    throw new Error('Could not find </activeMods> in ModsConfig.xml');
-  }
-  xml = xml.replace(insertRe, `$1  <li>${packageId}</li>$1</activeMods>`);
-  await fsp.writeFile(modsConfig, xml);
-  return { packageId, alreadyEnabled: false, configPath: modsConfig };
+  const registry = getRegistry();
+  await registry.start();
+  await registry.refresh();
+  const result = await registry.addActiveMod(packageId);
+  return {
+    packageId,
+    alreadyEnabled: result.alreadyEnabled,
+    configPath: modsConfig,
+  };
 }
 
 export interface DisableResult {
@@ -139,17 +131,15 @@ export async function disableModInGame(folder: string): Promise<DisableResult> {
     throw new Error('ModsConfig.xml not found.');
   }
   const packageId = await getModPackageId(folder);
-  let xml = await fsp.readFile(modsConfig, 'utf8');
-  const re = new RegExp(
-    `\\s*<li>\\s*${escapeRegex(packageId)}\\s*</li>`,
-    'gi',
-  );
-  if (!re.test(xml)) {
-    return { packageId, wasEnabled: false, configPath: modsConfig };
-  }
-  xml = xml.replace(re, '');
-  await fsp.writeFile(modsConfig, xml);
-  return { packageId, wasEnabled: true, configPath: modsConfig };
+  const registry = getRegistry();
+  await registry.start();
+  await registry.refresh();
+  const result = await registry.removeActiveMod(packageId);
+  return {
+    packageId,
+    wasEnabled: result.wasEnabled,
+    configPath: modsConfig,
+  };
 }
 
 export interface LaunchResult {
@@ -190,6 +180,3 @@ export async function launchRimWorldViaSteam(): Promise<LaunchResult> {
   };
 }
 
-function escapeRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}

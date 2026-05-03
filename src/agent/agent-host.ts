@@ -51,6 +51,16 @@ import {
 import { syncToGameTool, unsyncFromGameTool } from './tools/sync-to-game.js';
 import { shipAndLaunchTool } from './tools/ship-and-launch.js';
 import { withConfirmation } from './security/with-confirmation.js';
+import { withSessionConfirmation } from './security/with-session-confirmation.js';
+import { setActiveModsTool } from './tools/set-active-mods.js';
+import { autosortModsTool } from './tools/autosort-mods.js';
+import { startFixSessionTool } from './tools/start-fix-session.js';
+import { startTestSessionTool } from './tools/start-test-session.js';
+import {
+  applySessionTool,
+  revertSessionTool,
+} from './tools/apply-revert-session.js';
+import { getSessionManager } from './registry/index.js';
 import { SafeStorageAuthBackend } from './security/secure-auth-storage.js';
 import {
   enableModInGameTool,
@@ -115,6 +125,36 @@ function buildCustomTools(cwd: string): AgentTool<any>[] {
     tailPlayerLogTool,
     listInstalledModsTool,
     decompileDllTool,
+    // Mod-list manipulation: gated, but auto-approved inside an active fix
+    // session so the agent can iterate freely.
+    withSessionConfirmation(
+      setActiveModsTool,
+      {
+        label: 'Replace active mod list',
+        summary:
+          "Bulk-replace ModsConfig.xml's active mod list. RimWorld must be closed. The previous list is backed up automatically.",
+      },
+      () => getSessionManager().getActive() !== null,
+      (p: { packageIds: string[] }) =>
+        `Set ${p.packageIds.length} active mod(s).`,
+    ),
+    withSessionConfirmation(
+      autosortModsTool,
+      {
+        label: 'Autosort mod list',
+        summary:
+          "Reorder ModsConfig.xml's active mods according to About.xml deps and the community rules DB.",
+      },
+      () => getSessionManager().getActive() !== null,
+      (p: { apply?: boolean }) =>
+        p.apply
+          ? 'Apply autosort to ModsConfig.xml.'
+          : 'Preview autosort proposal (no write).',
+    ),
+    startTestSessionTool,
+    startFixSessionTool,
+    applySessionTool,
+    revertSessionTool,
     // RimWorld source/def index — read-only lookups against $MM/index/*.
     searchDefsTool,
     getDefDetailsTool,

@@ -3,17 +3,23 @@ import { cn } from '@/lib/cn';
 
 export function ModsView({
   mods,
+  activeOrder,
   onOpen,
   onNewMod,
   onSync,
   onUnsync,
+  onTestIsolated,
 }: {
   mods: WorkspaceMod[];
+  /** Lowercased packageIds currently in <activeMods>. */
+  activeOrder: string[];
   onOpen: (folder: string) => void;
   onNewMod: () => void;
   onSync: (folder: string) => void;
   onUnsync: (folder: string) => void;
+  onTestIsolated?: (folder: string, packageId: string) => void;
 }) {
+  const activeSet = new Set(activeOrder);
   return (
     <div className="flex-1 overflow-auto px-8 py-8">
       <div className="mx-auto max-w-5xl">
@@ -43,9 +49,19 @@ export function ModsView({
               <ModCard
                 key={m.folder}
                 mod={m}
+                isEnabled={
+                  m.about.packageId
+                    ? activeSet.has(m.about.packageId.toLowerCase())
+                    : false
+                }
                 onOpen={() => onOpen(m.folder)}
                 onSync={() => onSync(m.folder)}
                 onUnsync={() => onUnsync(m.folder)}
+                onTestIsolated={
+                  onTestIsolated && m.about.packageId
+                    ? () => onTestIsolated(m.folder, m.about.packageId)
+                    : undefined
+                }
               />
             ))}
           </div>
@@ -67,14 +83,19 @@ export function ModsView({
 
 function ModCard({
   mod,
+  isEnabled,
   onOpen,
   onSync,
   onUnsync,
+  onTestIsolated,
 }: {
   mod: WorkspaceMod;
+  /** True when the mod's packageId is in RimWorld's <activeMods>. */
+  isEnabled: boolean;
   onOpen: () => void;
   onSync: () => void;
   onUnsync: () => void;
+  onTestIsolated?: () => void;
 }) {
   return (
     <div className="group flex flex-col gap-2 rounded-lg border border-line bg-surface/40 p-4 transition-colors hover:border-ink/30">
@@ -89,7 +110,7 @@ function ModCard({
           <span
             className={cn(
               'inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.18em]',
-              mod.active
+              isEnabled
                 ? 'bg-ready/15 text-ready'
                 : 'bg-raised text-muted',
             )}
@@ -97,10 +118,10 @@ function ModCard({
             <span
               className={cn(
                 'h-1.5 w-1.5 rounded-full',
-                mod.active ? 'bg-ready' : 'bg-pending',
+                isEnabled ? 'bg-ready' : 'bg-pending',
               )}
             />
-            {mod.active ? 'enabled' : 'disabled'}
+            {isEnabled ? 'enabled' : 'disabled'}
           </span>
         </div>
         {mod.about.packageId && (
@@ -122,7 +143,7 @@ function ModCard({
         </div>
       </button>
       <div className="mt-2 flex items-center gap-2">
-        {mod.active ? (
+        {isEnabled ? (
           <button
             onClick={onUnsync}
             className="rounded-md border border-line bg-paper px-3 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-muted transition-colors hover:border-ink/30 hover:text-ink"
@@ -143,6 +164,15 @@ function ModCard({
         >
           open chat
         </button>
+        {onTestIsolated && (
+          <button
+            onClick={onTestIsolated}
+            title="Snapshot your mod list, enable just this mod + its deps + Core/DLCs, then restore on apply or revert."
+            className="ml-auto rounded-md border border-amber-500/50 bg-paper px-3 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-amber-700 transition-colors hover:bg-amber-500/10"
+          >
+            test isolated
+          </button>
+        )}
       </div>
     </div>
   );

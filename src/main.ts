@@ -59,6 +59,18 @@ import {
   quitRimWorld,
 } from './agent/game.js';
 import { getLogWatcher } from './agent/log-watcher.js';
+import {
+  getRegistry,
+  analyzeSnapshot,
+  autosort,
+  getCommunityRules,
+  refreshCommunityRules,
+  getSessionManager,
+  computeTestSet,
+  diffActiveLists,
+  type AnalysisResult,
+  type RegistrySnapshot,
+} from './agent/registry/index.js';
 import { getMonitorServer } from './agent/monitor/server.js';
 import type { BridgeMessage, MonitorConnectionState } from './agent/monitor/protocol.js';
 import { scanAssets } from './agent/assets/scanner.js';
@@ -127,6 +139,42 @@ const host = new AgentHost(() => mainWindow);
 // Eagerly initialize the log watcher so the agent finds an active instance
 // the first time it monitors Player.log.
 getLogWatcher();
+// Boot the mod registry so it's primed by the time the renderer asks for a
+// snapshot. Subscribers (renderer broadcast, agent tools) attach below.
+const registry = getRegistry();
+void registry.start();
+registry.subscribe(() => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(
+      'modmixer:registry:changed',
+      buildRegistryEnvelope(),
+    );
+  }
+});
+
+// Hydrate any persisted (orphaned) session so the renderer can prompt the
+// user to apply or revert. We DON'T auto-revert: the user's bytes are precious.
+const sessions = getSessionManager();
+sessions.adoptPersisted();
+sessions.subscribe(() => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('modmixer:session:changed', sessions.getActive());
+  }
+});
+
+// Warm the community rules cache in the background — first call kicks off
+// the network fetch with a long timeout, fall-back to disk cache if offline.
+void getCommunityRules();
+
+interface RegistryEnvelope {
+  snapshot: RegistrySnapshot;
+  analysis: AnalysisResult;
+}
+
+function buildRegistryEnvelope(): RegistryEnvelope {
+  const snapshot = registry.getSnapshot();
+  return { snapshot, analysis: analyzeSnapshot(snapshot) };
+}
 
 function requireConsent(): void {
   if (!hasCurrentConsent()) {
@@ -354,6 +402,30 @@ ipcMain.handle(
   },
 );
 
+ipcMain.handle(
+  'modmixer:mods:write-deps',
+  async (
+    _evt,
+    folder: string,
+    deps: {
+      modDependencies: import('./agent/registry/about-xml.js').ModDependency[];
+      loadAfter: string[];
+      loadBefore: string[];
+      incompatibleWith: string[];
+    },
+  ) => {
+    const updated = await writeAbout(folder, {
+      modDependencies: deps.modDependencies,
+      loadAfter: deps.loadAfter,
+      loadBefore: deps.loadBefore,
+      incompatibleWith: deps.incompatibleWith,
+    });
+    emitModChanged(folder);
+    await registry.refresh();
+    return updated;
+  },
+);
+
 ipcMain.handle('modmixer:mods:enable-in-game', (_evt, folder: string) =>
   enableModInGame(folder),
 );
@@ -367,6 +439,118 @@ ipcMain.handle('modmixer:game:launch', () => launchRimWorldViaSteam());
 ipcMain.handle('modmixer:game:is-running', () => isRimWorldRunning());
 
 ipcMain.handle('modmixer:game:quit', () => quitRimWorld());
+
+// Registry: full system mod view (DLCs + local + workshop + workspace).
+ipcMain.handle('modmixer:registry:get', async () => {
+  await registry.refresh();
+  return buildRegistryEnvelope();
+});
+
+ipcMain.handle('modmixer:registry:refresh', async () => {
+  await registry.refresh();
+  return buildRegistryEnvelope();
+});
+
+ipcMain.handle(
+  'modmixer:registry:set-active',
+  async (_evt, packageIds: string[]) => {
+    await registry.setActiveMods(packageIds);
+    return buildRegistryEnvelope();
+  },
+);
+
+ipcMain.handle('modmixer:registry:autosort', async () => {
+  const snapshot = registry.getSnapshot();
+  const rules = await getCommunityRules();
+  const result = autosort({
+    activeOrder: snapshot.activeOrder,
+    snapshot,
+    rules: rules.byPackageId,
+  });
+  return result;
+});
+
+ipcMain.handle('modmixer:registry:apply-autosort', async () => {
+  const snapshot = registry.getSnapshot();
+  const rules = await getCommunityRules();
+  const result = autosort({
+    activeOrder: snapshot.activeOrder,
+    snapshot,
+    rules: rules.byPackageId,
+  });
+  await registry.setActiveMods(result.order);
+  return { envelope: buildRegistryEnvelope(), conflicts: result.conflicts };
+});
+
+ipcMain.handle('modmixer:registry:community-rules', async () => {
+  const snap = await getCommunityRules();
+  // Maps don't always cross IPC happily depending on Electron settings —
+  // serialize to a plain object for the renderer.
+  const rules: Record<string, unknown> = {};
+  for (const [k, v] of snap.byPackageId) rules[k] = v;
+  return {
+    fetchedAt: snap.fetchedAt,
+    source: snap.source,
+    count: snap.byPackageId.size,
+    rules,
+  };
+});
+
+ipcMain.handle('modmixer:registry:refresh-community-rules', async () => {
+  const snap = await refreshCommunityRules();
+  return {
+    fetchedAt: snap.fetchedAt,
+    source: snap.source,
+    count: snap.byPackageId.size,
+  };
+});
+
+// Sessions: snapshot-restore primitive used by Test Mode and Fix Mode.
+ipcMain.handle('modmixer:session:get-active', () => sessions.getActive());
+
+ipcMain.handle(
+  'modmixer:session:start-test',
+  async (_evt, args: { folder: string; packageId: string }) => {
+    const snapshot = registry.getSnapshot();
+    const rules = (await getCommunityRules()).byPackageId;
+    const testSet = computeTestSet({
+      snapshot,
+      targetPackageId: args.packageId.toLowerCase(),
+      rules,
+    });
+    const session = await sessions.startTestSession({
+      folder: args.folder,
+      packageId: args.packageId.toLowerCase(),
+      reducedActive: testSet.reducedActive,
+    });
+    return { session, testSet, envelope: buildRegistryEnvelope() };
+  },
+);
+
+ipcMain.handle('modmixer:session:start-fix', async () => {
+  const snapshot = registry.getSnapshot();
+  const session = await sessions.startFixSession(snapshot.activeOrder);
+  return { session, envelope: buildRegistryEnvelope() };
+});
+
+ipcMain.handle('modmixer:session:apply', async () => {
+  await sessions.apply();
+  return { envelope: buildRegistryEnvelope() };
+});
+
+ipcMain.handle('modmixer:session:revert', async () => {
+  await sessions.revert();
+  await registry.refresh();
+  return { envelope: buildRegistryEnvelope() };
+});
+
+ipcMain.handle('modmixer:session:diff', () => {
+  const session = sessions.getActive();
+  if (!session) return null;
+  const initial = session.initialActive ?? [];
+  const current = registry.getSnapshot().activeOrder;
+  return diffActiveLists(initial, current);
+});
 
 ipcMain.handle('modmixer:assets:scan', async (_evt, folder: string) => {
   const { workspaceDir } = getWorkspacePaths();

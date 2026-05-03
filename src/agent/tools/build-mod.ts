@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import { spawn } from 'node:child_process';
 import { getWorkspacePaths } from '../workspace.js';
 import { lintMod, formatFindings, type LintFinding } from '../build-lint.js';
+import { DOTNET_NOT_FOUND_MESSAGE, resolveDotnet } from '../dotnet.js';
 
 const Params = Type.Object({
   modFolder: Type.String({
@@ -40,8 +41,12 @@ export const buildModTool: AgentTool<typeof Params, BuildModDetails> = {
         `Source folder not found: ${sourceDir}. Use scaffold_mod with withCSharp=true or write a .csproj first.`,
       );
     }
+    const dotnet = resolveDotnet();
+    if (!dotnet) {
+      throw new Error(DOTNET_NOT_FOUND_MESSAGE);
+    }
     const result = await runCommand(
-      'dotnet',
+      dotnet,
       ['build', '--nologo'],
       sourceDir,
       signal,

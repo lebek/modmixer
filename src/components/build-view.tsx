@@ -6,6 +6,7 @@ import { ModHeader } from './mod-header';
 import { AssetsView } from './assets-view';
 import { ModSchematicPanel } from './mod-schematic-panel';
 import { ModPublishPanel } from './mod-publish-panel';
+import { ModDepsPanel } from './mod-deps-panel';
 import { ModBuildSidebar, type BuildPanel } from './mod-build-sidebar';
 import { BuildLanding } from './build-landing';
 
@@ -73,6 +74,9 @@ export function BuildView({
         )}
         {!newModInProgress && panel === 'assets' && activeMod && (
           <AssetsView mod={activeMod} />
+        )}
+        {!newModInProgress && panel === 'deps' && activeMod && (
+          <ModDepsPanel mod={activeMod} />
         )}
         {!newModInProgress && panel === 'publish' && activeMod && (
           <ModPublishPanel mod={activeMod} />

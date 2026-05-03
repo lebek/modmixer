@@ -5,6 +5,7 @@ import fsp from 'node:fs/promises';
 import { detectRimWorldPaths } from './paths.js';
 import { readSchematic, type SchematicData } from './schematic.js';
 import { scanAssets } from './assets/scanner.js';
+import { parseAboutXml, type ModDependency } from './registry/about-xml.js';
 
 export interface WorkspacePaths {
   /** ModMixer's owned mods directory. The user's WIP mods live here. */
@@ -19,6 +20,14 @@ export interface AboutMetadata {
   description: string;
   author: string;
   supportedVersions: string[];
+  /** Hard deps from <modDependencies>. Empty when none declared. */
+  modDependencies: ModDependency[];
+  /** Soft "load after these" hints, lowercased packageIds. */
+  loadAfter: string[];
+  /** Soft "load before these" hints, lowercased packageIds. */
+  loadBefore: string[];
+  /** Declared incompatible mods, lowercased packageIds. */
+  incompatibleWith: string[];
 }
 
 export interface WorkspaceMod {
@@ -255,36 +264,26 @@ function emptyAbout(name: string): AboutMetadata {
     description: '',
     author: '',
     supportedVersions: [],
+    modDependencies: [],
+    loadAfter: [],
+    loadBefore: [],
+    incompatibleWith: [],
   };
 }
 
 export function parseAbout(xml: string): AboutMetadata {
+  const parsed = parseAboutXml(xml);
   return {
-    name: extractTag(xml, 'name'),
-    packageId: extractTag(xml, 'packageId'),
-    description: extractTag(xml, 'description'),
-    author: extractTag(xml, 'author'),
-    supportedVersions: extractList(xml, 'supportedVersions'),
+    name: parsed.name,
+    packageId: parsed.packageId,
+    description: parsed.description,
+    author: parsed.author,
+    supportedVersions: parsed.supportedVersions,
+    modDependencies: parsed.modDependencies,
+    loadAfter: parsed.loadAfter,
+    loadBefore: parsed.loadBefore,
+    incompatibleWith: parsed.incompatibleWith,
   };
-}
-
-function extractTag(xml: string, tag: string): string {
-  const m = xml.match(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`));
-  return (m?.[1] ?? '').trim();
-}
-
-function extractList(xml: string, parentTag: string): string[] {
-  const wrap = xml.match(
-    new RegExp(`<${parentTag}>([\\s\\S]*?)</${parentTag}>`),
-  );
-  if (!wrap) return [];
-  const items: string[] = [];
-  const re = /<li>([\s\S]*?)<\/li>/g;
-  let match: RegExpExecArray | null;
-  while ((match = re.exec(wrap[1])) !== null) {
-    items.push(match[1].trim());
-  }
-  return items;
 }
 
 export function escapeXml(s: string): string {
@@ -322,9 +321,9 @@ ${versionList}
  * unknown tags, comments, whitespace) is preserved. If a target tag is
  * missing, we insert it just before </ModMetaData>.
  *
- * supportedVersions in the patch is currently unsupported here — it's a
- * list, and rewriting it safely while preserving formatting isn't worth
- * the complexity until we expose it in the UI.
+ * Supports scalar fields and the list-shaped dep/load fields. supportedVersions
+ * is still left to manual editing — we don't yet have UI to change it and
+ * rewriting it without flattening custom formatting isn't worth the risk.
  */
 function patchAboutXml(xml: string, patch: Partial<AboutMetadata>): string {
   let out = xml;
@@ -338,6 +337,18 @@ function patchAboutXml(xml: string, patch: Partial<AboutMetadata>): string {
     const value = patch[field];
     if (value === undefined || typeof value !== 'string') continue;
     out = upsertScalarTag(out, field, value);
+  }
+  if (patch.modDependencies !== undefined) {
+    out = upsertModDependencies(out, patch.modDependencies);
+  }
+  if (patch.loadAfter !== undefined) {
+    out = upsertSimpleListTag(out, 'loadAfter', patch.loadAfter);
+  }
+  if (patch.loadBefore !== undefined) {
+    out = upsertSimpleListTag(out, 'loadBefore', patch.loadBefore);
+  }
+  if (patch.incompatibleWith !== undefined) {
+    out = upsertSimpleListTag(out, 'incompatibleWith', patch.incompatibleWith);
   }
   return out;
 }
@@ -354,4 +365,64 @@ function upsertScalarTag(xml: string, tag: string, value: string): string {
   if (idx === -1) return xml; // malformed; leave alone
   const insertion = `  <${tag}>${escaped}</${tag}>\n`;
   return xml.slice(0, idx) + insertion + xml.slice(idx);
+}
+
+function upsertSimpleListTag(xml: string, tag: string, items: string[]): string {
+  const close = '</ModMetaData>';
+  if (items.length === 0) {
+    // Empty list — drop the tag entirely if present.
+    return xml.replace(
+      new RegExp(`\\s*<${tag}>[\\s\\S]*?</${tag}>`, 'g'),
+      '',
+    );
+  }
+  const lis = items.map((v) => `    <li>${escapeXml(v)}</li>`).join('\n');
+  const block = `  <${tag}>\n${lis}\n  </${tag}>`;
+  const re = new RegExp(`<${tag}>[\\s\\S]*?</${tag}>`);
+  if (re.test(xml)) {
+    return xml.replace(re, block.trimStart());
+  }
+  const idx = xml.lastIndexOf(close);
+  if (idx === -1) return xml;
+  return xml.slice(0, idx) + block + '\n' + xml.slice(idx);
+}
+
+function upsertModDependencies(
+  xml: string,
+  deps: ModDependency[],
+): string {
+  const close = '</ModMetaData>';
+  if (deps.length === 0) {
+    return xml.replace(
+      /\s*<modDependencies>[\s\S]*?<\/modDependencies>/g,
+      '',
+    );
+  }
+  const lis = deps
+    .map((d) => {
+      const lines = [
+        `    <li>`,
+        `      <packageId>${escapeXml(d.packageId)}</packageId>`,
+      ];
+      if (d.displayName) {
+        lines.push(`      <displayName>${escapeXml(d.displayName)}</displayName>`);
+      }
+      if (d.steamWorkshopUrl) {
+        lines.push(`      <steamWorkshopUrl>${escapeXml(d.steamWorkshopUrl)}</steamWorkshopUrl>`);
+      }
+      if (d.downloadUrl) {
+        lines.push(`      <downloadUrl>${escapeXml(d.downloadUrl)}</downloadUrl>`);
+      }
+      lines.push(`    </li>`);
+      return lines.join('\n');
+    })
+    .join('\n');
+  const block = `  <modDependencies>\n${lis}\n  </modDependencies>`;
+  const re = /<modDependencies>[\s\S]*?<\/modDependencies>/;
+  if (re.test(xml)) {
+    return xml.replace(re, block.trimStart());
+  }
+  const idx = xml.lastIndexOf(close);
+  if (idx === -1) return xml;
+  return xml.slice(0, idx) + block + '\n' + xml.slice(idx);
 }

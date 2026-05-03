@@ -1,22 +1,30 @@
 import { cn } from '@/lib/cn';
 
-export type Tab = 'mods' | 'build' | 'monitor';
+export type Tab = 'mods' | 'library' | 'build' | 'monitor';
 
 export function TabNav({
   active,
   onChange,
   monitorConnected,
+  sessionActive,
 }: {
   active: Tab;
   onChange: (t: Tab) => void;
   monitorConnected?: boolean;
+  sessionActive?: boolean;
 }) {
   return (
     <nav className="flex items-center gap-1">
       <TabButton
-        label="Mods"
+        label="Workspace"
         active={active === 'mods'}
         onClick={() => onChange('mods')}
+      />
+      <TabButton
+        label="Library"
+        active={active === 'library'}
+        onClick={() => onChange('library')}
+        indicator={sessionActive ? 'session' : undefined}
       />
       <TabButton
         label="Build"
@@ -42,7 +50,7 @@ function TabButton({
   label: string;
   active: boolean;
   onClick: () => void;
-  indicator?: 'live';
+  indicator?: 'live' | 'session';
 }) {
   return (
     <button
@@ -62,6 +70,12 @@ function TabButton({
             'animate-pulse',
           )}
           aria-label="connected"
+        />
+      )}
+      {indicator === 'session' && (
+        <span
+          className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse"
+          aria-label="session active"
         />
       )}
     </button>
