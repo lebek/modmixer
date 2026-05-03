@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { sanitizeAuthorHandle } from '@/lib/identifiers';
 import type { OAuthEvent, OAuthLink } from '@/agent/agent-host';
 import type { ThemePreference } from '@/agent/settings';
+import type { UpdaterState } from '@/agent/updater';
 import { applyTheme } from '@/lib/theme';
 
 export type SettingsSection = 'providers' | 'general' | 'appearance' | 'index';
@@ -122,6 +123,7 @@ export function AppSettingsDialog({
                   <p className="text-sm text-muted">Loading…</p>
                 ) : (
                   <div className="space-y-4">
+                    <UpdateRow />
                     <div>
                       <label className="mb-1 block font-mono text-[10px] uppercase tracking-[0.18em] text-muted">
                         Default author handle
@@ -211,6 +213,88 @@ export function AppSettingsDialog({
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function UpdateRow() {
+  const [version, setVersion] = useState<string>('');
+  const [state, setState] = useState<UpdaterState>({ status: 'idle' });
+
+  useEffect(() => {
+    void window.modmixer.getAppVersion().then(setVersion);
+    void window.modmixer.getUpdaterState().then(setState);
+    return window.modmixer.onUpdaterState(setState);
+  }, []);
+
+  const onCheck = () => {
+    void window.modmixer.checkForUpdates();
+  };
+  const onRestart = () => {
+    void window.modmixer.quitAndInstallUpdate();
+  };
+
+  const busy = state.status === 'checking' || state.status === 'available';
+  const disabled =
+    state.status === 'unsupported' || busy || state.status === 'downloaded';
+
+  let message: string | null = null;
+  let tone: 'muted' | 'ready' | 'failed' = 'muted';
+  if (state.status === 'unsupported') {
+    message =
+      state.unsupportedReason === 'dev'
+        ? 'Updates disabled in dev builds.'
+        : 'Auto-update is not available on this platform.';
+  } else if (state.status === 'checking') {
+    message = 'Checking for updates…';
+  } else if (state.status === 'available') {
+    message = 'Update available — downloading…';
+  } else if (state.status === 'not-available') {
+    message = 'You are on the latest version.';
+    tone = 'ready';
+  } else if (state.status === 'downloaded') {
+    message = state.releaseName
+      ? `Update ${state.releaseName} ready — restart to install.`
+      : 'Update ready — restart to install.';
+    tone = 'ready';
+  } else if (state.status === 'error') {
+    message = `Update check failed${state.errorMessage ? `: ${state.errorMessage}` : '.'}`;
+    tone = 'failed';
+  }
+
+  const toneClass =
+    tone === 'ready'
+      ? 'text-ready'
+      : tone === 'failed'
+        ? 'text-failed'
+        : 'text-muted';
+
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-line bg-surface/40 px-3 py-2.5">
+      <div className="min-w-0">
+        <div className="text-sm text-ink">
+          Modmixer{version ? ` v${version}` : ''}
+        </div>
+        {message && <div className={`mt-0.5 text-xs ${toneClass}`}>{message}</div>}
+      </div>
+      {state.status === 'downloaded' ? (
+        <button
+          type="button"
+          onClick={onRestart}
+          className="rounded-md bg-accent px-3 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-accent-foreground transition-opacity hover:bg-accent-soft"
+        >
+          Restart to update
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={onCheck}
+          disabled={disabled}
+          className="rounded-md border border-line bg-paper px-3 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-muted transition-colors hover:border-ink/30 hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {busy ? 'Checking…' : 'Check for updates'}
+        </button>
+      )}
     </div>
   );
 }

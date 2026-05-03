@@ -38,6 +38,7 @@ import type { ConfirmationRequest } from './agent/security/confirmation-gate';
 import type {
   IndexSnapshot,
 } from './agent/index/main-bridge';
+import type { UpdaterState } from './agent/updater';
 import type { IndexProgressEvent } from './agent/index/progress';
 import type {
   RegistrySnapshot,
@@ -97,6 +98,22 @@ const api = {
   // App
   getAppVersion(): Promise<string> {
     return ipcRenderer.invoke('modmixer:app:version');
+  },
+
+  // Updater
+  getUpdaterState(): Promise<UpdaterState> {
+    return ipcRenderer.invoke('modmixer:updater:get-state');
+  },
+  checkForUpdates(): Promise<UpdaterState> {
+    return ipcRenderer.invoke('modmixer:updater:check');
+  },
+  quitAndInstallUpdate(): Promise<void> {
+    return ipcRenderer.invoke('modmixer:updater:quit-and-install');
+  },
+  onUpdaterState(handler: (state: UpdaterState) => void): () => void {
+    const wrapped = (_e: unknown, state: UpdaterState) => handler(state);
+    ipcRenderer.on('modmixer:updater:state', wrapped);
+    return () => ipcRenderer.off('modmixer:updater:state', wrapped);
   },
 
   // Consent
@@ -267,7 +284,11 @@ const api = {
   disableModInGame(folder: string): Promise<DisableResult> {
     return ipcRenderer.invoke('modmixer:mods:disable-in-game', folder);
   },
-  launchRimWorld(): Promise<{ url: string; command: string; alreadyRunning: boolean }> {
+  launchRimWorld(): Promise<{
+    executable: string;
+    args: string[];
+    alreadyRunning: boolean;
+  }> {
     return ipcRenderer.invoke('modmixer:game:launch');
   },
   isRimWorldRunning(): Promise<boolean> {

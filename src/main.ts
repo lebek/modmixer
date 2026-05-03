@@ -6,7 +6,6 @@ import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, shell } 
 import path from 'node:path';
 import fsp from 'node:fs/promises';
 import started from 'electron-squirrel-startup';
-import { updateElectronApp } from 'update-electron-app';
 import { initSentry } from './agent/sentry.js';
 
 // Initialize Sentry as early as possible so any failure during app
@@ -63,7 +62,7 @@ import { onModChanged, emitModChanged } from './agent/mod-events.js';
 import {
   enableModInGame,
   disableModInGame,
-  launchRimWorldViaSteam,
+  launchRimWorld,
   isRimWorldRunning,
   quitRimWorld,
 } from './agent/game.js';
@@ -113,10 +112,31 @@ import {
   startRebuild,
 } from './agent/index/main-bridge.js';
 import { closeIndexDb } from './agent/index/db.js';
+import {
+  checkForUpdates,
+  getUpdaterState,
+  initUpdater,
+  quitAndInstall,
+} from './agent/updater.js';
 
 if (started) {
   app.quit();
 }
+
+// Single-instance lock: a second launch (Start Menu re-click, second `npm start`,
+// Squirrel post-install autolaunch racing the first run) should focus the
+// existing window instead of spinning up a parallel main + renderer + GPU +
+// utility process tree that ends up fighting over %APPDATA%/Modmixer (cache
+// lock errors, duplicate index DBs, leaked processes).
+if (!app.requestSingleInstanceLock()) {
+  app.exit(0);
+}
+app.on('second-instance', () => {
+  const win = BrowserWindow.getAllWindows()[0];
+  if (!win) return;
+  if (win.isMinimized()) win.restore();
+  win.focus();
+});
 
 // In dev the app name comes from Electron's defaults (which says "Electron")
 // rather than package.json's productName. Force it so the dock tooltip,
@@ -143,14 +163,13 @@ if (process.argv.includes('--reset-onboarding')) {
 // log watcher, …). main.ts updates this again when the user picks a folder.
 setRimWorldInstallOverride(loadSettings().rimworldInstallOverride);
 
-// Auto-update from GitHub releases. No-ops in dev and on unsigned mac
-// builds; logs but won't throw if the feed is unreachable.
-updateElectronApp({
-  repo: 'lebek/modmixer',
-  updateInterval: '1 hour',
-});
-
 let mainWindow: BrowserWindow | null = null;
+
+// Auto-update from GitHub releases. No-ops in dev and on unsupported
+// platforms; logs but won't throw if the feed is unreachable. Also exposes
+// a manual "Check for updates" path the renderer can drive from Settings.
+initUpdater(() => mainWindow);
+
 // The confirmation gate must exist before AgentHost wraps tools — the
 // wrappers grab `getConfirmationGate()` lazily at execute time, but the
 // IPC bridge for resolution events needs to be installed up front.
@@ -287,6 +306,14 @@ ipcMain.handle('modmixer:env:clear-rimworld-install-override', async () => {
 });
 
 ipcMain.handle('modmixer:app:version', () => app.getVersion());
+
+ipcMain.handle('modmixer:updater:get-state', () => getUpdaterState());
+
+ipcMain.handle('modmixer:updater:check', () => checkForUpdates());
+
+ipcMain.handle('modmixer:updater:quit-and-install', () => {
+  quitAndInstall();
+});
 
 ipcMain.handle('modmixer:settings:get', () => loadSettings());
 
@@ -543,7 +570,7 @@ ipcMain.handle('modmixer:mods:disable-in-game', (_evt, folder: string) =>
   disableModInGame(folder),
 );
 
-ipcMain.handle('modmixer:game:launch', () => launchRimWorldViaSteam());
+ipcMain.handle('modmixer:game:launch', () => launchRimWorld());
 
 ipcMain.handle('modmixer:game:is-running', () => isRimWorldRunning());
 
