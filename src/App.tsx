@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from 'react';
 import type { AgentMessage } from '@mariozechner/pi-agent-core';
 import type { Conversation } from './agent/conversations';
 import type { WorkspaceMod } from './agent/workspace';
-import type { MonitorConnectionState } from './agent/monitor/protocol';
 import type { ModelOption } from './agent/models';
 import type { ModelSelection } from './agent/settings';
 import type { ActiveSession } from './agent/registry';
@@ -14,7 +13,6 @@ import { IndexProgressModal } from './components/index-progress-modal';
 import { TabNav, type Tab } from './components/tab-nav';
 import { BuildView } from './components/build-view';
 import { ModsView } from './components/mods-view';
-import { MonitorView } from './components/monitor-view';
 import { LibraryView } from './components/library-view';
 import { SessionRecoveryDialog } from './components/session-recovery-dialog';
 
@@ -28,9 +26,6 @@ export function App() {
   const [activeMessages, setActiveMessages] = useState<AgentMessage[]>([]);
   const [buildPanel, setBuildPanel] = useState<BuildPanel>('chat');
   const [busy, setBusy] = useState(false);
-  const [monitorState, setMonitorState] = useState<MonitorConnectionState>({
-    kind: 'idle',
-  });
   const [availableModels, setAvailableModels] = useState<ModelOption[]>([]);
   const [currentModel, setCurrentModel] = useState<ModelSelection | null>(null);
   const [settingsSection, setSettingsSection] = useState<SettingsSection | null>(
@@ -50,11 +45,6 @@ export function App() {
 
   const openSettings = useCallback((section: SettingsSection = 'providers') => {
     setSettingsSection(section);
-  }, []);
-
-  useEffect(() => {
-    void window.modmixer.getMonitorState().then(setMonitorState);
-    return window.modmixer.onMonitorState(setMonitorState);
   }, []);
 
   useEffect(() => {
@@ -305,7 +295,6 @@ export function App() {
           <TabNav
             active={tab}
             onChange={setTab}
-            monitorConnected={monitorState.kind === 'connected'}
             sessionActive={!!session}
           />
         </div>
@@ -412,8 +401,6 @@ export function App() {
           onConnect={() => openSettings('providers')}
         />
       )}
-      {tab === 'monitor' && <MonitorView connection={monitorState} />}
-
       {settingsSection && (
         <AppSettingsDialog
           initialSection={settingsSection}
