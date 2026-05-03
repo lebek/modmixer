@@ -27,13 +27,24 @@ export const prepareDebugSessionTool: AgentTool<
   name: 'prepare_debug_session',
   label: 'Prepare debug session',
   description:
-    "Edit RimWorld's Prefs.xml to enable dev mode, auto-open the debug action palette on startup, and pin specific palette entries so they're one click away in-game. Use this in the test-in-game flow to give the user a one-click trigger for the mod's main behavior — e.g. pin 'Actions\\\\Do incident\\\\<YourIncidentDef>' for an incident mod and the user can fire it without starting a colony or waiting on the storyteller. RimWorld must be CLOSED when this runs (the game rewrites Prefs.xml on quit). Run before launch_rimworld in the test cycle.",
+    "Edit RimWorld's Prefs.xml to enable dev mode, auto-open the debug action palette on startup, and pin specific palette entries so they're one click away in-game. Use this in the test-in-game flow to give the user a one-click trigger for the mod's main behavior — e.g. pin 'Actions\\\\Do incident\\\\<YourIncidentDef>' for an incident mod and the user can fire it without starting a colony or waiting on the storyteller. RimWorld must be CLOSED when this runs (the game rewrites Prefs.xml on quit). Run before launch_rimworld in the test cycle. If Prefs.xml doesn't exist yet (RimWorld never launched on this machine), the tool returns skipped=true — proceed with ship_and_launch anyway and rerun this after the user has quit the game once.",
   parameters: Params,
   async execute(_id, params): Promise<AgentToolResult<PrepareDebugSessionResult>> {
     const result = await prepareDebugSession({
       paletteEntries: params.paletteEntries,
       autoOpenPalette: params.autoOpenPalette,
     });
+    if (result.skipped) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Skipped: ${result.skipReason} Continue with ship_and_launch — dev mode will be off this run; rerun prepare_debug_session after the user closes the game once.`,
+          },
+        ],
+        details: result,
+      };
+    }
     const parts: string[] = [];
     parts.push(
       result.devModeWasOn

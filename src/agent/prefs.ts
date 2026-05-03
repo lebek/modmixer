@@ -10,7 +10,17 @@ export interface PrepareDebugSessionOptions {
 }
 
 export interface PrepareDebugSessionResult {
-  prefsPath: string;
+  /**
+   * True when Prefs.xml didn't exist yet (RimWorld has never been launched on
+   * this machine, or the user wiped their config). The caller continues with
+   * the launch — RimWorld creates Prefs.xml on first quit, and a follow-up
+   * call after that will succeed. The remaining fields hold defaults.
+   */
+  skipped: boolean;
+  /** Human-readable reason when `skipped` is true. */
+  skipReason: string | null;
+  /** Absolute path that would have been edited; null when Prefs.xml is absent. */
+  prefsPath: string | null;
   devModeWasOn: boolean;
   autoOpenPaletteWasOn: boolean;
   pinnedNew: string[];
@@ -25,17 +35,30 @@ export interface PrepareDebugSessionResult {
  *  3. append the given entries to `<debugActionPalette>` so they show up
  *     pinned the moment the user lands in-game.
  *
+ * If Prefs.xml doesn't exist (RimWorld never launched on this machine yet),
+ * we return `skipped: true` instead of throwing — the test-in-game flow
+ * still proceeds, the game creates Prefs.xml on its first quit, and a
+ * subsequent call lands cleanly.
+ *
  * RimWorld must be CLOSED — the game rewrites Prefs.xml on quit via
- * `Prefs.Save()`, the same hazard as ModsConfig.xml.
+ * `Prefs.Save()`, the same hazard as ModsConfig.xml. That precondition is a
+ * hard error (still throws), since proceeding would silently lose the edit.
  */
 export async function prepareDebugSession(
   opts: PrepareDebugSessionOptions = {},
 ): Promise<PrepareDebugSessionResult> {
   const { prefsXml } = detectRimWorldPaths();
   if (!prefsXml) {
-    throw new Error(
-      'Prefs.xml not found. Launch RimWorld at least once first so it can create the file.',
-    );
+    return {
+      skipped: true,
+      skipReason:
+        'Prefs.xml not found — RimWorld has not been launched on this machine yet. The game will create it on first quit; rerun this tool after that to enable dev mode.',
+      prefsPath: null,
+      devModeWasOn: false,
+      autoOpenPaletteWasOn: false,
+      pinnedNew: [],
+      pinnedAlready: [],
+    };
   }
   if (await isRimWorldRunning()) {
     throw new Error(
@@ -105,6 +128,8 @@ export async function prepareDebugSession(
 
   await fsp.writeFile(prefsXml, xml);
   return {
+    skipped: false,
+    skipReason: null,
     prefsPath: prefsXml,
     devModeWasOn,
     autoOpenPaletteWasOn,
