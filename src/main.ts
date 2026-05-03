@@ -32,12 +32,14 @@ import {
 } from './agent/telemetry.js';
 import {
   listConversations,
+  listConversationsForMod,
   getActiveForMod,
   setActiveForMod,
   clearActiveForMod,
   type ConversationScope,
 } from './agent/conversations.js';
 import {
+  deleteWorkspaceMod,
   listWorkspaceMods,
   syncModToGame,
   unsyncModFromGame,
@@ -83,6 +85,7 @@ import {
   ensureWatching,
   onAssetsChanged,
   stopAllWatches,
+  stopWatching,
 } from './agent/assets/watcher.js';
 import type { AssetKind } from './agent/assets/types.js';
 import {
@@ -371,6 +374,36 @@ ipcMain.handle('modmixer:mods:sync-to-game', async (_evt, folder: string) => {
 
 ipcMain.handle('modmixer:mods:unsync-from-game', async (_evt, folder: string) => {
   await unsyncModFromGame(folder);
+  return await listWorkspaceMods();
+});
+
+ipcMain.handle('modmixer:mods:delete', async (_evt, folder: string) => {
+  // Order matters: read packageId before the folder is gone, then drop it
+  // from ModsConfig.xml (best-effort — RimWorld may not be installed yet),
+  // then nuke the symlink + folder, then clean up watchers and chats.
+  const about = await readModAbout(folder);
+  const packageId = about?.packageId?.trim().toLowerCase() ?? '';
+  if (packageId) {
+    try {
+      await registry.start();
+      await registry.refresh();
+      await registry.removeActiveMod(packageId);
+    } catch (err) {
+      console.warn('[delete-mod] removeActiveMod failed (continuing):', err);
+    }
+  }
+  stopWatching(folder);
+  await deleteWorkspaceMod(folder);
+  // Drop any chats scoped to this mod and their session files.
+  for (const convo of listConversationsForMod(folder)) {
+    try {
+      await host.deleteConversation(convo.id);
+    } catch (err) {
+      console.warn('[delete-mod] deleteConversation failed (continuing):', err);
+    }
+  }
+  emitModChanged(folder);
+  await registry.refresh();
   return await listWorkspaceMods();
 });
 

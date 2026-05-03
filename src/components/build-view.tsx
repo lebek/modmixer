@@ -22,6 +22,7 @@ export function BuildView({
   onBack,
   onTest,
   onNewChat,
+  onModDeleted,
   busy,
   hasAi,
   onConnect,
@@ -37,6 +38,7 @@ export function BuildView({
   onBack: () => void;
   onTest: () => void;
   onNewChat: () => void;
+  onModDeleted?: (folder: string) => void;
   busy: boolean;
   hasAi: boolean;
   onConnect: () => void;
@@ -79,7 +81,12 @@ export function BuildView({
           <ModDepsPanel mod={activeMod} />
         )}
         {!newModInProgress && panel === 'publish' && activeMod && (
-          <ModPublishPanel mod={activeMod} />
+          <ModPublishPanel
+            mod={activeMod}
+            onDeleted={
+              onModDeleted ? () => onModDeleted(activeMod.folder) : undefined
+            }
+          />
         )}
         <div
           className={

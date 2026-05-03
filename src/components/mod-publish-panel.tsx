@@ -6,7 +6,13 @@ import type {
 } from '../agent/workshop';
 import { derivePackageId } from '@/lib/identifiers';
 
-export function ModPublishPanel({ mod }: { mod: WorkspaceMod }) {
+export function ModPublishPanel({
+  mod,
+  onDeleted,
+}: {
+  mod: WorkspaceMod;
+  onDeleted?: () => void;
+}) {
   const [name, setName] = useState(mod.about.name);
   const [packageId, setPackageId] = useState(mod.about.packageId);
   const [author, setAuthor] = useState(mod.about.author);
@@ -28,6 +34,13 @@ export function ModPublishPanel({ mod }: { mod: WorkspaceMod }) {
       : null,
   );
   const [agreementUrl, setAgreementUrl] = useState<string | null>(null);
+
+  // Delete state
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const expectedDeleteText = mod.about.name || mod.folder;
 
   // Track the latest defaultAuthor for the sticky-detection initialization.
   const defaultAuthorRef = useRef('');
@@ -59,6 +72,9 @@ export function ModPublishPanel({ mod }: { mod: WorkspaceMod }) {
     setAgreementUrl(null);
     setPublishError(null);
     setProgress(null);
+    setDeleteOpen(false);
+    setDeleteConfirmText('');
+    setDeleteError(null);
   }, [mod.folder]);
 
   useEffect(() => {
@@ -183,6 +199,23 @@ export function ModPublishPanel({ mod }: { mod: WorkspaceMod }) {
   };
 
   const isUpdate = mod.publishedFileId !== null;
+
+  const deleteConfirmMatches =
+    deleteConfirmText.trim() === expectedDeleteText.trim() &&
+    expectedDeleteText.trim() !== '';
+
+  const performDelete = async () => {
+    if (!deleteConfirmMatches) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await window.modmixer.deleteMod(mod.folder);
+      onDeleted?.();
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : String(err));
+      setDeleting(false);
+    }
+  };
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -345,6 +378,82 @@ export function ModPublishPanel({ mod }: { mod: WorkspaceMod }) {
               </button>
             </div>
           </Section>
+
+          <section className="space-y-3 border-t border-failed/30 pt-6">
+            <header>
+              <h2 className="font-display text-sm font-medium text-failed">
+                Danger zone
+              </h2>
+              <p className="mt-0.5 text-xs text-muted">
+                Deleting removes the mod folder from disk, the symlink in
+                RimWorld's Mods/ directory, the entry in ModsConfig.xml,
+                and any agent chats for this mod. This cannot be undone.
+                {mod.publishedFileId && (
+                  <>
+                    {' '}
+                    The Steam Workshop item is <em>not</em> removed —
+                    delete it from the Workshop page yourself if you want
+                    it gone.
+                  </>
+                )}
+              </p>
+            </header>
+
+            {!deleteOpen ? (
+              <div className="flex items-center justify-end pt-1">
+                <button
+                  onClick={() => setDeleteOpen(true)}
+                  className="rounded-md border border-failed/50 bg-paper px-3 py-1 text-[10px] uppercase tracking-[0.18em] text-failed transition-colors hover:bg-failed/5"
+                >
+                  Delete this mod…
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-3 rounded-md border border-failed/40 bg-failed/5 px-3 py-3">
+                <p className="text-xs text-ink">
+                  Type{' '}
+                  <span className="rounded bg-paper px-1 py-0.5 font-mono text-[11px] text-failed">
+                    {expectedDeleteText}
+                  </span>{' '}
+                  to confirm.
+                </p>
+                <input
+                  type="text"
+                  value={deleteConfirmText}
+                  onChange={(e) => setDeleteConfirmText(e.target.value)}
+                  disabled={deleting}
+                  autoFocus
+                  className="w-full rounded-md border border-line bg-paper px-2.5 py-1.5 text-sm text-ink focus:border-failed focus:outline-none"
+                  placeholder={expectedDeleteText}
+                />
+                {deleteError && (
+                  <div className="rounded-md border border-failed/40 bg-paper px-3 py-2 text-xs text-failed">
+                    {deleteError}
+                  </div>
+                )}
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    onClick={() => {
+                      setDeleteOpen(false);
+                      setDeleteConfirmText('');
+                      setDeleteError(null);
+                    }}
+                    disabled={deleting}
+                    className="rounded-md border border-line bg-paper px-3 py-1 text-[10px] uppercase tracking-[0.18em] text-muted transition-colors hover:border-ink/40 hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => void performDelete()}
+                    disabled={!deleteConfirmMatches || deleting}
+                    className="rounded-md bg-failed px-3 py-1 text-[10px] uppercase tracking-[0.18em] text-paper transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {deleting ? 'Deleting…' : 'Delete permanently'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </section>
         </div>
       </div>
     </div>

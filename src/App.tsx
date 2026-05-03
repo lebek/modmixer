@@ -401,6 +401,12 @@ export function App() {
           onBack={exitMod}
           onTest={test}
           onNewChat={startFreshChat}
+          onModDeleted={async () => {
+            exitMod();
+            await refreshMods();
+            await refreshRegistry();
+            setTab('mods');
+          }}
           busy={busy}
           hasAi={hasAi}
           onConnect={() => openSettings('providers')}

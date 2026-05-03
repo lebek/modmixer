@@ -211,6 +211,47 @@ export async function unsyncModFromGame(folder: string): Promise<void> {
   await fsp.unlink(link);
 }
 
+/**
+ * Permanently remove the symlink in RimWorld's Mods/ directory if it points
+ * at our workspace folder. Unlike `unsyncModFromGame` this also runs after
+ * the workspace folder has been deleted (when realpath comparison fails) —
+ * it just refuses to delete a non-symlink, since that would be the user's
+ * own data.
+ */
+async function removeRimWorldLink(folder: string): Promise<void> {
+  const { rimworldModsDir } = getWorkspacePaths();
+  const link = path.join(rimworldModsDir, folder);
+  let st: fs.Stats;
+  try {
+    st = await fsp.lstat(link);
+  } catch {
+    return; // nothing there
+  }
+  // Refuse to nuke a real directory — that's not ours to delete. On Windows
+  // junctions report as directories from lstat but `isSymbolicLink` returns
+  // true for them; only real dirs reach the throw.
+  if (!st.isSymbolicLink() && st.isDirectory() && process.platform !== 'win32') {
+    throw new Error(
+      `${link} is a real directory, not a symlink — refusing to delete.`,
+    );
+  }
+  await fsp.rm(link, { recursive: true, force: true });
+}
+
+/**
+ * Delete a workspace mod completely: remove the RimWorld symlink (if any),
+ * then delete the workspace folder on disk. Caller is responsible for
+ * removing the packageId from ModsConfig.xml *before* calling this — once
+ * the folder is gone, About.xml is no longer readable.
+ */
+export async function deleteWorkspaceMod(folder: string): Promise<void> {
+  const { workspaceDir } = getWorkspacePaths();
+  const target = path.join(workspaceDir, folder);
+  if (!fs.existsSync(target)) return;
+  await removeRimWorldLink(folder);
+  await fsp.rm(target, { recursive: true, force: true });
+}
+
 async function isModActive(
   folder: string,
   workspacePath: string,

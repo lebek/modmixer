@@ -142,6 +142,12 @@ export function clearActiveForMod(folder: string): void {
   persist();
 }
 
+export function listConversationsForMod(folder: string): Conversation[] {
+  return load().conversations.filter(
+    (c) => c.scope.type === 'mod' && c.scope.modFolder === folder,
+  );
+}
+
 export function isDefaultTitle(title: string): boolean {
   return title === DEFAULT_TITLE;
 }

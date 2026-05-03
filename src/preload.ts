@@ -194,6 +194,9 @@ const api = {
   unsyncModFromGame(folder: string): Promise<WorkspaceMod[]> {
     return ipcRenderer.invoke('modmixer:mods:unsync-from-game', folder);
   },
+  deleteMod(folder: string): Promise<WorkspaceMod[]> {
+    return ipcRenderer.invoke('modmixer:mods:delete', folder);
+  },
   readModAbout(folder: string): Promise<AboutMetadata | null> {
     return ipcRenderer.invoke('modmixer:mods:read-about', folder);
   },
