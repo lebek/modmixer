@@ -40,7 +40,7 @@ function snapshot(mods: RegistryMod[]): RegistrySnapshot {
 }
 
 describe('autosort', () => {
-  it('places Core first', () => {
+  it('places Core first when Harmony is not active', () => {
     const mods = [makeMod('Author.MyMod'), makeMod('Ludeon.RimWorld')];
     const out = autosort({
       activeOrder: ['author.mymod', 'ludeon.rimworld'],
@@ -48,6 +48,24 @@ describe('autosort', () => {
       rules: new Map(),
     });
     assert.equal(out.order[0], 'ludeon.rimworld');
+  });
+
+  it('places Harmony before Core when both are active', () => {
+    const mods = [
+      makeMod('Author.MyMod'),
+      makeMod('Ludeon.RimWorld'),
+      makeMod('Brrainz.Harmony'),
+    ];
+    const out = autosort({
+      activeOrder: ['author.mymod', 'ludeon.rimworld', 'brrainz.harmony'],
+      snapshot: snapshot(mods),
+      rules: new Map(),
+    });
+    assert.deepEqual(out.order, [
+      'brrainz.harmony',
+      'ludeon.rimworld',
+      'author.mymod',
+    ]);
   });
 
   it('places official DLCs after Core in canonical order', () => {

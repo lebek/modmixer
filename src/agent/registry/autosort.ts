@@ -39,8 +39,13 @@ export interface AutosortConflict {
   other: string;
 }
 
-const OFFICIAL_PRIORITY = [
-  'ludeon.rimworld', // Core always first
+// Fixed-priority head of the load order. Harmony (when active) comes before
+// Core because Harmony patches need to attach to Core's static initializers
+// before they run — Brrainz's recommended ordering. Then Core, then DLCs in
+// canonical Ludeon order. Mods not in this list follow.
+const LOAD_PRIORITY = [
+  'brrainz.harmony',
+  'ludeon.rimworld',
   'ludeon.rimworld.royalty',
   'ludeon.rimworld.ideology',
   'ludeon.rimworld.biotech',
@@ -110,18 +115,19 @@ export function autosort(opts: AutosortOptions): AutosortResult {
     }
   }
 
-  // 3. Official priority — Core/DLCs go first when active.
-  for (let i = 0; i < OFFICIAL_PRIORITY.length; i++) {
-    const before = OFFICIAL_PRIORITY[i];
+  // 3. Fixed load priority — Harmony, then Core, then DLCs go first when
+  // active, in that canonical order. Everything else follows.
+  for (let i = 0; i < LOAD_PRIORITY.length; i++) {
+    const before = LOAD_PRIORITY[i];
     if (!idSet.has(before)) continue;
-    for (let j = i + 1; j < OFFICIAL_PRIORITY.length; j++) {
-      const next = OFFICIAL_PRIORITY[j];
+    for (let j = i + 1; j < LOAD_PRIORITY.length; j++) {
+      const next = LOAD_PRIORITY[j];
       if (!idSet.has(next)) continue;
       addEdge(before, next, 'about-xml', before, 'load-before');
     }
-    // Officials should come before all non-officials.
+    // Priority entries should come before everything else.
     for (const id of ids) {
-      if (OFFICIAL_PRIORITY.includes(id)) continue;
+      if (LOAD_PRIORITY.includes(id)) continue;
       addEdge(before, id, 'about-xml', before, 'load-before');
     }
   }
