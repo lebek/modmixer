@@ -47,7 +47,7 @@ Rules:
 - One short sentence per bullet. No commit hashes. No "by @username".
 - If a commit subject already reads as a user-facing change, you can use it largely as-is.
 
-Write the draft to a temp file. Get the path with `node -p "require('path').join(require('os').tmpdir(), 'modmixer-release-notes.md')"` and use that absolute path with the Write tool. Remember the path — you'll pass it to the script in step 5.
+Write the draft to a fresh temp file. Get the path with `node -p "require('path').join(require('os').tmpdir(), 'modmixer-release-notes-' + Date.now() + '.md')"` (the timestamp avoids collisions with stale files from prior runs that would otherwise trip the Write tool's read-before-write guard) and use that absolute path with the Write tool. Remember the path — you'll pass it to the script in step 5.
 
 ## 4. Confirm with the user
 

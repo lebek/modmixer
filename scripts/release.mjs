@@ -27,6 +27,25 @@ const RELEASE_WORKFLOW = 'release.yml';
 
 const isWin = process.platform === 'win32';
 
+// On Windows, gh.exe is often installed somewhere not on the bash PATH used
+// by Claude Code. If gh isn't resolvable, probe the standard install dirs
+// and prepend the first hit to PATH so child processes can find it.
+function ensureGhOnPath() {
+  if (tryCapture('gh', ['--version']).ok) return;
+  if (!isWin) return;
+  const candidates = [
+    'C:\\Program Files\\GitHub CLI',
+    'C:\\Program Files (x86)\\GitHub CLI',
+    process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Programs', 'GitHub CLI'),
+  ].filter(Boolean);
+  for (const dir of candidates) {
+    if (fs.existsSync(path.join(dir, 'gh.exe'))) {
+      process.env.PATH = `${dir};${process.env.PATH ?? ''}`;
+      return;
+    }
+  }
+}
+
 function exec(cmd, args, opts = {}) {
   // npm/npx are .cmd shims on Windows; Node ≥20.12 (CVE-2024-27980) blocks
   // spawning .cmd/.bat without shell:true, so we route them via the shell.
@@ -106,6 +125,7 @@ async function main() {
   // ---- preflight ----
   section('preflight');
 
+  ensureGhOnPath();
   const ghAuth = tryCapture('gh', ['auth', 'status']);
   if (!ghAuth.ok) {
     console.error('error: `gh` not available or not authenticated. Run `gh auth login`.');
