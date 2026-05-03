@@ -17,13 +17,20 @@ initSentry();
 import { AgentHost } from './agent/agent-host.js';
 import {
   CURRENT_CONSENT_VERSION,
+  CURRENT_ONBOARDING_VERSION,
+  hasCompletedOnboarding,
   hasCurrentConsent,
   loadSettings,
   recordConsent,
+  recordOnboardingComplete,
+  resetOnboarding,
   saveSettings,
   type ModelSelection,
   type ThemePreference,
 } from './agent/settings.js';
+import { setRimWorldInstallOverride } from './agent/paths.js';
+import { invalidatePathPolicyRoots } from './agent/security/policy-roots.js';
+import { detectEnv } from './agent/env-detect.js';
 import {
   initTelemetry,
   setAnalyticsOptIn,
@@ -115,6 +122,26 @@ if (started) {
 // rather than package.json's productName. Force it so the dock tooltip,
 // About menu, and userData paths match the packaged app.
 app.setName('Modmixer');
+
+// CLI escape hatch for development: `--reset-onboarding` wipes the
+// onboarding record (and optionally the consent record with `--reset-all`)
+// before the app reads settings. This lets you iterate the flow without
+// hand-editing settings.json. The flags are no-ops in production builds
+// since they only affect persisted user state.
+if (process.argv.includes('--reset-onboarding')) {
+  try {
+    resetOnboarding({ alsoConsent: process.argv.includes('--reset-all') });
+    // eslint-disable-next-line no-console
+    console.log('[onboarding] reset via --reset-onboarding flag');
+  } catch (err) {
+    console.error('[onboarding] reset failed:', err);
+  }
+}
+
+// Seed the install-path override from settings so detectRimWorldPaths()
+// honors it from the very first call (registry start, ensureIndexAtStartup,
+// log watcher, …). main.ts updates this again when the user picks a folder.
+setRimWorldInstallOverride(loadSettings().rimworldInstallOverride);
 
 // Auto-update from GitHub releases. No-ops in dev and on unsigned mac
 // builds; logs but won't throw if the feed is unreachable.
@@ -210,6 +237,54 @@ ipcMain.handle(
     return next;
   },
 );
+
+// Onboarding — gates the main UI on first launch.
+ipcMain.handle('modmixer:onboarding:get-status', () => ({
+  required: CURRENT_ONBOARDING_VERSION,
+  completed: loadSettings().onboarding,
+  /** True when the renderer should show the onboarding flow on this launch. */
+  shouldShow: !hasCompletedOnboarding(),
+}));
+
+ipcMain.handle('modmixer:onboarding:complete', () => {
+  return recordOnboardingComplete(CURRENT_ONBOARDING_VERSION);
+});
+
+ipcMain.handle('modmixer:onboarding:reset', () => {
+  return resetOnboarding();
+});
+
+ipcMain.handle('modmixer:env:detect', () => detectEnv());
+
+ipcMain.handle('modmixer:env:browse-rimworld-install', async () => {
+  if (!mainWindow) return null;
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openDirectory'],
+    title: 'Pick your RimWorld install folder',
+    message:
+      'Choose the folder containing RimWorldWin64_Data, RimWorldMac.app, or RimWorldLinux_Data.',
+  });
+  if (result.canceled || result.filePaths.length === 0) return null;
+  const chosen = result.filePaths[0];
+  // Persist + push the override into the path resolver so a follow-up
+  // detectEnv() picks it up immediately.
+  saveSettings({ rimworldInstallOverride: chosen });
+  setRimWorldInstallOverride(chosen);
+  invalidatePathPolicyRoots();
+  // Refresh the registry so the env snapshot's mod counts reflect the new
+  // install. start() is idempotent.
+  await registry.start();
+  await registry.refresh();
+  return chosen;
+});
+
+ipcMain.handle('modmixer:env:clear-rimworld-install-override', async () => {
+  saveSettings({ rimworldInstallOverride: null });
+  setRimWorldInstallOverride(null);
+  invalidatePathPolicyRoots();
+  await registry.refresh();
+  return null;
+});
 
 ipcMain.handle('modmixer:app:version', () => app.getVersion());
 

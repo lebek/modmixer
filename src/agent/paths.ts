@@ -2,6 +2,24 @@ import { homedir, platform } from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
 
+/**
+ * Optional user-supplied override of the RimWorld install location. Set by
+ * the onboarding "Browse for install…" button. Cached in module scope so
+ * detectRimWorldPaths() (called from many code paths, including ones with no
+ * Electron context) doesn't have to reach into settings.ts. main.ts seeds
+ * this on boot from settings, and clears/replaces it when the user picks a
+ * different folder.
+ */
+let installOverride: string | null = null;
+
+export function setRimWorldInstallOverride(installRoot: string | null): void {
+  installOverride = installRoot && installRoot.length > 0 ? installRoot : null;
+}
+
+export function getRimWorldInstallOverride(): string | null {
+  return installOverride;
+}
+
 export interface RimWorldPaths {
   /** Where ModMixer drops new mods (RimWorld picks them up from here on next launch). */
   modsDir: string;
@@ -54,6 +72,12 @@ export function detectRimWorldPaths(): RimWorldPaths {
   let playerLogCandidate: string | null = null;
   let modsConfigCandidates: string[] = [];
 
+  // The install override (when set) wins over the auto-detected Steam paths.
+  // We still probe the standard locations as a fallback so the override can
+  // be a partial fix — e.g. user points at a custom Steam library, but the
+  // workshop dir is still in the default Steam location.
+  const overrideRoot = installOverride;
+
   if (os === 'darwin') {
     const appSupport = path.join(home, 'Library/Application Support');
     const steamInstall = path.join(
@@ -70,8 +94,19 @@ export function detectRimWorldPaths(): RimWorldPaths {
       appSupport,
       'RimWorld by Ludeon Studios/Mods',
     );
-    modsDir = fs.existsSync(bundleMods) ? bundleMods : legacyMods;
+    const overrideBundleMods = overrideRoot
+      ? path.join(overrideRoot, 'RimWorldMac.app/Mods')
+      : null;
+    modsDir =
+      overrideBundleMods && fs.existsSync(overrideBundleMods)
+        ? overrideBundleMods
+        : fs.existsSync(bundleMods)
+          ? bundleMods
+          : legacyMods;
     managedCandidates = [
+      ...(overrideRoot
+        ? [path.join(overrideRoot, 'RimWorldMac.app/Contents/Resources/Data/Managed')]
+        : []),
       path.join(
         steamInstall,
         'RimWorldMac.app/Contents/Resources/Data/Managed',
@@ -102,6 +137,7 @@ export function detectRimWorldPaths(): RimWorldPaths {
     // mods), and Steam Workshop. The LocalLow path many older guides cite
     // is NOT scanned — symlinks dropped there are invisible to the game.
     const winInstalls = [
+      ...(overrideRoot ? [overrideRoot] : []),
       'C:/Program Files (x86)/Steam/steamapps/common/RimWorld',
       'C:/Program Files/Steam/steamapps/common/RimWorld',
     ];
@@ -126,6 +162,7 @@ export function detectRimWorldPaths(): RimWorldPaths {
     // Same as Windows: user mods belong in <install>/Mods/, not under
     // ~/.config. RimWorld 1.6's ModLister only scans the install dir.
     const linuxInstalls = [
+      ...(overrideRoot ? [overrideRoot] : []),
       path.join(home, '.steam/steam/steamapps/common/RimWorld'),
       path.join(home, '.local/share/Steam/steamapps/common/RimWorld'),
     ];

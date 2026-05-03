@@ -35,3 +35,12 @@ export function getPathPolicyRoots(): PathPolicyRoots {
 export function __resetPathPolicyRootsForTests(): void {
   cached = null;
 }
+
+/**
+ * Drop the cache so the next call re-resolves against the current RimWorld
+ * paths. Used after the user picks a new install location during onboarding —
+ * subsequent path-policy checks must consider the override.
+ */
+export function invalidatePathPolicyRoots(): void {
+  cached = null;
+}

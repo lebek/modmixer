@@ -163,17 +163,30 @@ export function AppSettingsDialog({
                       </label>
                     </div>
 
-                    <div className="flex items-center justify-between pt-2">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          void window.modmixer.revealLoreDir({ tier: 'user' })
-                        }
-                        title="Reveal the folder where Modmixer stores cross-mod modding lessons learned during your sessions."
-                        className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted/70 transition-colors hover:text-ink"
-                      >
-                        Reveal lore folder
-                      </button>
+                    <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+                      <div className="flex flex-wrap items-center gap-4">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void window.modmixer.revealLoreDir({ tier: 'user' })
+                          }
+                          title="Reveal the folder where Modmixer stores cross-mod modding lessons learned during your sessions."
+                          className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted/70 transition-colors hover:text-ink"
+                        >
+                          Reveal lore folder
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            await window.modmixer.resetOnboarding();
+                            window.location.reload();
+                          }}
+                          title="Walk through the first-run setup again. Useful after switching machines or to re-verify your install."
+                          className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted/70 transition-colors hover:text-ink"
+                        >
+                          Re-run onboarding
+                        </button>
+                      </div>
                       <div className="flex gap-2">
                         <button
                           onClick={onClose}

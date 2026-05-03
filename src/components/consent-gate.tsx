@@ -3,16 +3,19 @@ import { App } from '../App';
 import type { ThemePreference } from '../agent/settings';
 import { applyTheme, watchSystemTheme } from '../lib/theme';
 import { ConfirmModal } from './confirm-modal';
-import { ConsentScreen } from './consent-screen';
+import { OnboardingFlow } from './onboarding/onboarding-flow';
 
-type Status = 'loading' | 'needs-consent' | 'ready';
+type Status = 'loading' | 'needs-onboarding' | 'ready';
 
 /**
- * Mounts the consent screen on first launch (or after a consent version
- * bump) and only renders <App /> once the main process confirms acceptance
- * is recorded. The agent is also gated server-side (`requireConsent` in
+ * Gates the main app on first launch (or after a consent/onboarding version
+ * bump). Shows the onboarding flow until the renderer confirms acceptance is
+ * recorded; the agent is also gated server-side (`requireConsent` in
  * main.ts) — this component just keeps the UI coherent so the user can't
  * see a half-loaded chat panel.
+ *
+ * Kept as `ConsentGate` for naming continuity in renderer.tsx — it now
+ * covers both consent and the broader onboarding flow.
  */
 export function ConsentGate() {
   const [status, setStatus] = useState<Status>('loading');
@@ -20,11 +23,9 @@ export function ConsentGate() {
 
   useEffect(() => {
     let cancelled = false;
-    void window.modmixer.getConsentStatus().then((s) => {
+    void window.modmixer.getOnboardingStatus().then((s) => {
       if (cancelled) return;
-      const accepted =
-        s.accepted !== null && s.accepted.version === s.required;
-      setStatus(accepted ? 'ready' : 'needs-consent');
+      setStatus(s.shouldShow ? 'needs-onboarding' : 'ready');
     });
     return () => {
       cancelled = true;
@@ -49,8 +50,8 @@ export function ConsentGate() {
     return <div className="fixed inset-0 bg-paper" />;
   }
 
-  if (status === 'needs-consent') {
-    return <ConsentScreen onAccepted={() => setStatus('ready')} />;
+  if (status === 'needs-onboarding') {
+    return <OnboardingFlow onComplete={() => setStatus('ready')} />;
   }
 
   return (

@@ -19,12 +19,26 @@ export interface Consent {
   acceptedAt: string;
 }
 
+export interface OnboardingState {
+  /** Onboarding version the user completed. Matches CURRENT_ONBOARDING_VERSION at completion time. */
+  version: string;
+  /** ISO-8601 timestamp of completion. */
+  completedAt: string;
+}
+
 /**
  * The consent version the current build of modmixer enforces. Bump this
  * when the consent screen materially changes — users will be re-prompted
  * on next launch.
  */
 export const CURRENT_CONSENT_VERSION = '1.0';
+
+/**
+ * The onboarding version the current build of modmixer enforces. Bump this
+ * when a step is added or materially changed and existing users should walk
+ * through the flow again (e.g. a new required dependency).
+ */
+export const CURRENT_ONBOARDING_VERSION = '1.0';
 
 export interface Settings {
   /**
@@ -56,6 +70,20 @@ export interface Settings {
    * prefers-color-scheme. Defaults to "dark".
    */
   theme: ThemePreference;
+  /**
+   * Onboarding completion record. Absent until the user clicks through the
+   * first-run flow. The renderer gates the main UI until this is set with a
+   * version matching CURRENT_ONBOARDING_VERSION.
+   */
+  onboarding: OnboardingState | null;
+  /**
+   * User-supplied path to RimWorld's install directory (the folder containing
+   * RimWorldWin64_Data/, RimWorldMac.app/, or RimWorldLinux_Data/). Set when
+   * the auto-detector misses Steam's install — e.g. a non-standard library
+   * location. detectRimWorldPaths() consults this before falling back to the
+   * hard-coded candidate list.
+   */
+  rimworldInstallOverride: string | null;
 }
 
 let cached: Settings | null = null;
@@ -72,6 +100,8 @@ function computeDefaults(): Settings {
     analyticsOptIn: true,
     consent: null,
     theme: 'dark',
+    onboarding: null,
+    rimworldInstallOverride: null,
   };
 }
 
@@ -111,6 +141,26 @@ function normalize(raw: unknown, defaults: Settings): Settings {
       version: (c as Record<string, unknown>).version as string,
       acceptedAt: (c as Record<string, unknown>).acceptedAt as string,
     };
+  }
+
+  const o = obj.onboarding;
+  if (
+    o &&
+    typeof o === 'object' &&
+    typeof (o as Record<string, unknown>).version === 'string' &&
+    typeof (o as Record<string, unknown>).completedAt === 'string'
+  ) {
+    next.onboarding = {
+      version: (o as Record<string, unknown>).version as string,
+      completedAt: (o as Record<string, unknown>).completedAt as string,
+    };
+  }
+
+  if (
+    typeof obj.rimworldInstallOverride === 'string' &&
+    obj.rimworldInstallOverride.length > 0
+  ) {
+    next.rimworldInstallOverride = obj.rimworldInstallOverride;
   }
 
   const m = obj.model;
@@ -191,4 +241,36 @@ export function recordConsent(version: string): Settings {
       acceptedAt: new Date().toISOString(),
     },
   });
+}
+
+/**
+ * True when the user has completed the onboarding flow at the version this
+ * build enforces. Used to gate the main UI on first launch (and after a
+ * version bump).
+ */
+export function hasCompletedOnboarding(
+  settings: Settings = loadSettings(),
+): boolean {
+  if (process.env.MODMIXER_FORCE_ONBOARDING === '1') return false;
+  return settings.onboarding?.version === CURRENT_ONBOARDING_VERSION;
+}
+
+export function recordOnboardingComplete(version: string): Settings {
+  return saveSettings({
+    onboarding: {
+      version,
+      completedAt: new Date().toISOString(),
+    },
+  });
+}
+
+/**
+ * Wipe the onboarding (and optionally consent) record so the gate runs
+ * again. Used by the dev `--reset-onboarding` CLI flag and the "Re-run
+ * onboarding" button in Settings → General.
+ */
+export function resetOnboarding(options: { alsoConsent?: boolean } = {}): Settings {
+  const patch: Partial<Settings> = { onboarding: null };
+  if (options.alsoConsent) patch.consent = null;
+  return saveSettings(patch);
 }

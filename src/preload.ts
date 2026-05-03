@@ -4,9 +4,11 @@ import type { AgentSessionEvent } from '@mariozechner/pi-coding-agent';
 import type {
   Consent,
   ModelSelection,
+  OnboardingState,
   Settings,
   ThemePreference,
 } from './agent/settings';
+import type { EnvSnapshot } from './agent/env-detect';
 import type { ModelOption } from './agent/models';
 import type { OAuthEvent, OAuthLink } from './agent/agent-host';
 import type {
@@ -106,6 +108,30 @@ const api = {
   },
   acceptConsent(options?: { analyticsOptIn?: boolean }): Promise<Settings> {
     return ipcRenderer.invoke('modmixer:consent:accept', options);
+  },
+
+  // Onboarding
+  getOnboardingStatus(): Promise<{
+    required: string;
+    completed: OnboardingState | null;
+    shouldShow: boolean;
+  }> {
+    return ipcRenderer.invoke('modmixer:onboarding:get-status');
+  },
+  completeOnboarding(): Promise<Settings> {
+    return ipcRenderer.invoke('modmixer:onboarding:complete');
+  },
+  resetOnboarding(): Promise<Settings> {
+    return ipcRenderer.invoke('modmixer:onboarding:reset');
+  },
+  detectEnv(): Promise<EnvSnapshot> {
+    return ipcRenderer.invoke('modmixer:env:detect');
+  },
+  browseRimWorldInstall(): Promise<string | null> {
+    return ipcRenderer.invoke('modmixer:env:browse-rimworld-install');
+  },
+  clearRimWorldInstallOverride(): Promise<null> {
+    return ipcRenderer.invoke('modmixer:env:clear-rimworld-install-override');
   },
 
   // Agent
