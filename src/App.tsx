@@ -151,10 +151,9 @@ export function App() {
     setRegistryEnvelope(envelope);
     setSession(null);
   }, []);
-  const startTestSession = useCallback(
-    async (folder: string, packageId: string) => {
-      const res = await window.modmixer.startTestSession({ folder, packageId });
-      setSession(res.session);
+  const enableWithDeps = useCallback(
+    async (packageId: string) => {
+      const res = await window.modmixer.enableWithDeps(packageId);
       setRegistryEnvelope(res.envelope);
       return res;
     },
@@ -198,8 +197,23 @@ export function App() {
     try {
       const next = await window.modmixer.syncModToGame(folder);
       setMods(next);
+      const m = next.find((x) => x.folder === folder);
+      const packageId = m?.about.packageId;
+      if (!packageId) {
+        const env = await window.modmixer.refreshRegistry();
+        setRegistryEnvelope(env);
+        window.alert(
+          'Mod synced, but About.xml has no packageId, so it was not added to the active list.',
+        );
+        return;
+      }
       try {
-        await window.modmixer.enableModInGame(folder);
+        const res = await enableWithDeps(packageId);
+        if (res.missing.length > 0) {
+          window.alert(
+            `Enabled ${m?.about.name || folder}. Declared deps not installed (mod will fail to load until installed): ${res.missing.join(', ')}.`,
+          );
+        }
       } catch (err) {
         console.error(err);
         window.alert(
@@ -208,8 +222,6 @@ export function App() {
             : 'Mod synced, but adding to ModsConfig.xml failed.',
         );
       }
-      const env = await window.modmixer.refreshRegistry();
-      setRegistryEnvelope(env);
     } catch (err) {
       console.error(err);
       window.alert(
@@ -355,14 +367,6 @@ export function App() {
           onNewMod={newMod}
           onSync={sync}
           onUnsync={unsync}
-          onTestIsolated={async (folder, packageId) => {
-            try {
-              await startTestSession(folder, packageId);
-              setTab('library');
-            } catch (e) {
-              window.alert(e instanceof Error ? e.message : String(e));
-            }
-          }}
         />
       )}
       {tab === 'library' && (
@@ -372,6 +376,7 @@ export function App() {
           onRefresh={refreshRegistry}
           onAutosort={applyAutosort}
           onSetActive={setActiveMods}
+          onEnableWithDeps={enableWithDeps}
           onStartFix={startFix}
           onApplySession={applySession}
           onRevertSession={revertSession}

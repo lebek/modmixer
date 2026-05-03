@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { cn } from '@/lib/cn';
-import type { RegistryEnvelope } from '../preload';
+import type { EnableWithDepsResult, RegistryEnvelope } from '../preload';
 import type {
   ActiveSession,
   ModIssue,
@@ -17,6 +17,7 @@ export function LibraryView({
   onRefresh,
   onAutosort,
   onSetActive,
+  onEnableWithDeps,
   onStartFix,
   onApplySession,
   onRevertSession,
@@ -26,6 +27,7 @@ export function LibraryView({
   onRefresh: () => Promise<void>;
   onAutosort: () => Promise<void>;
   onSetActive: (packageIds: string[]) => Promise<void>;
+  onEnableWithDeps: (packageId: string) => Promise<EnableWithDepsResult>;
   onStartFix: () => Promise<void>;
   onApplySession: () => Promise<void>;
   onRevertSession: () => Promise<void>;
@@ -138,59 +140,46 @@ export function LibraryView({
         if (mod.source === 'workspace') {
           await window.modmixer.syncModToGame(mod.folder);
         }
-        const { added, missing } = collectDepsToEnable(
-          mod.about.packageIdLc,
-          byPackageId,
-          new Set(activeOrder),
-        );
-        const next = [...activeOrder, ...added, mod.about.packageIdLc];
-        await onSetActive(next);
-        if (added.length > 0 || missing.length > 0) {
-          const parts: string[] = [];
-          if (added.length > 0) {
-            parts.push(`Also enabled ${added.length} dep${added.length === 1 ? '' : 's'}: ${added.join(', ')}.`);
-          }
-          if (missing.length > 0) {
-            parts.push(
-              `Missing on disk: ${missing.join(', ')}. Install before launching.`,
-            );
-          }
-          setResolveBanner(parts.join(' '));
+        const res = await onEnableWithDeps(mod.about.packageIdLc);
+        const depCount = res.added.filter((p) => p !== mod.about.packageIdLc).length;
+        const parts: string[] = [];
+        if (depCount > 0) {
+          parts.push(
+            `Also enabled ${depCount} dep${depCount === 1 ? '' : 's'}: ${res.added.filter((p) => p !== mod.about.packageIdLc).join(', ')}.`,
+          );
         }
+        if (res.missing.length > 0) {
+          parts.push(
+            `Missing on disk: ${res.missing.join(', ')}. Install before launching.`,
+          );
+        }
+        if (parts.length > 0) setResolveBanner(parts.join(' '));
       }),
-    [activeOrder, byPackageId, guarded, onSetActive],
+    [guarded, onEnableWithDeps],
   );
   const resolveDeps = useCallback(
     (mod: RegistryMod) =>
       guarded(async () => {
         if (!mod.about.packageIdLc) return;
-        const { added, missing } = collectDepsToEnable(
-          mod.about.packageIdLc,
-          byPackageId,
-          new Set(activeOrder),
-        );
-        if (added.length === 0 && missing.length === 0) {
+        const res = await onEnableWithDeps(mod.about.packageIdLc);
+        if (res.added.length === 0 && res.missing.length === 0) {
           setResolveBanner('No deps to resolve.');
           return;
         }
-        const idx = activeOrder.indexOf(mod.about.packageIdLc);
-        const next =
-          idx >= 0
-            ? [...activeOrder.slice(0, idx), ...added, ...activeOrder.slice(idx)]
-            : [...activeOrder, ...added];
-        await onSetActive(next);
         const parts: string[] = [];
-        if (added.length > 0) {
-          parts.push(`Enabled ${added.length} dep${added.length === 1 ? '' : 's'}: ${added.join(', ')}.`);
-        }
-        if (missing.length > 0) {
+        if (res.added.length > 0) {
           parts.push(
-            `Still missing on disk: ${missing.join(', ')}. Install before launching.`,
+            `Enabled ${res.added.length} dep${res.added.length === 1 ? '' : 's'}: ${res.added.join(', ')}.`,
+          );
+        }
+        if (res.missing.length > 0) {
+          parts.push(
+            `Still missing on disk: ${res.missing.join(', ')}. Install before launching.`,
           );
         }
         setResolveBanner(parts.join(' '));
       }),
-    [activeOrder, byPackageId, guarded, onSetActive],
+    [guarded, onEnableWithDeps],
   );
   // Disable = remove from <activeMods> only. The workspace symlink (and any
   // other mod's folder) stays in place so the mod remains visible in
@@ -683,42 +672,6 @@ function IconButton({
       {children}
     </button>
   );
-}
-
-/**
- * Walk About.xml deps transitively, returning the ordered list of installed
- * deps to enable plus the list of deps not on disk. Mirrors what RimSort and
- * the in-game UI do when you toggle a mod that needs others.
- */
-function collectDepsToEnable(
-  packageId: string,
-  byPackageId: Map<string, RegistryMod>,
-  alreadyActive: Set<string>,
-): { added: string[]; missing: string[] } {
-  const added: string[] = [];
-  const seen = new Set<string>();
-  const missing: string[] = [];
-  function visit(pid: string): void {
-    if (seen.has(pid)) return;
-    seen.add(pid);
-    const mod = byPackageId.get(pid);
-    if (!mod) {
-      // The starting target may not have a packageIdLc yet; only flag deps we
-      // genuinely can't find.
-      if (pid !== packageId) missing.push(pid);
-      return;
-    }
-    for (const dep of mod.about.modDependencies) {
-      const lc = dep.packageIdLc;
-      if (!lc) continue;
-      if (alreadyActive.has(lc)) continue;
-      if (added.includes(lc)) continue;
-      visit(lc);
-      if (byPackageId.has(lc)) added.push(lc);
-    }
-  }
-  visit(packageId);
-  return { added, missing };
 }
 
 const CORE_PACKAGE_ID = 'ludeon.rimworld';

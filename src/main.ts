@@ -71,6 +71,7 @@ import {
   computeTestSet,
   diffActiveLists,
   type AnalysisResult,
+  type RegistryMod,
   type RegistrySnapshot,
 } from './agent/registry/index.js';
 import { getMonitorServer } from './agent/monitor/server.js';
@@ -514,6 +515,84 @@ ipcMain.handle('modmixer:registry:apply-autosort', async () => {
   await registry.setActiveMods(result.order);
   return { envelope: buildRegistryEnvelope(), conflicts: result.conflicts };
 });
+
+// Add a mod to <activeMods> together with its installed transitive deps,
+// then autosort. Mirrors what `ship_and_launch` does so the UI's "enable"
+// and "+deps" actions can't drift from the agent's flow. Returns the new
+// envelope plus a summary of what changed for banner display.
+ipcMain.handle(
+  'modmixer:registry:enable-with-deps',
+  async (_evt, packageId: string) => {
+    const target = packageId.toLowerCase();
+    await registry.refresh();
+    const snapshot = registry.getSnapshot();
+    const before = snapshot.activeOrder.slice();
+    const beforeSet = new Set(before);
+
+    const installedByPid = new Map<string, RegistryMod>();
+    for (const m of snapshot.mods) {
+      if (m.about.packageIdLc) installedByPid.set(m.about.packageIdLc, m);
+    }
+
+    const closure = new Set<string>();
+    const missingDeps = new Set<string>();
+    const queue: string[] = [target];
+    const visited = new Set<string>();
+    while (queue.length > 0) {
+      const pid = queue.shift()!;
+      if (visited.has(pid)) continue;
+      visited.add(pid);
+      const m = installedByPid.get(pid);
+      if (!m) continue;
+      for (const dep of m.about.modDependencies) {
+        const depPid = dep.packageIdLc;
+        if (!depPid) continue;
+        if (installedByPid.has(depPid)) {
+          closure.add(depPid);
+          queue.push(depPid);
+        } else {
+          missingDeps.add(dep.displayName || depPid);
+        }
+      }
+    }
+
+    const desired = before.slice();
+    const added: string[] = [];
+    const alreadyActive = beforeSet.has(target);
+    if (!alreadyActive && installedByPid.has(target)) {
+      desired.push(target);
+      added.push(target);
+    }
+    for (const dep of closure) {
+      if (!beforeSet.has(dep)) {
+        desired.push(dep);
+        added.push(dep);
+      }
+    }
+
+    const rules = await getCommunityRules();
+    const sorted = autosort({
+      activeOrder: desired,
+      snapshot,
+      rules: rules.byPackageId,
+    });
+
+    const changed =
+      sorted.order.length !== before.length ||
+      sorted.order.some((p, i) => p !== before[i]);
+    if (changed) {
+      await registry.setActiveMods(sorted.order);
+    }
+
+    return {
+      envelope: buildRegistryEnvelope(),
+      added,
+      missing: Array.from(missingDeps),
+      alreadyActive,
+      conflicts: sorted.conflicts,
+    };
+  },
+);
 
 ipcMain.handle('modmixer:registry:community-rules', async () => {
   const snap = await getCommunityRules();

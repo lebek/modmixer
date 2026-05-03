@@ -41,11 +41,23 @@ import type {
   RegistrySnapshot,
   AnalysisResult,
   AutosortResult,
+  AutosortConflict,
   ActiveSession,
   ActiveDiff,
 } from './agent/registry';
 export interface AssetsChangedEnvelope {
   folder: string;
+}
+
+export interface EnableWithDepsResult {
+  envelope: RegistryEnvelope;
+  /** Lowercased packageIds newly added to <activeMods> (target + deps). */
+  added: string[];
+  /** Declared deps that aren't installed on disk. */
+  missing: string[];
+  /** True if the target packageId was already in <activeMods>. */
+  alreadyActive: boolean;
+  conflicts: AutosortConflict[];
 }
 
 export interface ModChangedEnvelope {
@@ -399,6 +411,9 @@ const api = {
     conflicts: AutosortResult['conflicts'];
   }> {
     return ipcRenderer.invoke('modmixer:registry:apply-autosort');
+  },
+  enableWithDeps(packageId: string): Promise<EnableWithDepsResult> {
+    return ipcRenderer.invoke('modmixer:registry:enable-with-deps', packageId);
   },
   getCommunityRulesInfo(): Promise<CommunityRulesInfo> {
     return ipcRenderer.invoke('modmixer:registry:community-rules');

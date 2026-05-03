@@ -8,7 +8,6 @@ export function ModsView({
   onNewMod,
   onSync,
   onUnsync,
-  onTestIsolated,
 }: {
   mods: WorkspaceMod[];
   /** Lowercased packageIds currently in <activeMods>. */
@@ -17,7 +16,6 @@ export function ModsView({
   onNewMod: () => void;
   onSync: (folder: string) => void;
   onUnsync: (folder: string) => void;
-  onTestIsolated?: (folder: string, packageId: string) => void;
 }) {
   const activeSet = new Set(activeOrder);
   return (
@@ -57,11 +55,6 @@ export function ModsView({
                 onOpen={() => onOpen(m.folder)}
                 onSync={() => onSync(m.folder)}
                 onUnsync={() => onUnsync(m.folder)}
-                onTestIsolated={
-                  onTestIsolated && m.about.packageId
-                    ? () => onTestIsolated(m.folder, m.about.packageId)
-                    : undefined
-                }
               />
             ))}
           </div>
@@ -87,7 +80,6 @@ function ModCard({
   onOpen,
   onSync,
   onUnsync,
-  onTestIsolated,
 }: {
   mod: WorkspaceMod;
   /** True when the mod's packageId is in RimWorld's <activeMods>. */
@@ -95,7 +87,6 @@ function ModCard({
   onOpen: () => void;
   onSync: () => void;
   onUnsync: () => void;
-  onTestIsolated?: () => void;
 }) {
   return (
     <div className="group flex flex-col gap-2 rounded-lg border border-line bg-surface/40 p-4 transition-colors hover:border-ink/30">
@@ -164,15 +155,6 @@ function ModCard({
         >
           open chat
         </button>
-        {onTestIsolated && (
-          <button
-            onClick={onTestIsolated}
-            title="Snapshot your mod list, enable just this mod + its deps + Core/DLCs, then restore on apply or revert."
-            className="ml-auto rounded-md border border-amber-500/50 bg-paper px-3 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-amber-700 transition-colors hover:bg-amber-500/10"
-          >
-            test isolated
-          </button>
-        )}
       </div>
     </div>
   );
