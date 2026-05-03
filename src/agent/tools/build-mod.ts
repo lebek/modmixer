@@ -5,6 +5,11 @@ import fs from 'node:fs';
 import { spawn } from 'node:child_process';
 import { getWorkspacePaths } from '../workspace.js';
 import { lintMod, formatFindings, type LintFinding } from '../build-lint.js';
+import {
+  extractHints,
+  formatHints,
+  type BuildErrorHint,
+} from '../build-error-hints.js';
 import { DOTNET_NOT_FOUND_MESSAGE, resolveDotnet } from '../dotnet.js';
 
 const Params = Type.Object({
@@ -24,6 +29,12 @@ export interface BuildModDetails {
    * exit code.
    */
   lintFindings: LintFinding[];
+  /**
+   * For failed builds: per-error suggestions resolved against the C# index
+   * (e.g. "missing `using RimWorld.Planet;` for IsWorldPawn"). Empty when
+   * the index can't help — never blocks anything.
+   */
+  errorHints: BuildErrorHint[];
 }
 
 export const buildModTool: AgentTool<typeof Params, BuildModDetails> = {
@@ -61,6 +72,18 @@ export const buildModTool: AgentTool<typeof Params, BuildModDetails> = {
       // Lint failures should never block the build; log and continue.
       console.warn('[build_mod] lint failed:', err);
     }
+    // For failed builds, try to resolve any "missing using" errors against
+    // the C# symbol index so the agent doesn't have to grep for it. Hints
+    // are best-effort — we swallow any failure rather than masking the
+    // build error itself.
+    let errorHints: BuildErrorHint[] = [];
+    if (result.exitCode !== 0) {
+      try {
+        errorHints = extractHints(result.stdout, modDir);
+      } catch (err) {
+        console.warn('[build_mod] hint extraction failed:', err);
+      }
+    }
     const status =
       result.exitCode === 0
         ? 'BUILD SUCCEEDED'
@@ -68,10 +91,12 @@ export const buildModTool: AgentTool<typeof Params, BuildModDetails> = {
     const text =
       `${status}\n\n${result.stdout}${
         result.stderr ? '\n--- stderr ---\n' + result.stderr : ''
-      }` + formatFindings(lintFindings);
+      }` +
+      formatFindings(lintFindings) +
+      formatHints(errorHints);
     return {
       content: [{ type: 'text', text }],
-      details: { ...result, sourceDir, lintFindings },
+      details: { ...result, sourceDir, lintFindings, errorHints },
     };
   },
 };
