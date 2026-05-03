@@ -96,6 +96,19 @@ export function ModPublishPanel({
       if (folder !== mod.folder) return;
       void window.modmixer.readModAbout(folder).then((about) => {
         if (!about) return;
+        // Disk already matches what's in the form — this is our own save
+        // landing (or an external write that happened to converge). Sync
+        // the baseline and don't surface an "agent updated" banner.
+        const matchesLocal =
+          about.name === name &&
+          about.packageId === packageId &&
+          about.author === author &&
+          about.description === description;
+        if (matchesLocal) {
+          setSavedSnapshot(about);
+          setExternalUpdate(false);
+          return;
+        }
         const isDirty =
           name !== savedSnapshot.name ||
           packageId !== savedSnapshot.packageId ||
