@@ -30,13 +30,21 @@ interface RawRef {
 export async function scanAssets(modDir: string): Promise<AssetScan> {
   const folder = path.basename(modDir);
   const defsDir = path.join(modDir, 'Defs');
-  const xmlFiles = await listXmlFiles(defsDir);
+  const xmlFiles = await listFiles(defsDir, (n) => n.toLowerCase().endsWith('.xml'));
+  // C# files can live anywhere under the mod root (typically Source/, but
+  // some modders put them in the root or a custom subdir).
+  const csFiles = await listFiles(modDir, (n) => n.toLowerCase().endsWith('.cs'));
 
   const refs: RawRef[] = [];
   for (const file of xmlFiles) {
     const xml = await fsp.readFile(file, 'utf8');
     const relSource = path.relative(modDir, file).split(path.sep).join('/');
     refs.push(...extractRefs(xml, relSource));
+  }
+  for (const file of csFiles) {
+    const src = await fsp.readFile(file, 'utf8');
+    const relSource = path.relative(modDir, file).split(path.sep).join('/');
+    refs.push(...extractCsRefs(src, relSource));
   }
 
   const grouped = groupRefs(refs);
@@ -78,7 +86,10 @@ export async function scanAssets(modDir: string): Promise<AssetScan> {
   return { folder, requirements, counts, countsByKind };
 }
 
-async function listXmlFiles(dir: string): Promise<string[]> {
+async function listFiles(
+  dir: string,
+  match: (name: string) => boolean,
+): Promise<string[]> {
   if (!fs.existsSync(dir)) return [];
   const out: string[] = [];
   const stack = [dir];
@@ -95,7 +106,7 @@ async function listXmlFiles(dir: string): Promise<string[]> {
       const full = path.join(next, entry.name);
       if (entry.isDirectory()) {
         stack.push(full);
-      } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.xml')) {
+      } else if (entry.isFile() && match(entry.name)) {
         out.push(full);
       }
     }
@@ -108,6 +119,10 @@ const DEF_NAME_RE = /<defName>\s*([^<\s]+)\s*<\/defName>/;
 const TEX_PATH_RE = /<texPath>\s*([^<\s]+)\s*<\/texPath>/g;
 const UI_ICON_PATH_RE = /<uiIconPath>\s*([^<\s]+)\s*<\/uiIconPath>/g;
 const CLIP_PATH_RE = /<clipPath>\s*([^<\s]+)\s*<\/clipPath>/g;
+const WORN_GRAPHIC_PATH_RE = /<wornGraphicPath>\s*([^<\s]+)\s*<\/wornGraphicPath>/g;
+// Apparel uses Graphic_Multi by default — game looks for _north/_south/_east
+// PNGs at the base path. _west is auto-mirrored from _east when absent.
+const WORN_DIRECTIONS = ['_north', '_south', '_east'] as const;
 
 function extractRefs(xml: string, sourceFile: string): RawRef[] {
   const out: RawRef[] = [];
@@ -161,8 +176,85 @@ function extractRefs(xml: string, sourceFile: string): RawRef[] {
         note: nearbyComment(body, clipMatch.index, clipMatch.index + clipMatch[0].length),
       });
     }
+
+    // wornGraphicPath — apparel sprites worn on pawns. Base path expands to
+    // directional variants (_north/_south/_east). Emit one ref per direction
+    // so each PNG shows up in the Assets tab and gets a stub.
+    let wornMatch: RegExpExecArray | null;
+    WORN_GRAPHIC_PATH_RE.lastIndex = 0;
+    while ((wornMatch = WORN_GRAPHIC_PATH_RE.exec(body)) !== null) {
+      const note = nearbyComment(body, wornMatch.index, wornMatch.index + wornMatch[0].length);
+      for (const dir of WORN_DIRECTIONS) {
+        out.push({
+          stem: `${wornMatch[1]}${dir}`,
+          kind: 'texture',
+          field: `wornGraphicPath${dir}`,
+          defType,
+          defName,
+          sourceFile,
+          note,
+        });
+      }
+    }
   }
   return out;
+}
+
+const CONTENT_FINDER_RE =
+  /\bContentFinder\s*<\s*(Texture2D|AudioClip)\s*>\s*\.\s*Get\s*\(\s*"([^"\r\n]+)"/g;
+const CS_CLASS_RE = /\bclass\s+(\w+)/g;
+
+function extractCsRefs(source: string, sourceFile: string): RawRef[] {
+  const out: RawRef[] = [];
+  let m: RegExpExecArray | null;
+  CONTENT_FINDER_RE.lastIndex = 0;
+  while ((m = CONTENT_FINDER_RE.exec(source)) !== null) {
+    const typeArg = m[1];
+    const stem = m[2];
+    const kind: AssetKind = typeArg === 'AudioClip' ? 'audio' : 'texture';
+    out.push({
+      stem,
+      kind,
+      field: `ContentFinder<${typeArg}>.Get`,
+      defType: 'C#',
+      defName: enclosingClass(source, m.index) ?? path.basename(sourceFile, '.cs'),
+      sourceFile,
+      note: nearbyCsComment(source, m.index),
+    });
+  }
+  return out;
+}
+
+function enclosingClass(source: string, idx: number): string | undefined {
+  CS_CLASS_RE.lastIndex = 0;
+  let last: string | undefined;
+  let m: RegExpExecArray | null;
+  while ((m = CS_CLASS_RE.exec(source)) !== null) {
+    if (m.index >= idx) break;
+    last = m[1];
+  }
+  return last;
+}
+
+// Walk back from `idx`'s line looking for a `// ...` comment that describes
+// this call. Skips intermediate code lines (e.g. `static readonly Texture2D Icon =`
+// preceding the ContentFinder call on the next line) up to a small lookback
+// budget so we don't grab unrelated distant comments.
+const COMMENT_LOOKBACK_LINES = 4;
+function nearbyCsComment(source: string, idx: number): string | undefined {
+  let lineEnd = source.lastIndexOf('\n', idx - 1);
+  for (let i = 0; i < COMMENT_LOOKBACK_LINES; i++) {
+    if (lineEnd <= 0) return undefined;
+    const lineStart = source.lastIndexOf('\n', lineEnd - 1) + 1;
+    const line = source.slice(lineStart, lineEnd).trim();
+    if (line.startsWith('//')) {
+      const text = line.replace(/^\/+\s*/, '').trim();
+      return text || undefined;
+    }
+    if (!line) return undefined; // blank line — stop, comment isn't attached
+    lineEnd = lineStart - 1;
+  }
+  return undefined;
 }
 
 /**
@@ -340,13 +432,26 @@ function specFor(kind: AssetKind, refs: AssetReference[]): AssetSpec {
   }
   // texture
   const usedInGraphicData = refs.some((r) => r.field === 'graphicData.texPath');
+  const usedAsApparel = refs.some((r) => r.field.startsWith('wornGraphicPath'));
+  const usedFromCs = refs.some((r) => r.field.startsWith('ContentFinder<'));
+  let description: string;
+  if (usedAsApparel) {
+    description =
+      'Directional apparel sprite worn on pawns. _west.png is auto-mirrored from _east.png if absent.';
+  } else if (usedInGraphicData) {
+    description =
+      'PNG sprite rendered in-world via graphicData. Power-of-two dimensions preferred.';
+  } else if (usedFromCs) {
+    description =
+      'PNG loaded from C# code (gizmo, designator, MainTabWindow icon, etc.).';
+  } else {
+    description = 'PNG sprite. Power-of-two dimensions preferred.';
+  }
   return {
     kind: 'texture',
     format: 'png',
-    acceptsMask: usedInGraphicData,
-    description: usedInGraphicData
-      ? 'PNG sprite rendered in-world via graphicData. Power-of-two dimensions preferred.'
-      : 'PNG sprite. Power-of-two dimensions preferred.',
+    acceptsMask: usedInGraphicData || usedAsApparel,
+    description,
     sizeHint: '64×64 / 128×128 / 256×256 PNG with transparency',
   };
 }

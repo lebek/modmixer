@@ -13,7 +13,7 @@ interface ActiveWatch {
 const watches = new Map<string, ActiveWatch>();
 const listeners = new Set<Listener>();
 
-const WATCH_SUBDIRS = ['Defs', 'Textures', 'Sounds'];
+const WATCH_SUBDIRS = ['Defs', 'Textures', 'Sounds', 'Source'];
 const DEBOUNCE_MS = 250;
 
 export function onAssetsChanged(handler: Listener): () => void {
