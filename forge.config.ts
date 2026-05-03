@@ -13,6 +13,25 @@ import { FuseV1Options, FuseVersion } from '@electron/fuses';
 
 const ICON_BASE = path.resolve(__dirname, 'assets/icon');
 
+// Stage better-sqlite3 with its `bindings` and `file-uri-to-path` runtime
+// deps nested under its own node_modules/. npm hoists them to the top-level
+// node_modules in dev, but we ship better-sqlite3 as a stand-alone
+// extraResource — without nesting them, lib/database.js's `require('bindings')`
+// fails in packaged builds with "Cannot find module 'bindings'".
+async function stageBetterSqlite() {
+  const src = path.resolve(__dirname, 'node_modules/better-sqlite3');
+  const dest = path.resolve(__dirname, 'dist/better-sqlite3');
+  await fs.rm(dest, { recursive: true, force: true });
+  await fs.cp(src, dest, { recursive: true });
+  for (const dep of ['bindings', 'file-uri-to-path']) {
+    await fs.cp(
+      path.resolve(__dirname, `node_modules/${dep}`),
+      path.join(dest, 'node_modules', dep),
+      { recursive: true },
+    );
+  }
+}
+
 // Stage steamworks.js with only the host platform's native binding subdir.
 // node_modules/steamworks.js/dist/ ships {win64, osx, linux64}; signtool can
 // only sign Windows PE binaries, so leaving Linux/macOS .node files in the
@@ -98,8 +117,10 @@ const config: ForgeConfig = {
       'node_modules/@vscode/ripgrep',
       // better-sqlite3 native binding for the index DB. Like steamworks.js,
       // the .node file can't be bundled by Rollup, so we ship the whole
-      // module and resolve it from resourcesPath at runtime.
-      'node_modules/better-sqlite3',
+      // module and resolve it from resourcesPath at runtime. Staged in
+      // generateAssets to nest its hoisted runtime deps (`bindings`,
+      // `file-uri-to-path`) under node_modules/ so require() resolves.
+      'dist/better-sqlite3',
       // web-tree-sitter is marked external in vite.main.config.ts (it ships
       // a .wasm sibling that Rollup can't inline), so the bundled main.js
       // does require('web-tree-sitter') at runtime — needs the module on
@@ -115,6 +136,7 @@ const config: ForgeConfig = {
         { stdio: 'inherit' },
       );
       await stagePrunedSteamworks();
+      await stageBetterSqlite();
     },
   },
   rebuildConfig: {},
