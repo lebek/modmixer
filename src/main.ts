@@ -852,6 +852,11 @@ ipcMain.handle('modmixer:shell:open-external', async (_evt, url: string) => {
   await shell.openExternal(url);
 });
 
+ipcMain.handle('modmixer:shell:open-folder', async (_evt, folder: string) => {
+  const err = await shell.openPath(folder);
+  return err === '' ? null : err;
+});
+
 // Power-user escape hatch from Settings → reveal the user-tier or mod-tier
 // lore directory in Finder/Explorer. Returns null on success (matches
 // shell.openPath's empty-string convention) or an error string for the

@@ -385,6 +385,9 @@ const api = {
   openExternal(url: string): Promise<void> {
     return ipcRenderer.invoke('modmixer:shell:open-external', url);
   },
+  openFolder(folder: string): Promise<string | null> {
+    return ipcRenderer.invoke('modmixer:shell:open-folder', folder);
+  },
 
   // Lore (power-user reveal)
   revealLoreDir(args: {

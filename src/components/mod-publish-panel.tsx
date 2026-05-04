@@ -379,6 +379,12 @@ export function ModPublishPanel({
 
             <div className="flex items-center justify-end gap-2 pt-1">
               <button
+                onClick={() => void window.modmixer.openFolder(mod.workspacePath)}
+                className="text-[10px] uppercase tracking-[0.18em] text-muted transition-colors hover:text-ink"
+              >
+                Open mod folder
+              </button>
+              <button
                 onClick={() => void publish()}
                 disabled={publishing || !name.trim() || !description.trim()}
                 className="rounded-md bg-ink px-3 py-1 text-[10px] uppercase tracking-[0.18em] text-paper transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
