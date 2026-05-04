@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { promises as fs } from 'node:fs';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import type { ForgeConfig } from '@electron-forge/shared-types';
 import { MakerSquirrel } from '@electron-forge/maker-squirrel';
@@ -10,8 +11,30 @@ import { VitePlugin } from '@electron-forge/plugin-vite';
 import { FusesPlugin } from '@electron-forge/plugin-fuses';
 import { PublisherGithub } from '@electron-forge/publisher-github';
 import { FuseV1Options, FuseVersion } from '@electron/fuses';
+import { rebuild } from '@electron/rebuild';
+
+const requireCJS = createRequire(__filename);
 
 const ICON_BASE = path.resolve(__dirname, 'assets/icon');
+
+// Resolve the target arch for staging. Forge's CLI passes --arch=<arch> to
+// the make/package command; we parse it out of process.argv here so that
+// cross-arch local makes (e.g. `npm run make -- --arch=x64` from an ARM64
+// host) produce dist/<mod>/ with the right-arch binary. Falls back to
+// process.arch — in CI that's correct because we now use native runners
+// per matrix entry (host arch always equals target arch).
+function getTargetArch(): NodeJS.Architecture {
+  for (let i = 0; i < process.argv.length; i++) {
+    const arg = process.argv[i];
+    if (arg === '--arch' && process.argv[i + 1]) {
+      return process.argv[i + 1] as NodeJS.Architecture;
+    }
+    if (arg.startsWith('--arch=')) {
+      return arg.slice('--arch='.length) as NodeJS.Architecture;
+    }
+  }
+  return process.arch;
+}
 
 // Stage better-sqlite3 with its `bindings` and `file-uri-to-path` runtime
 // deps nested under its own node_modules/. npm hoists them to the top-level
@@ -19,49 +42,52 @@ const ICON_BASE = path.resolve(__dirname, 'assets/icon');
 // extraResource — without nesting them, lib/database.js's `require('bindings')`
 // fails in packaged builds with "Cannot find module 'bindings'".
 //
-// Reads from `<buildPath>/node_modules/`, electron-packager's per-target
-// staging copy. We run this in `packageAfterPrune` (instead of
-// `generateAssets`, where it lived in v0.6.0–0.6.2) so the rebuild step
-// has already run against the staging copy — guaranteeing the shipped
-// .node matches the target arch + Electron ABI. The original placement
-// raced @electron/rebuild and shipped a stale prebuild-install Node-ABI
-// binary, which broke v0.6.1 and the cross-arch local-make path.
-async function stageBetterSqlite(buildPath: string) {
-  const src = path.join(buildPath, 'node_modules/better-sqlite3');
+// Reads from `<project>/node_modules/`. We can't use <buildPath> because
+// electron-packager's copy filter (galactus) prunes any native module out
+// of <buildPath>/node_modules/ before our hooks fire — broke v0.6.3 and
+// v0.6.4 when packageAfterPrune was tried. Instead, we explicitly rebuild
+// the project copy here against Electron's ABI for the target arch, then
+// copy. Forge's own @electron/rebuild step also fires later (against
+// buildPath) but its output isn't reachable from our extraResource path.
+async function stageBetterSqlite() {
+  const electronVersion = (
+    requireCJS('electron/package.json') as { version: string }
+  ).version;
+  const arch = getTargetArch();
+  await rebuild({
+    buildPath: __dirname,
+    electronVersion,
+    arch,
+    onlyModules: ['better-sqlite3'],
+    force: true,
+  });
+
+  const src = path.resolve(__dirname, 'node_modules/better-sqlite3');
   const dest = path.resolve(__dirname, 'dist/better-sqlite3');
   await fs.rm(dest, { recursive: true, force: true });
   await fs.cp(src, dest, { recursive: true });
   for (const dep of ['bindings', 'file-uri-to-path']) {
     await fs.cp(
-      path.join(buildPath, 'node_modules', dep),
+      path.resolve(__dirname, `node_modules/${dep}`),
       path.join(dest, 'node_modules', dep),
       { recursive: true },
     );
   }
 }
 
-// Stage steamworks.js with only the build-target platform's native binding
-// subdir. node_modules/steamworks.js/dist/ ships {win64, osx, linux64};
-// signtool can only sign Windows PE binaries, so leaving Linux/macOS .node
-// files in the Windows installer makes signing fail with "This file format
-// cannot be signed because it is not recognized." The runtime require() in
+// Stage steamworks.js with only the host platform's native binding subdir.
+// node_modules/steamworks.js/dist/ ships {win64, osx, linux64}; signtool
+// can only sign Windows PE binaries, so leaving Linux/macOS .node files in
+// the Windows installer makes signing fail with "This file format cannot
+// be signed because it is not recognized." The runtime require() in
 // node_modules/steamworks.js/index.js only loads the matching subdir for
 // the current process.platform anyway, so the dropped subdirs are dead
 // weight on every platform.
-//
-// Reads from `<project>/node_modules/`, NOT from <buildPath>/. Two reasons:
-// (1) steamworks.js ships prebuilt .node binaries — it never goes through
-// @electron/rebuild, so the before-rebuild copy is fine; (2) reading from
-// buildPath would fail anyway: electron-packager's copy filter (galactus)
-// silently prunes steamworks.js out of <buildPath>/node_modules/ before our
-// hook fires, breaking v0.6.3 on every platform when this was attempted.
-// Runs in `generateAssets` (the early hook) so dist/steamworks.js exists
-// by the time electron-packager processes extraResource.
-async function stagePrunedSteamworks(platform: string) {
+async function stagePrunedSteamworks() {
   const src = path.resolve(__dirname, 'node_modules/steamworks.js');
   const dest = path.resolve(__dirname, 'dist/steamworks.js');
-  const keep = platform === 'win32' ? 'win64'
-    : platform === 'darwin' ? 'osx'
+  const keep = process.platform === 'win32' ? 'win64'
+    : process.platform === 'darwin' ? 'osx'
     : 'linux64';
   await fs.rm(dest, { recursive: true, force: true });
   await fs.cp(src, dest, { recursive: true });
@@ -111,12 +137,12 @@ const config: ForgeConfig = {
     // The Forge Vite plugin bundles main/preload via Rollup and does not ship
     // node_modules. steamworks.js is a native module (Steam SDK redistributable
     // + .node binding sibling files) that can't be bundled by Rollup, so we
-    // copy a per-target-platform-pruned staging dir into Contents/Resources/
+    // copy a per-host-platform-pruned staging dir into Contents/Resources/
     // and require it from process.resourcesPath at runtime. The staging dir
-    // is built in packageAfterPrune (after Forge's @electron/rebuild) — we
-    // drop foreign-platform .node files because (a) signtool can't sign
-    // Linux ELF / macOS Mach-O so the Windows installer fails to package
-    // them, and (b) shipping unused binaries just bloats every installer.
+    // is built in generateAssets — we drop foreign-platform .node files
+    // because (a) signtool can't sign Linux ELF / macOS Mach-O so the
+    // Windows installer fails to package them, and (b) shipping unused
+    // binaries just bloats every installer.
     extraResource: [
       'dist/steamworks.js',
       'dist/LICENSES.txt',
@@ -135,9 +161,9 @@ const config: ForgeConfig = {
       // better-sqlite3 native binding for the index DB. Like steamworks.js,
       // the .node file can't be bundled by Rollup, so we ship the whole
       // module and resolve it from resourcesPath at runtime. Staged in
-      // packageAfterPrune (after Forge's @electron/rebuild) to nest its
-      // hoisted runtime deps (`bindings`, `file-uri-to-path`) under
-      // node_modules/ so require() resolves.
+      // generateAssets, where stageBetterSqlite explicitly rebuilds against
+      // Electron's ABI for the target arch and nests `bindings` /
+      // `file-uri-to-path` under node_modules/ so require() resolves.
       'dist/better-sqlite3',
       // web-tree-sitter is marked external in vite.main.config.ts (it ships
       // a .wasm sibling that Rollup can't inline), so the bundled main.js
@@ -157,28 +183,13 @@ const config: ForgeConfig = {
   },
   hooks: {
     generateAssets: async () => {
-      // generate-licenses.mjs writes dist/LICENSES.txt, which is shipped
-      // via extraResource. Doesn't depend on the rebuild output, so it stays
-      // in generateAssets where it runs once per `make` regardless of arch.
       execFileSync(
         process.execPath,
         [path.resolve(__dirname, 'scripts/generate-licenses.mjs')],
         { stdio: 'inherit' },
       );
-      // steamworks.js ships prebuilts (no rebuild needed) and gets pruned
-      // from <buildPath> by galactus, so we stage from project root before
-      // electron-packager runs. Pass the host platform — local cross-arch
-      // makes only ever run for the host platform, and Windows is the only
-      // ARM/x64 split (steamworks.js always uses the win64 subdir there).
-      await stagePrunedSteamworks(process.platform);
-    },
-    // Runs after Forge's @electron/rebuild has rebuilt native modules in
-    // <buildPath>/node_modules/ for the target arch + Electron ABI. Only
-    // better-sqlite3 needs this — its .node binary is rebuilt against
-    // Electron's ABI here, and we copy that fresh build into dist/ before
-    // electron-packager processes extraResource.
-    packageAfterPrune: async (_config, buildPath) => {
-      await stageBetterSqlite(buildPath);
+      await stagePrunedSteamworks();
+      await stageBetterSqlite();
     },
   },
   rebuildConfig: {},
