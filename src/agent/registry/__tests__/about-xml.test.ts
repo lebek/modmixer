@@ -109,6 +109,29 @@ describe('parseAboutXml', () => {
     assert.equal(out.name, 'Foo & Bar');
   });
 
+  it('extracts the top-level packageId when modDependencies appears first', () => {
+    // Zombieland 1.6 ships About.xml with <modDependencies> BEFORE its own
+    // <packageId>. The dep block carries <packageId>brrainz.harmony</packageId>,
+    // and a naive non-greedy regex would grab that instead of the real id.
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
+<ModMetaData>
+  <name>Zombieland 1.6</name>
+  <author>Andreas Pardeike, Louize</author>
+  <modDependencies>
+    <li>
+      <packageId>brrainz.harmony</packageId>
+      <displayName>Harmony</displayName>
+    </li>
+  </modDependencies>
+  <packageId>brrainz.zombieland</packageId>
+</ModMetaData>`;
+    const out = parseAboutXml(xml);
+    assert.equal(out.packageId, 'brrainz.zombieland');
+    assert.equal(out.packageIdLc, 'brrainz.zombieland');
+    assert.equal(out.modDependencies.length, 1);
+    assert.equal(out.modDependencies[0].packageIdLc, 'brrainz.harmony');
+  });
+
   it('normalizes "1.5.0" to "1.5"', () => {
     const xml = `<ModMetaData>
   <supportedVersions>

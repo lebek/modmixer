@@ -54,12 +54,16 @@ export function parseAboutXml(rawXml: string): AboutXml {
   if (!rawXml || typeof rawXml !== 'string') return { ...EMPTY };
   // Strip BOM. RimWorld writes UTF-8 with BOM via Unity's XmlSerializer.
   const xml = rawXml.replace(/^\uFEFF/, '');
+  // Mask out nested dependency blocks so a non-greedy <packageId> regex
+  // doesn't grab a dep's id (e.g. Zombieland declares <modDependencies>
+  // before its own <packageId>).
+  const topLevel = stripNestedBlocks(xml);
 
-  const name = extractScalar(xml, 'name');
-  const packageId = extractScalar(xml, 'packageId');
-  const author = extractScalar(xml, 'author') || extractList(xml, 'authors').join(', ');
-  const description = extractScalar(xml, 'description');
-  const supportedVersions = normalizeVersions(extractList(xml, 'supportedVersions'));
+  const name = extractScalar(topLevel, 'name');
+  const packageId = extractScalar(topLevel, 'packageId');
+  const author = extractScalar(topLevel, 'author') || extractList(topLevel, 'authors').join(', ');
+  const description = extractScalar(topLevel, 'description');
+  const supportedVersions = normalizeVersions(extractList(topLevel, 'supportedVersions'));
 
   return {
     name,
@@ -73,6 +77,13 @@ export function parseAboutXml(rawXml: string): AboutXml {
     loadBefore: extractListLc(xml, 'loadBefore'),
     incompatibleWith: extractListLc(xml, 'incompatibleWith'),
   };
+}
+
+function stripNestedBlocks(xml: string): string {
+  return xml.replace(
+    /<(modDependencies|modDependenciesByVersion)\b[^>]*>[\s\S]*?<\/\1>/gi,
+    '',
+  );
 }
 
 function extractScalar(xml: string, tag: string): string {
