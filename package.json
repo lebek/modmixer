@@ -61,6 +61,7 @@
     "@mariozechner/pi-agent-core": "^0.70.5",
     "@mariozechner/pi-ai": "^0.70.5",
     "@mariozechner/pi-coding-agent": "^0.70.6",
+    "@resvg/resvg-wasm": "^2.6.2",
     "@sentry/electron": "^7.12.0",
     "@tanstack/react-virtual": "^3.13.24",
     "@types/dagre": "^0.7.54",

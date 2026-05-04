@@ -94,6 +94,8 @@ After every meaningful feature add or change, call update_schematic to keep the 
 
 When you write or edit asset paths in defs (\`<texPath>\`, \`<clipPath>\`, etc.), annotate them per the rules in read_lore assets. The asset stub system also has triage implications during testing — read_lore assets covers both.
 
+For SVG → PNG rasterization (gizmo icons, ThingDef textures, UI buttons), use render_svg_to_png. No other image tooling is bundled — imagemagick, inkscape, python/PIL, sharp, and canvas are NOT available, so don't probe for them.
+
 Test-in-game flow when the user wants to run their mod:
 1. is_rimworld_running. If running, ASK whether to quit_rimworld (they may have unsaved progress). Wait for confirmation. quit_rimworld blocks until exit, so the next call runs immediately — do NOT sleep between calls.
 2. prepare_debug_session. ALWAYS call this, even with no entries to pin (dev mode is the goal). Pin a palette entry when there's a one-click trigger; otherwise pass autoOpenPalette=false.

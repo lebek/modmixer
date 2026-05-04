@@ -135,6 +135,11 @@ const config: ForgeConfig = {
       // does require('web-tree-sitter') at runtime — needs the module on
       // disk. csharp-indexer.ts loads it via the dual-resolve pattern.
       'node_modules/web-tree-sitter',
+      // @resvg/resvg-wasm is the SVG-to-PNG renderer behind render_svg_to_png.
+      // Same wasm-sibling story as web-tree-sitter: marked external in vite,
+      // shipped via extraResource, and resolved at runtime via the
+      // dual-resolve pattern in render-svg-to-png.ts.
+      'node_modules/@resvg/resvg-wasm',
     ],
   },
   hooks: {

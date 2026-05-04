@@ -19,6 +19,10 @@ export default defineConfig({
         // Pure-WASM but ships the .wasm file as a sibling asset; let Node
         // resolve it from node_modules instead of trying to inline.
         'web-tree-sitter',
+        // Pure-WASM SVG → PNG renderer used by the render_svg_to_png tool.
+        // Same .wasm-sibling story as web-tree-sitter — keep external so the
+        // bundled main.js does require() against the on-disk package.
+        '@resvg/resvg-wasm',
         // Bundles platform-specific ripgrep binaries.
         '@vscode/ripgrep',
         /^node:/,
