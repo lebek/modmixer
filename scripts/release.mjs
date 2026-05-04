@@ -192,6 +192,27 @@ async function main() {
   run('git', ['push', 'origin', 'main']);
   run('git', ['push', 'origin', tag]);
 
+  // Pre-create the GitHub Release as a draft, with the curated notes already
+  // attached. Without this, every matrix entry's PublisherGithub races to
+  // create the release: first one wins, the rest fail with 422 already_exists
+  // (PublisherGithub does list-then-create with no fallback). Doing it here
+  // means each matrix entry's `listReleases` finds the existing draft and
+  // skips the create entirely — they just upload assets to it. Final
+  // edit-step at the end of this script flips draft → published.
+  section(`pre-creating draft release ${tag}`);
+  run('gh', [
+    'release',
+    'create',
+    tag,
+    '--repo',
+    REPO,
+    '--title',
+    tag,
+    '--draft',
+    '--notes-file',
+    notesFile,
+  ]);
+
   // ---- find + watch the workflow run ----
   section('finding workflow run');
   let runId = null;
@@ -261,6 +282,7 @@ async function main() {
     process.exit(1);
   }
 
+  // Update notes (in case the draft notes drifted) and flip draft → published.
   run('gh', [
     'release',
     'edit',
@@ -269,6 +291,7 @@ async function main() {
     REPO,
     '--notes-file',
     notesFile,
+    '--draft=false',
   ]);
 
   const url = capture('gh', [

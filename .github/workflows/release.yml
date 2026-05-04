@@ -142,7 +142,13 @@ jobs:
             CertificateProfileName = 'modmixer-release'
           } | ConvertTo-Json
           Set-Content -Path "$env:RUNNER_TEMP\trusted-signing-metadata.json" -Value $metadata -Encoding utf8
-          "WINDOWS_SIGN_DLIB=$env:RUNNER_TEMP\tsclient\Microsoft.Trusted.Signing.Client\bin\${{ matrix.arch }}\Azure.CodeSigning.Dlib.dll" >> $env:GITHUB_ENV
+          # signtool itself is x64 on every Windows runner image, even on
+          # windows-11-arm (ARM64 emulates x64 well enough). The dlib must
+          # match signtool's bitness, not the build target arch — pinning
+          # `bin\arm64\` here breaks Trusted Signing on the ARM64 runner
+          # with "No certificates were found that met all the given criteria"
+          # because signtool can't load an ARM64 dlib into an x64 process.
+          "WINDOWS_SIGN_DLIB=$env:RUNNER_TEMP\tsclient\Microsoft.Trusted.Signing.Client\bin\x64\Azure.CodeSigning.Dlib.dll" >> $env:GITHUB_ENV
           "WINDOWS_SIGN_METADATA=$env:RUNNER_TEMP\trusted-signing-metadata.json" >> $env:GITHUB_ENV
 
       # Tag-push path: build, sign, and publish to GitHub Releases.
