@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { GridMark } from '../grid-mark';
 
 /**
@@ -41,6 +41,10 @@ export function OnboardingStep({
   onBack,
   skip,
 }: OnboardingStepProps) {
+  const [appVersion, setAppVersion] = useState<string>('');
+  useEffect(() => {
+    void window.modmixer.getAppVersion().then(setAppVersion);
+  }, []);
   return (
     <div className="fixed inset-0 z-[100] flex flex-col bg-paper">
       <header className="flex items-center justify-between border-b border-line px-6 py-4">
@@ -49,6 +53,11 @@ export function OnboardingStep({
           <span className="font-display text-lg font-medium tracking-tight text-ink">
             modmixer
           </span>
+          {appVersion && (
+            <span className="ml-1 font-mono text-[10px] uppercase tracking-[0.18em] text-subtle">
+              v{appVersion}
+            </span>
+          )}
           <span className="ml-3 font-mono text-[10px] uppercase tracking-[0.18em] text-muted">
             {eyebrow}
           </span>
