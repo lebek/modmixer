@@ -13,6 +13,7 @@ import type {
   AssetSpec,
 } from './types.js';
 import { materializeStubs, readStubbedPaths } from './stubs.js';
+import { detectGameVersionMajorMinorSync } from '../paths.js';
 
 const SKIP_DIRS = new Set(['.git', '.DS_Store', '.vs', 'bin', 'obj', 'node_modules']);
 
@@ -27,10 +28,18 @@ interface RawRef {
   note?: string;
 }
 
-export async function scanAssets(modDir: string): Promise<AssetScan> {
+export async function scanAssets(
+  modDir: string,
+  gameVersion: string | null = detectGameVersionMajorMinorSync(),
+): Promise<AssetScan> {
   const folder = path.basename(modDir);
-  const defsDir = path.join(modDir, 'Defs');
-  const xmlFiles = await listFiles(defsDir, (n) => n.toLowerCase().endsWith('.xml'));
+  const contentRoots = resolveContentRoots(modDir, gameVersion);
+  const xmlFiles: string[] = [];
+  for (const root of contentRoots) {
+    const defsDir = path.join(root, 'Defs');
+    const found = await listFiles(defsDir, (n) => n.toLowerCase().endsWith('.xml'));
+    xmlFiles.push(...found);
+  }
   // C# files can live anywhere under the mod root (typically Source/, but
   // some modders put them in the root or a custom subdir).
   const csFiles = await listFiles(modDir, (n) => n.toLowerCase().endsWith('.cs'));
@@ -39,7 +48,7 @@ export async function scanAssets(modDir: string): Promise<AssetScan> {
   for (const file of xmlFiles) {
     const xml = await fsp.readFile(file, 'utf8');
     const relSource = path.relative(modDir, file).split(path.sep).join('/');
-    refs.push(...extractRefs(xml, relSource));
+    refs.push(...extractRefs(xml, relSource, contentRoots));
   }
   for (const file of csFiles) {
     const src = await fsp.readFile(file, 'utf8');
@@ -50,7 +59,7 @@ export async function scanAssets(modDir: string): Promise<AssetScan> {
   const grouped = groupRefs(refs);
   const requirements: AssetRequirement[] = [];
   for (const group of grouped.values()) {
-    requirements.push(await materializeRequirement(group, modDir));
+    requirements.push(await materializeRequirement(group, modDir, contentRoots));
   }
   requirements.sort((a, b) => a.path.localeCompare(b.path));
 
@@ -84,6 +93,81 @@ export async function scanAssets(modDir: string): Promise<AssetScan> {
   };
 
   return { folder, requirements, counts, countsByKind };
+}
+
+/**
+ * Resolve which directories under modDir act as content roots for the active
+ * game version. Mirrors RimWorld's mod loading: an explicit LoadFolders.xml
+ * wins; otherwise we fall back to the conventional versioned-subfolder /
+ * Common / mod-root layout.
+ *
+ * Returned paths are absolute and ordered as they appear in LoadFolders.xml
+ * (or by convention priority when LoadFolders is absent). The first entry is
+ * where new placeholder files get written.
+ */
+function resolveContentRoots(modDir: string, gameVersion: string | null): string[] {
+  const fromLoadFolders = readLoadFolders(modDir, gameVersion);
+  if (fromLoadFolders) return fromLoadFolders;
+
+  const out: string[] = [];
+  if (gameVersion) {
+    const versioned = path.join(modDir, gameVersion);
+    if (fs.existsSync(versioned)) out.push(versioned);
+  }
+  const common = path.join(modDir, 'Common');
+  if (fs.existsSync(common)) out.push(common);
+  out.push(modDir);
+  return out;
+}
+
+function readLoadFolders(modDir: string, gameVersion: string | null): string[] | null {
+  const lf = path.join(modDir, 'LoadFolders.xml');
+  let xml: string;
+  try {
+    xml = fs.readFileSync(lf, 'utf8');
+  } catch {
+    return null;
+  }
+  // Match each <v1.6>...</v1.6> style version block.
+  const blockRe = /<v(\d+(?:\.\d+)?)\b[^>]*>([\s\S]*?)<\/v\1>/gi;
+  const blocks = new Map<string, string>();
+  let m: RegExpExecArray | null;
+  while ((m = blockRe.exec(xml)) !== null) {
+    blocks.set(m[1], m[2]);
+  }
+  if (blocks.size === 0) return null;
+
+  let chosen = gameVersion && blocks.has(gameVersion) ? blocks.get(gameVersion) : undefined;
+  if (!chosen) {
+    const sorted = [...blocks.keys()].sort(compareVersionKey);
+    chosen = blocks.get(sorted[sorted.length - 1]);
+  }
+  if (!chosen) return null;
+
+  const liRe = /<li\b[^>]*>([^<]*)<\/li>/g;
+  const out: string[] = [];
+  const seen = new Set<string>();
+  let li: RegExpExecArray | null;
+  while ((li = liRe.exec(chosen)) !== null) {
+    const entry = li[1].trim().replace(/\\/g, '/').replace(/^\/+/, '');
+    const abs = entry === '' ? modDir : path.join(modDir, ...entry.split('/'));
+    if (!fs.existsSync(abs)) continue;
+    if (seen.has(abs)) continue;
+    seen.add(abs);
+    out.push(abs);
+  }
+  return out.length ? out : null;
+}
+
+function compareVersionKey(a: string, b: string): number {
+  const pa = a.split('.').map((n) => parseInt(n, 10));
+  const pb = b.split('.').map((n) => parseInt(n, 10));
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] ?? 0;
+    const y = pb[i] ?? 0;
+    if (x !== y) return x - y;
+  }
+  return 0;
 }
 
 async function listFiles(
@@ -120,11 +204,15 @@ const TEX_PATH_RE = /<texPath>\s*([^<\s]+)\s*<\/texPath>/g;
 const UI_ICON_PATH_RE = /<uiIconPath>\s*([^<\s]+)\s*<\/uiIconPath>/g;
 const CLIP_PATH_RE = /<clipPath>\s*([^<\s]+)\s*<\/clipPath>/g;
 const WORN_GRAPHIC_PATH_RE = /<wornGraphicPath>\s*([^<\s]+)\s*<\/wornGraphicPath>/g;
-// Apparel uses Graphic_Multi by default — game looks for _north/_south/_east
-// PNGs at the base path. _west is auto-mirrored from _east when absent.
-const WORN_DIRECTIONS = ['_north', '_south', '_east'] as const;
+// RimWorld renders directional sprites as _north/_south/_east. _west is
+// auto-mirrored from _east when absent.
+const DIRECTIONS = ['_north', '_south', '_east'] as const;
 
-function extractRefs(xml: string, sourceFile: string): RawRef[] {
+function extractRefs(
+  xml: string,
+  sourceFile: string,
+  contentRoots: string[],
+): RawRef[] {
   const out: RawRef[] = [];
   let m: RegExpExecArray | null;
   DEF_BLOCK_RE.lastIndex = 0;
@@ -177,18 +265,23 @@ function extractRefs(xml: string, sourceFile: string): RawRef[] {
       });
     }
 
-    // wornGraphicPath — apparel sprites worn on pawns. Base path expands to
-    // directional variants (_north/_south/_east). Emit one ref per direction
-    // so each PNG shows up in the Assets tab and gets a stub.
+    // wornGraphicPath — apparel sprites worn on pawns. The actual file pattern
+    // depends on the apparel layer: body-conforming layers (OnSkin/Middle/etc.)
+    // need <base>_<BodyType>_<dir>.png variants; non-body layers (Overhead/etc.)
+    // just need plain <base>_<dir>.png. We can't determine the layer reliably
+    // from the def alone, so we look at the on-disk reality: emit refs for
+    // existing matching files. If the directory is empty (fresh scaffold), fall
+    // back to plain directional so the agent has something to fill in.
     let wornMatch: RegExpExecArray | null;
     WORN_GRAPHIC_PATH_RE.lastIndex = 0;
     while ((wornMatch = WORN_GRAPHIC_PATH_RE.exec(body)) !== null) {
       const note = nearbyComment(body, wornMatch.index, wornMatch.index + wornMatch[0].length);
-      for (const dir of WORN_DIRECTIONS) {
+      const basePath = wornMatch[1];
+      for (const stem of expandWornGraphicPath(basePath, contentRoots)) {
         out.push({
-          stem: `${wornMatch[1]}${dir}`,
+          stem,
           kind: 'texture',
-          field: `wornGraphicPath${dir}`,
+          field: `wornGraphicPath_${stem.slice(basePath.length + 1)}`,
           defType,
           defName,
           sourceFile,
@@ -198,6 +291,48 @@ function extractRefs(xml: string, sourceFile: string): RawRef[] {
     }
   }
   return out;
+}
+
+/**
+ * Decide which apparel sprite files this wornGraphicPath should resolve to.
+ * Looks at the on-disk parent dir; if files matching `<base>_..._<dir>.png` (or
+ * plain `<base>_<dir>.png`) exist, emit refs for those. Otherwise fall back to
+ * the conservative directional triple — that covers fresh scaffolds with no
+ * artwork yet, and avoids inventing per-body-type stems we can't verify.
+ */
+function expandWornGraphicPath(basePath: string, contentRoots: string[]): string[] {
+  const segments = basePath.split('/').filter(Boolean);
+  const baseStem = segments[segments.length - 1] ?? basePath;
+  const parentSegs = segments.slice(0, -1);
+  const found = new Set<string>();
+  for (const root of contentRoots) {
+    const dir = path.join(root, 'Textures', ...parentSegs);
+    let entries: string[];
+    try {
+      entries = fs.readdirSync(dir);
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (!entry.toLowerCase().endsWith('.png')) continue;
+      const stem = entry.slice(0, -4);
+      if (!stem.startsWith(`${baseStem}_`)) continue;
+      const suffix = stem.slice(baseStem.length + 1);
+      if (!isApparelSuffix(suffix)) continue;
+      const relStem = [...parentSegs, stem].join('/');
+      found.add(relStem);
+    }
+  }
+  if (found.size > 0) return [...found];
+  return DIRECTIONS.map((d) => `${basePath}${d}`);
+}
+
+function isApparelSuffix(suffix: string): boolean {
+  // Plain directional: north / south / east
+  if (/^(north|south|east)$/i.test(suffix)) return true;
+  // Body-typed directional: <BodyType>_<dir>, e.g. Male_north, Hulk_east.
+  if (/^[A-Za-z][A-Za-z0-9]*_(north|south|east)$/i.test(suffix)) return true;
+  return false;
 }
 
 const CONTENT_FINDER_RE =
@@ -303,16 +438,30 @@ function extractTexPathRefs(
     graphicSpans.push([g.index, g.index + g[0].length]);
     const inner = g[1];
     const innerOffset = g.index + '<graphicData>'.length;
+    // graphicClass controls how RimWorld interprets texPath. Default is
+    // Graphic_Single (one PNG at the path). Graphic_Multi means the path is a
+    // base and the actual files are _north/_south/_east. Anything else
+    // (Random, Mote, Linked, …) we don't try to enumerate.
+    const cls = inner.match(/<graphicClass>\s*([^<\s]+)\s*<\/graphicClass>/)?.[1];
+    const isMulti = cls === 'Graphic_Multi';
     let t: RegExpExecArray | null;
     const texRe = /<texPath>\s*([^<\s]+)\s*<\/texPath>/g;
     while ((t = texRe.exec(inner)) !== null) {
       const absStart = innerOffset + t.index;
       const absEnd = absStart + t[0].length;
-      out.push({
-        stem: t[1],
-        field: 'graphicData.texPath',
-        note: nearbyComment(body, absStart, absEnd),
-      });
+      const note = nearbyComment(body, absStart, absEnd);
+      const base = t[1];
+      if (isMulti) {
+        for (const dir of DIRECTIONS) {
+          out.push({
+            stem: `${base}${dir}`,
+            field: `graphicData.texPath${dir}`,
+            note,
+          });
+        }
+      } else {
+        out.push({ stem: base, field: 'graphicData.texPath', note });
+      }
     }
   }
   // Any texPath outside graphicData blocks.
@@ -363,12 +512,13 @@ function normalizeStem(stem: string): string {
 async function materializeRequirement(
   group: RefGroup,
   modDir: string,
+  contentRoots: string[],
 ): Promise<AssetRequirement> {
   const spec = specFor(group.kind, group.refs);
   const ext = group.kind === 'audio' ? '.ogg' : '.png';
-  const root = group.kind === 'audio' ? 'Sounds' : 'Textures';
-  const relPath = `${root}/${group.stem}${ext}`;
-  const absPath = path.join(modDir, ...relPath.split('/'));
+  const subRoot = group.kind === 'audio' ? 'Sounds' : 'Textures';
+  const within = `${subRoot}/${group.stem}${ext}`;
+  const { relPath, absPath } = resolveAssetLocation(modDir, contentRoots, within);
   const id = createHash('sha1').update(`${group.kind}::${relPath}`).digest('hex').slice(0, 16);
 
   const presence = await probeFile(absPath, relPath, group.kind);
@@ -400,17 +550,41 @@ async function materializeRequirement(
   };
 
   if (group.kind === 'texture' && (spec as { acceptsMask: boolean }).acceptsMask) {
-    const maskRel = `${root}/${group.stem}_m.png`;
-    const maskAbs = path.join(modDir, ...maskRel.split('/'));
-    const maskPresence = await probeFile(maskAbs, maskRel, 'texture');
+    const maskWithin = `${subRoot}/${group.stem}_m.png`;
+    const maskLoc = resolveAssetLocation(modDir, contentRoots, maskWithin);
+    const maskPresence = await probeFile(maskLoc.absPath, maskLoc.relPath, 'texture');
     requirement.mask = {
-      path: maskRel,
+      path: maskLoc.relPath,
       status: maskPresence ? 'present' : 'missing',
       current: maskPresence ?? undefined,
     };
   }
 
   return requirement;
+}
+
+/**
+ * Find the actual location of `<subRoot>/<stem>.<ext>` across content roots,
+ * preferring an existing file. When none exists, default to the first
+ * content root (where new placeholders get written).
+ */
+function resolveAssetLocation(
+  modDir: string,
+  contentRoots: string[],
+  within: string,
+): { relPath: string; absPath: string } {
+  for (const root of contentRoots) {
+    const abs = path.join(root, ...within.split('/'));
+    if (fs.existsSync(abs)) {
+      return { absPath: abs, relPath: toModRelative(modDir, abs) };
+    }
+  }
+  const abs = path.join(contentRoots[0], ...within.split('/'));
+  return { absPath: abs, relPath: toModRelative(modDir, abs) };
+}
+
+function toModRelative(modDir: string, abs: string): string {
+  return path.relative(modDir, abs).split(path.sep).join('/');
 }
 
 function specFor(kind: AssetKind, refs: AssetReference[]): AssetSpec {
@@ -431,7 +605,7 @@ function specFor(kind: AssetKind, refs: AssetReference[]): AssetSpec {
     };
   }
   // texture
-  const usedInGraphicData = refs.some((r) => r.field === 'graphicData.texPath');
+  const usedInGraphicData = refs.some((r) => r.field.startsWith('graphicData.texPath'));
   const usedAsApparel = refs.some((r) => r.field.startsWith('wornGraphicPath'));
   const usedFromCs = refs.some((r) => r.field.startsWith('ContentFinder<'));
   let description: string;
