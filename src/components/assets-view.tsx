@@ -7,6 +7,7 @@ import type {
   TextureSpec,
 } from '../agent/assets/types';
 import { cn } from '@/lib/cn';
+import { appAlert, appConfirm } from './app-dialog';
 
 const KIND_LABEL: Record<AssetKind, string> = {
   texture: 'Textures',
@@ -370,7 +371,7 @@ function DropSlot({
       onChanged();
     } catch (err) {
       console.error(err);
-      window.alert(err instanceof Error ? err.message : 'Failed to add asset.');
+      void appAlert(err instanceof Error ? err.message : 'Failed to add asset.');
     } finally {
       setBusy(false);
     }
@@ -382,7 +383,11 @@ function DropSlot({
   };
 
   const remove = async () => {
-    if (!window.confirm(`Remove ${relPath}?`)) return;
+    const ok = await appConfirm(`Remove ${relPath}?`, {
+      okLabel: 'Remove',
+      tone: 'danger',
+    });
+    if (!ok) return;
     setBusy(true);
     try {
       await window.modmixer.removeAsset(folder, relPath);
@@ -399,7 +404,7 @@ function DropSlot({
     if (!f) return;
     const p = window.modmixer.getPathForFile(f);
     if (!p) {
-      window.alert('Could not read file path. Drag the file from Finder/Explorer.');
+      void appAlert('Could not read file path. Drag the file from Finder/Explorer.');
       return;
     }
     void submit(p);

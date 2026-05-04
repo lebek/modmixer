@@ -15,6 +15,7 @@ import { BuildView } from './components/build-view';
 import { ModsView } from './components/mods-view';
 import { LibraryView } from './components/library-view';
 import { SessionRecoveryDialog } from './components/session-recovery-dialog';
+import { appAlert } from './components/app-dialog';
 
 import type { BuildPanel } from './components/mod-build-sidebar';
 
@@ -208,7 +209,7 @@ export function App() {
       if (!packageId) {
         const env = await window.modmixer.refreshRegistry();
         setRegistryEnvelope(env);
-        window.alert(
+        void appAlert(
           'Mod synced, but About.xml has no packageId, so it was not added to the active list.',
         );
         return;
@@ -216,13 +217,13 @@ export function App() {
       try {
         const res = await enableWithDeps(packageId);
         if (res.missing.length > 0) {
-          window.alert(
+          void appAlert(
             `Enabled ${m?.about.name || folder}. Declared deps not installed (mod will fail to load until installed): ${res.missing.join(', ')}.`,
           );
         }
       } catch (err) {
         console.error(err);
-        window.alert(
+        void appAlert(
           err instanceof Error
             ? err.message
             : 'Mod synced, but adding to ModsConfig.xml failed.',
@@ -230,7 +231,7 @@ export function App() {
       }
     } catch (err) {
       console.error(err);
-      window.alert(
+      void appAlert(
         err instanceof Error ? err.message : 'Failed to sync mod to game.',
       );
     }
@@ -250,7 +251,7 @@ export function App() {
       setRegistryEnvelope(env);
     } catch (err) {
       console.error(err);
-      window.alert(
+      void appAlert(
         err instanceof Error ? err.message : 'Failed to disable mod.',
       );
     }
@@ -266,7 +267,7 @@ export function App() {
       );
     } catch (err) {
       console.error(err);
-      window.alert(
+      void appAlert(
         err instanceof Error ? err.message : 'Failed to start test.',
       );
     }
@@ -287,7 +288,7 @@ export function App() {
       );
     } catch (err) {
       console.error(err);
-      window.alert(
+      void appAlert(
         err instanceof Error
           ? err.message
           : 'Failed to start preview generation.',
@@ -321,7 +322,7 @@ export function App() {
       await openMod(imported.result.folder);
     } catch (err) {
       console.error(err);
-      window.alert(
+      void appAlert(
         err instanceof Error ? err.message : 'Failed to import mod folder.',
       );
     }

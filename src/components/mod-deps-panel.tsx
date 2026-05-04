@@ -3,6 +3,7 @@ import type { WorkspaceMod } from '../agent/workspace';
 import type { ModDependency } from '../agent/registry';
 import type { RegistryEnvelope } from '../preload';
 import { cn } from '@/lib/cn';
+import { appAlert } from './app-dialog';
 
 export function ModDepsPanel({ mod }: { mod: WorkspaceMod }) {
   const [registry, setRegistry] = useState<RegistryEnvelope | null>(null);
@@ -61,7 +62,7 @@ export function ModDepsPanel({ mod }: { mod: WorkspaceMod }) {
         incompatibleWith: next.incompatibleWith ?? incompat,
       });
     } catch (e) {
-      window.alert(e instanceof Error ? e.message : String(e));
+      void appAlert(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }

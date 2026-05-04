@@ -3,6 +3,7 @@ import type { Conversation } from '../agent/conversations';
 import type { WorkspaceMod } from '../agent/workspace';
 import type { AssetCounts } from '../agent/assets/types';
 import { cn } from '@/lib/cn';
+import { appConfirm } from './app-dialog';
 
 export type BuildPanel = 'chat' | 'schematic' | 'assets' | 'deps' | 'publish';
 
@@ -132,9 +133,10 @@ export function ModBuildSidebar({
         <div className="border-t border-line px-4 py-3">
           <button
             type="button"
-            onClick={() => {
-              const ok = window.confirm(
-                'Start a fresh chat? The current chat will be archived and the agent will begin with no prior context for this mod.',
+            onClick={async () => {
+              const ok = await appConfirm(
+                'The current chat will be archived and the agent will begin with no prior context for this mod.',
+                { title: 'Start a fresh chat?', okLabel: 'Start fresh' },
               );
               if (ok) onNewChat();
             }}

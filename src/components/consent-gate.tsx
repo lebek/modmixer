@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { App } from '../App';
 import type { ThemePreference } from '../agent/settings';
 import { applyTheme, watchSystemTheme } from '../lib/theme';
+import { AppDialog } from './app-dialog';
 import { ConfirmModal } from './confirm-modal';
 import { OnboardingFlow } from './onboarding/onboarding-flow';
 
@@ -58,6 +59,7 @@ export function ConsentGate() {
     <>
       <App />
       <ConfirmModal />
+      <AppDialog />
     </>
   );
 }

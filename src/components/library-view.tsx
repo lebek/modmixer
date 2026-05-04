@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { cn } from '@/lib/cn';
+import { appAlert } from './app-dialog';
 import type { EnableWithDepsResult, RegistryEnvelope } from '../preload';
 import type {
   ActiveSession,
@@ -119,7 +120,7 @@ export function LibraryView({
         await fn();
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        window.alert(msg);
+        void appAlert(msg);
       } finally {
         setBusy(false);
       }
