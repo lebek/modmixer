@@ -313,6 +313,20 @@ export function App() {
     setTab('build');
   };
 
+  const importMod = async () => {
+    try {
+      const imported = await window.modmixer.importModFromFolder();
+      if (!imported) return;
+      setMods(imported.mods);
+      await openMod(imported.result.folder);
+    } catch (err) {
+      console.error(err);
+      window.alert(
+        err instanceof Error ? err.message : 'Failed to import mod folder.',
+      );
+    }
+  };
+
   const activeMod =
     activeModFolder
       ? mods.find((m) => m.folder === activeModFolder) ?? null
@@ -428,6 +442,7 @@ export function App() {
           onSelectPanel={setBuildPanel}
           onOpenMod={openMod}
           onNewMod={newMod}
+          onImportMod={importMod}
           onBack={exitMod}
           onTest={test}
           onGeneratePreview={generatePreview}

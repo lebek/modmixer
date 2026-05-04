@@ -46,6 +46,8 @@ import {
 } from './agent/conversations.js';
 import {
   deleteWorkspaceMod,
+  getWorkspaceMod,
+  importModFromFolder,
   listWorkspaceMods,
   syncModToGame,
   unsyncModFromGame,
@@ -53,6 +55,8 @@ import {
   readModAbout,
   writeAbout,
   type AboutMetadata,
+  type ImportModResult,
+  type WorkspaceMod,
 } from './agent/workspace.js';
 import { readSchematic } from './agent/schematic.js';
 import { userLoreDir, modLoreDir } from './agent/lore.js';
@@ -97,6 +101,8 @@ import {
 import type { AssetKind } from './agent/assets/types.js';
 import {
   publishToWorkshop,
+  linkWorkshopItem,
+  unlinkWorkshopItem,
   onPublishProgress,
   type PublishProgressEvent,
 } from './agent/workshop.js';
@@ -512,6 +518,24 @@ ipcMain.handle('modmixer:mods:delete', async (_evt, folder: string) => {
 
 ipcMain.handle('modmixer:workspace:paths', () => getWorkspacePaths());
 
+ipcMain.handle('modmixer:mods:import-from-folder', async (): Promise<{
+  result: ImportModResult;
+  mods: WorkspaceMod[];
+} | null> => {
+  if (!mainWindow) return null;
+  const dialogResult = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openDirectory'],
+    title: 'Pick a mod folder to import',
+    message:
+      'Choose a RimWorld mod folder to copy into the Modmixer workspace.',
+  });
+  if (dialogResult.canceled || dialogResult.filePaths.length === 0) return null;
+  const result = await importModFromFolder(dialogResult.filePaths[0]);
+  emitModChanged(result.folder);
+  await registry.refresh();
+  return { result, mods: await listWorkspaceMods() };
+});
+
 ipcMain.handle('modmixer:mods:read-about', (_evt, folder: string) =>
   readModAbout(folder),
 );
@@ -826,8 +850,34 @@ onPublishProgress((event: PublishProgressEvent) => {
   mainWindow?.webContents.send('modmixer:workshop:progress', event);
 });
 
-ipcMain.handle('modmixer:workshop:publish', (_evt, folder: string) =>
-  publishToWorkshop(folder),
+ipcMain.handle('modmixer:workshop:publish', async (_evt, folder: string) => {
+  const result = await publishToWorkshop(folder);
+  // First publish wrote About/PublishedFileId.txt — fan out so the panel
+  // re-reads `mod.publishedFileId` and shows the freshly-linked Workshop ID.
+  emitModChanged(folder);
+  return result;
+});
+
+ipcMain.handle(
+  'modmixer:workshop:unlink',
+  async (_evt, folder: string): Promise<WorkspaceMod | null> => {
+    await unlinkWorkshopItem(folder);
+    emitModChanged(folder);
+    return await getWorkspaceMod(folder);
+  },
+);
+
+ipcMain.handle(
+  'modmixer:workshop:link',
+  async (
+    _evt,
+    folder: string,
+    workshopId: string,
+  ): Promise<WorkspaceMod | null> => {
+    await linkWorkshopItem(folder, workshopId);
+    emitModChanged(folder);
+    return await getWorkspaceMod(folder);
+  },
 );
 
 onModChanged((folder) => {

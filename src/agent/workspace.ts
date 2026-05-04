@@ -238,6 +238,109 @@ async function removeRimWorldLink(folder: string): Promise<void> {
   await fsp.rm(link, { recursive: true, force: true });
 }
 
+export interface ImportModResult {
+  folder: string;
+  workspacePath: string;
+  /** True if About.xml was missing/unparseable and we synthesized a fresh one. */
+  synthesizedAbout: boolean;
+}
+
+/**
+ * Copy an external mod folder into the workspace so it shows up alongside
+ * scaffolded mods. Source stays untouched. If About.xml is missing or
+ * unparseable, a fresh one is synthesized so the rest of the app (which
+ * keys off About) doesn't blow up. About/PublishedFileId.txt is preserved
+ * so users re-importing their own mods can keep pushing updates to the
+ * existing Workshop item; the publish panel exposes a "disconnect" button
+ * for the rarer case of forking someone else's mod.
+ */
+export async function importModFromFolder(
+  srcPath: string,
+): Promise<ImportModResult> {
+  const { workspaceDir } = getWorkspacePaths();
+
+  let resolvedSrc: string;
+  try {
+    resolvedSrc = await fsp.realpath(srcPath);
+  } catch {
+    throw new Error(`Source folder does not exist: ${srcPath}`);
+  }
+  const stat = await fsp.stat(resolvedSrc);
+  if (!stat.isDirectory()) {
+    throw new Error(`Source is not a folder: ${resolvedSrc}`);
+  }
+
+  const resolvedWorkspace = await fsp.realpath(workspaceDir);
+  const rel = path.relative(resolvedWorkspace, resolvedSrc);
+  if (rel && !rel.startsWith('..') && !path.isAbsolute(rel)) {
+    throw new Error(
+      'That folder is already inside the Modmixer workspace — nothing to import.',
+    );
+  }
+
+  const aboutSrc = path.join(resolvedSrc, 'About', 'About.xml');
+  let aboutName = '';
+  try {
+    const xml = await fsp.readFile(aboutSrc, 'utf8');
+    aboutName = parseAbout(xml).name;
+  } catch {
+    // missing or unreadable; fall back to source basename
+  }
+
+  const baseName =
+    sanitizeFolderName(aboutName) ||
+    sanitizeFolderName(path.basename(resolvedSrc)) ||
+    'ImportedMod';
+  const folder = uniqueWorkspaceFolder(workspaceDir, baseName);
+  const dest = path.join(workspaceDir, folder);
+
+  await fsp.cp(resolvedSrc, dest, {
+    recursive: true,
+    errorOnExist: true,
+    force: false,
+    filter: (source) => !SKIP.has(path.basename(source)),
+  });
+
+  let synthesizedAbout = false;
+  const aboutDest = path.join(dest, 'About', 'About.xml');
+  let needsFreshAbout = false;
+  try {
+    const xml = await fsp.readFile(aboutDest, 'utf8');
+    parseAbout(xml);
+  } catch {
+    needsFreshAbout = true;
+  }
+  if (needsFreshAbout) {
+    await fsp.mkdir(path.join(dest, 'About'), { recursive: true });
+    await fsp.writeFile(
+      aboutDest,
+      renderFreshAboutXml(emptyAbout(folder)),
+      'utf8',
+    );
+    synthesizedAbout = true;
+  }
+
+  return {
+    folder,
+    workspacePath: dest,
+    synthesizedAbout,
+  };
+}
+
+function sanitizeFolderName(raw: string): string {
+  return raw.replace(/[^A-Za-z0-9_ -]/g, '').trim();
+}
+
+function uniqueWorkspaceFolder(workspaceDir: string, base: string): string {
+  let candidate = base;
+  let n = 2;
+  while (fs.existsSync(path.join(workspaceDir, candidate))) {
+    candidate = `${base} (${n})`;
+    n += 1;
+  }
+  return candidate;
+}
+
 /**
  * Delete a workspace mod completely: remove the RimWorld symlink (if any),
  * then delete the workspace folder on disk. Caller is responsible for

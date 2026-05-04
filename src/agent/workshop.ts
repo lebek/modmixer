@@ -114,6 +114,52 @@ async function writePublishedFileId(folder: string, id: bigint): Promise<void> {
   await fsp.writeFile(file, id.toString(), 'utf8');
 }
 
+/**
+ * Remove About/PublishedFileId.txt, severing the link between this workspace
+ * mod and a Steam Workshop item. The next publish will create a fresh
+ * Workshop item rather than updating the old one. The Workshop item itself
+ * is untouched — the user can still find and manage it on Steam.
+ */
+export async function unlinkWorkshopItem(folder: string): Promise<void> {
+  const file = publishedFileIdPath(folder);
+  try {
+    await fsp.unlink(file);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+  }
+}
+
+/**
+ * Manually associate this workspace mod with an existing Steam Workshop
+ * item by writing About/PublishedFileId.txt. Use case: the user published
+ * outside Modmixer (or imported a mod whose PublishedFileId.txt was lost)
+ * and wants future publishes from Modmixer to update that same item.
+ *
+ * Steam doesn't validate ownership at this layer — that happens at publish
+ * time, where Steam will reject updates from anyone who isn't the original
+ * uploader.
+ */
+export async function linkWorkshopItem(
+  folder: string,
+  rawId: string,
+): Promise<void> {
+  const trimmed = rawId.trim();
+  if (!trimmed) throw new Error('Workshop ID is required.');
+  if (!/^\d+$/.test(trimmed)) {
+    throw new Error('Workshop ID must be a positive integer.');
+  }
+  let id: bigint;
+  try {
+    id = BigInt(trimmed);
+  } catch {
+    throw new Error('Workshop ID must be a positive integer.');
+  }
+  if (id <= 0n) {
+    throw new Error('Workshop ID must be a positive integer.');
+  }
+  await writePublishedFileId(folder, id);
+}
+
 function previewPathFor(folder: string): string | undefined {
   const { workspaceDir } = getWorkspacePaths();
   const candidate = path.join(workspaceDir, folder, 'About', 'Preview.png');

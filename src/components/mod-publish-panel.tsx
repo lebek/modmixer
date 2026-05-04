@@ -53,6 +53,20 @@ export function ModPublishPanel({
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const expectedDeleteText = mod.about.name || mod.folder;
 
+  // Unlink state — drops PublishedFileId.txt so the next publish creates a
+  // fresh Workshop item. Useful when the imported mod was someone else's,
+  // or the user wants to publish a fork as a separate item.
+  const [unlinkConfirmOpen, setUnlinkConfirmOpen] = useState(false);
+  const [unlinking, setUnlinking] = useState(false);
+  const [unlinkError, setUnlinkError] = useState<string | null>(null);
+
+  // Link state — manually associate this mod with an existing Workshop ID
+  // (e.g. mod was published outside Modmixer or PublishedFileId.txt was lost).
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [linkInput, setLinkInput] = useState('');
+  const [linking, setLinking] = useState(false);
+  const [linkError, setLinkError] = useState<string | null>(null);
+
   // Track the latest defaultAuthor for the sticky-detection initialization.
   const defaultAuthorRef = useRef('');
   defaultAuthorRef.current = defaultAuthor;
@@ -86,6 +100,11 @@ export function ModPublishPanel({
     setDeleteOpen(false);
     setDeleteConfirmText('');
     setDeleteError(null);
+    setUnlinkConfirmOpen(false);
+    setUnlinkError(null);
+    setLinkOpen(false);
+    setLinkInput('');
+    setLinkError(null);
   }, [mod.folder]);
 
   useEffect(() => {
@@ -268,6 +287,41 @@ export function ModPublishPanel({
 
   const isUpdate = mod.publishedFileId !== null;
 
+  const performUnlink = async () => {
+    setUnlinking(true);
+    setUnlinkError(null);
+    try {
+      await window.modmixer.unlinkWorkshopItem(mod.folder);
+      // App.tsx's mod:changed listener will refresh `mod`, which clears
+      // mod.publishedFileId and removes this UI block on the next render.
+      setPublishedUrl(null);
+      setUnlinkConfirmOpen(false);
+    } catch (err) {
+      setUnlinkError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setUnlinking(false);
+    }
+  };
+
+  const performLink = async () => {
+    setLinking(true);
+    setLinkError(null);
+    try {
+      await window.modmixer.linkWorkshopItem(mod.folder, linkInput);
+      // mod:changed will repopulate mod.publishedFileId; flip our local
+      // publishedUrl too so the linked URL shows immediately.
+      setPublishedUrl(
+        `https://steamcommunity.com/sharedfiles/filedetails/?id=${linkInput.trim()}`,
+      );
+      setLinkOpen(false);
+      setLinkInput('');
+    } catch (err) {
+      setLinkError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLinking(false);
+    }
+  };
+
   const deleteConfirmMatches =
     deleteConfirmText.trim() === expectedDeleteText.trim() &&
     expectedDeleteText.trim() !== '';
@@ -442,17 +496,144 @@ export function ModPublishPanel({
               </div>
             </Field>
 
-            {publishedUrl && (
-              <div className="rounded-md border border-line bg-surface/60 px-3 py-2 text-xs text-ink">
-                <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted">
-                  Workshop item
+            {mod.publishedFileId && (
+              <div className="space-y-2 rounded-md border border-line bg-surface/60 px-3 py-2 text-xs text-ink">
+                <div className="flex items-baseline justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted">
+                      Workshop item
+                    </div>
+                    <div className="mt-0.5 font-mono text-[11px] text-muted">
+                      ID {mod.publishedFileId}
+                    </div>
+                    {publishedUrl && (
+                      <button
+                        onClick={() =>
+                          void window.modmixer.openExternal(publishedUrl)
+                        }
+                        className="mt-0.5 block w-full truncate text-left text-accent hover:underline"
+                      >
+                        {publishedUrl}
+                      </button>
+                    )}
+                  </div>
+                  {!unlinkConfirmOpen && (
+                    <button
+                      onClick={() => {
+                        setUnlinkConfirmOpen(true);
+                        setUnlinkError(null);
+                      }}
+                      className="shrink-0 text-[10px] uppercase tracking-[0.18em] text-muted transition-colors hover:text-failed"
+                    >
+                      disconnect
+                    </button>
+                  )}
                 </div>
-                <button
-                  onClick={() => void window.modmixer.openExternal(publishedUrl)}
-                  className="mt-0.5 truncate text-left text-accent hover:underline"
-                >
-                  {publishedUrl}
-                </button>
+
+                {unlinkConfirmOpen && (
+                  <div className="space-y-2 rounded-md border border-failed/40 bg-failed/5 px-2.5 py-2">
+                    <p className="text-[11px] text-ink">
+                      Disconnecting clears the Workshop link locally so the
+                      next publish creates a new item. The existing Workshop
+                      item is not deleted.
+                    </p>
+                    {unlinkError && (
+                      <div className="rounded-md border border-failed/40 bg-paper px-2.5 py-1.5 text-[11px] text-failed">
+                        {unlinkError}
+                      </div>
+                    )}
+                    <div className="flex items-center justify-end gap-2">
+                      <button
+                        onClick={() => {
+                          setUnlinkConfirmOpen(false);
+                          setUnlinkError(null);
+                        }}
+                        disabled={unlinking}
+                        className="text-[10px] uppercase tracking-[0.18em] text-muted hover:text-ink disabled:opacity-40"
+                      >
+                        cancel
+                      </button>
+                      <button
+                        onClick={() => void performUnlink()}
+                        disabled={unlinking}
+                        className="rounded-md border border-failed/50 bg-paper px-2.5 py-1 text-[10px] uppercase tracking-[0.18em] text-failed transition-colors hover:bg-failed/10 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        {unlinking ? 'Disconnecting…' : 'Disconnect'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {!mod.publishedFileId && (
+              <div className="space-y-2 rounded-md border border-line bg-surface/60 px-3 py-2 text-xs text-ink">
+                <div className="flex items-baseline justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted">
+                      Workshop item
+                    </div>
+                    <div className="mt-0.5 text-[11px] text-muted">
+                      Not linked. Publishing will create a new Workshop item.
+                    </div>
+                  </div>
+                  {!linkOpen && (
+                    <button
+                      onClick={() => {
+                        setLinkOpen(true);
+                        setLinkError(null);
+                      }}
+                      className="shrink-0 text-[10px] uppercase tracking-[0.18em] text-muted transition-colors hover:text-ink"
+                    >
+                      link existing
+                    </button>
+                  )}
+                </div>
+
+                {linkOpen && (
+                  <div className="space-y-2 rounded-md border border-line bg-paper px-2.5 py-2">
+                    <p className="text-[11px] text-muted">
+                      Paste the Workshop ID to associate this mod with an
+                      existing item. Find it in the Steam Workshop URL after
+                      <span className="font-mono"> ?id=</span>.
+                    </p>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={linkInput}
+                      onChange={(e) => setLinkInput(e.target.value)}
+                      disabled={linking}
+                      autoFocus
+                      placeholder="1234567890"
+                      className="w-full rounded-md border border-line bg-paper px-2.5 py-1.5 font-mono text-[11px] text-ink focus:border-accent focus:outline-none"
+                    />
+                    {linkError && (
+                      <div className="rounded-md border border-failed/40 bg-failed/5 px-2.5 py-1.5 text-[11px] text-failed">
+                        {linkError}
+                      </div>
+                    )}
+                    <div className="flex items-center justify-end gap-2">
+                      <button
+                        onClick={() => {
+                          setLinkOpen(false);
+                          setLinkInput('');
+                          setLinkError(null);
+                        }}
+                        disabled={linking}
+                        className="text-[10px] uppercase tracking-[0.18em] text-muted hover:text-ink disabled:opacity-40"
+                      >
+                        cancel
+                      </button>
+                      <button
+                        onClick={() => void performLink()}
+                        disabled={linking || !linkInput.trim()}
+                        className="rounded-md bg-ink px-2.5 py-1 text-[10px] uppercase tracking-[0.18em] text-paper transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        {linking ? 'Linking…' : 'Link'}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 

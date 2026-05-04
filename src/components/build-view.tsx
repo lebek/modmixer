@@ -19,6 +19,7 @@ export function BuildView({
   onSelectPanel,
   onOpenMod,
   onNewMod,
+  onImportMod,
   onBack,
   onTest,
   onGeneratePreview,
@@ -36,6 +37,7 @@ export function BuildView({
   onSelectPanel: (panel: BuildPanel) => void;
   onOpenMod: (folder: string) => void;
   onNewMod: () => void;
+  onImportMod: () => void;
   onBack: () => void;
   onTest: () => void;
   onGeneratePreview: () => void;
@@ -46,7 +48,14 @@ export function BuildView({
   onConnect: () => void;
 }) {
   if (!activeConvo) {
-    return <BuildLanding mods={mods} onOpen={onOpenMod} onNewMod={onNewMod} />;
+    return (
+      <BuildLanding
+        mods={mods}
+        onOpen={onOpenMod}
+        onNewMod={onNewMod}
+        onImportMod={onImportMod}
+      />
+    );
   }
 
   // Pre-scaffold "new mod" chat: no mod yet, no Assets to browse.

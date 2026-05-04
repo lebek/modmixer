@@ -17,6 +17,7 @@ import type {
 } from './agent/conversations';
 import type {
   AboutMetadata,
+  ImportModResult,
   WorkspaceMod,
   WorkspacePaths,
 } from './agent/workspace';
@@ -252,6 +253,12 @@ const api = {
   deleteMod(folder: string): Promise<WorkspaceMod[]> {
     return ipcRenderer.invoke('modmixer:mods:delete', folder);
   },
+  importModFromFolder(): Promise<{
+    result: ImportModResult;
+    mods: WorkspaceMod[];
+  } | null> {
+    return ipcRenderer.invoke('modmixer:mods:import-from-folder');
+  },
   readModAbout(folder: string): Promise<AboutMetadata | null> {
     return ipcRenderer.invoke('modmixer:mods:read-about', folder);
   },
@@ -434,6 +441,15 @@ const api = {
   // Workshop
   publishToWorkshop(folder: string): Promise<PublishResult> {
     return ipcRenderer.invoke('modmixer:workshop:publish', folder);
+  },
+  unlinkWorkshopItem(folder: string): Promise<WorkspaceMod | null> {
+    return ipcRenderer.invoke('modmixer:workshop:unlink', folder);
+  },
+  linkWorkshopItem(
+    folder: string,
+    workshopId: string,
+  ): Promise<WorkspaceMod | null> {
+    return ipcRenderer.invoke('modmixer:workshop:link', folder, workshopId);
   },
   onWorkshopProgress(
     handler: (event: PublishProgressEvent) => void,
