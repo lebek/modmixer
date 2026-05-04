@@ -22,10 +22,10 @@ const Params = Type.Object({
   }),
   width: Type.Number({
     description:
-      'Final PNG width in pixels. Internally rendered at 2× and downscaled for crisp text.',
+      'PNG width in pixels. The satori canvas is exactly this size, so root pixel dimensions and `width:100%` both fill the canvas correctly.',
   }),
   height: Type.Number({
-    description: 'Final PNG height in pixels.',
+    description: 'PNG height in pixels.',
   }),
 });
 
@@ -157,14 +157,14 @@ export const renderHtmlToPngTool: AgentTool<typeof Params, RenderHtmlToPngDetail
     const tree = htmlToVNode(params.html) as VNode;
     await resolveImageSources(tree, workspaceDir);
 
-    // Render at 2× for crisp text, then let resvg downscale to the requested
-    // dimensions. fitTo:width preserves aspect ratio against the satori canvas,
-    // so width:height ratio of the input must match the requested output.
-    const renderW = params.width * 2;
-    const renderH = params.height * 2;
+    // Satori canvas matches the requested PNG size 1:1 — earlier the canvas
+    // was rendered at 2× and downsampled for crisper text, but that meant
+    // any agent-emitted root with literal `width: 1280px` only filled the
+    // top-left quarter of a 2560×1440 canvas. Glyphs are vector paths so
+    // 1× rasterization still looks fine at thumbnail scale.
     const svg = await satori(tree as never, {
-      width: renderW,
-      height: renderH,
+      width: params.width,
+      height: params.height,
       fonts: fonts.map((f) => ({
         name: f.name,
         data: f.data,
