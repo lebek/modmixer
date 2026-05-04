@@ -42,10 +42,20 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 `;
 
+// @resvg/resvg-wasm doesn't ship a LICENSE file; its README points at the
+// standard MPL 2.0 text. The canonical text is checked in at
+// scripts/licenses/MPL-2.0.txt (copied from the lightningcss dep, which
+// also ships under MPL-2.0).
+const MPL_2_0_LICENSE = readFileSync(
+  path.join(here, 'licenses', 'MPL-2.0.txt'),
+  'utf8',
+);
+
 const LICENSE_OVERRIDES = {
   '@mariozechner/pi-agent-core': PI_MONO_LICENSE,
   '@mariozechner/pi-ai': PI_MONO_LICENSE,
   '@mariozechner/pi-coding-agent': PI_MONO_LICENSE,
+  '@resvg/resvg-wasm': MPL_2_0_LICENSE,
 };
 
 const LICENSE_FILENAMES = [
