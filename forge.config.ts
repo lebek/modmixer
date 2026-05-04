@@ -163,7 +163,11 @@ const config: ForgeConfig = {
   },
   rebuildConfig: {},
   makers: [
-    new MakerSquirrel({ setupIcon: `${ICON_BASE}.ico`, windowsSign }),
+    new MakerSquirrel({
+      setupIcon: `${ICON_BASE}.ico`,
+      loadingGif: path.resolve(__dirname, 'assets/loading.gif'),
+      windowsSign,
+    }),
     // ZIP is required on darwin: Squirrel.Mac applies updates from a .zip.
     // Mac is currently unsigned so updates won't actually apply, but ship
     // the artifact anyway so we can flip to signed without changing makers.
