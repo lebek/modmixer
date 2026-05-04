@@ -90,6 +90,21 @@ function detectDataDir(managedDir: string): string | null {
   return null;
 }
 
+/**
+ * Derive the Steam Workshop content dir from a RimWorld install root.
+ * Steam's library layout is `<library>/steamapps/common/<game>` and
+ * `<library>/steamapps/workshop/content/<appId>`, so the workshop dir is
+ * always two levels up from the install + `workshop/content/294100`. This
+ * lets a non-default Steam library (e.g. `E:\SteamLibrary`) resolve its
+ * own workshop dir without us hard-coding every drive letter.
+ */
+function workshopDirFromInstall(installRoot: string): string {
+  return path.join(
+    path.dirname(path.dirname(installRoot)),
+    'workshop/content/294100',
+  );
+}
+
 export function detectRimWorldPaths(): RimWorldPaths {
   const home = homedir();
   const os = platform();
@@ -141,7 +156,8 @@ export function detectRimWorldPaths(): RimWorldPaths {
       ),
     ];
     workshopCandidates = [
-      path.join(appSupport, 'Steam/steamapps/workshop/content/294100'),
+      ...(overrideRoot ? [workshopDirFromInstall(overrideRoot)] : []),
+      workshopDirFromInstall(steamInstall),
     ];
     playerLogCandidate = path.join(
       home,
@@ -176,10 +192,7 @@ export function detectRimWorldPaths(): RimWorldPaths {
     managedCandidates = winInstalls.map((p) =>
       path.join(p, 'RimWorldWin64_Data/Managed'),
     );
-    workshopCandidates = [
-      'C:/Program Files (x86)/Steam/steamapps/workshop/content/294100',
-      'C:/Program Files/Steam/steamapps/workshop/content/294100',
-    ];
+    workshopCandidates = winInstalls.map(workshopDirFromInstall);
     playerLogCandidate = path.join(userBase, 'Player.log');
     modsConfigCandidates = [path.join(userBase, 'Config/ModsConfig.xml')];
   } else {
@@ -201,10 +214,7 @@ export function detectRimWorldPaths(): RimWorldPaths {
     managedCandidates = linuxInstalls.map((p) =>
       path.join(p, 'RimWorldLinux_Data/Managed'),
     );
-    workshopCandidates = [
-      path.join(home, '.steam/steam/steamapps/workshop/content/294100'),
-      path.join(home, '.local/share/Steam/steamapps/workshop/content/294100'),
-    ];
+    workshopCandidates = linuxInstalls.map(workshopDirFromInstall);
     modsConfigCandidates = [path.join(linuxBase, 'Config/ModsConfig.xml')];
   }
 
