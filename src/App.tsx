@@ -165,14 +165,20 @@ export function App() {
     await window.modmixer.setModel(selection);
   }, []);
 
-  const openMod = useCallback(async (folder: string) => {
-    const hydrated = await window.modmixer.openConversationForMod(folder);
-    setActiveModFolder(folder);
-    setActiveConvo(hydrated.conversation);
-    setActiveMessages(hydrated.messages);
-    setBuildPanel('chat');
-    setTab('build');
-  }, []);
+  const openMod = useCallback(
+    async (folder: string) => {
+      setBuildPanel('chat');
+      setTab('build');
+      // Same mod = no-op past the tab switch. Re-hydrating would reset
+      // ChatPanel and drop in-flight streaming + tool state.
+      if (folder === activeModFolder && activeConvo) return;
+      const hydrated = await window.modmixer.openConversationForMod(folder);
+      setActiveModFolder(folder);
+      setActiveConvo(hydrated.conversation);
+      setActiveMessages(hydrated.messages);
+    },
+    [activeModFolder, activeConvo],
+  );
 
   const exitMod = useCallback(() => {
     setActiveModFolder(null);
@@ -382,7 +388,10 @@ export function App() {
           onRevertSession={revertSession}
         />
       )}
-      {tab === 'build' && (
+      {/* Stays mounted across tab switches so ChatPanel's state and event
+          subscription survive — otherwise in-flight streaming and the
+          user's just-sent message vanish on the way back. */}
+      <div className={tab === 'build' ? 'flex min-h-0 flex-1' : 'hidden'}>
         <BuildView
           mods={mods}
           activeMod={activeMod}
@@ -405,7 +414,7 @@ export function App() {
           hasAi={hasAi}
           onConnect={() => openSettings('providers')}
         />
-      )}
+      </div>
       {settingsSection && (
         <AppSettingsDialog
           initialSection={settingsSection}
