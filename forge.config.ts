@@ -48,8 +48,17 @@ async function stageBetterSqlite(buildPath: string) {
 // node_modules/steamworks.js/index.js only loads the matching subdir for
 // the current process.platform anyway, so the dropped subdirs are dead
 // weight on every platform.
-async function stagePrunedSteamworks(buildPath: string, platform: string) {
-  const src = path.join(buildPath, 'node_modules/steamworks.js');
+//
+// Reads from `<project>/node_modules/`, NOT from <buildPath>/. Two reasons:
+// (1) steamworks.js ships prebuilt .node binaries — it never goes through
+// @electron/rebuild, so the before-rebuild copy is fine; (2) reading from
+// buildPath would fail anyway: electron-packager's copy filter (galactus)
+// silently prunes steamworks.js out of <buildPath>/node_modules/ before our
+// hook fires, breaking v0.6.3 on every platform when this was attempted.
+// Runs in `generateAssets` (the early hook) so dist/steamworks.js exists
+// by the time electron-packager processes extraResource.
+async function stagePrunedSteamworks(platform: string) {
+  const src = path.resolve(__dirname, 'node_modules/steamworks.js');
   const dest = path.resolve(__dirname, 'dist/steamworks.js');
   const keep = platform === 'win32' ? 'win64'
     : platform === 'darwin' ? 'osx'
@@ -156,15 +165,19 @@ const config: ForgeConfig = {
         [path.resolve(__dirname, 'scripts/generate-licenses.mjs')],
         { stdio: 'inherit' },
       );
+      // steamworks.js ships prebuilts (no rebuild needed) and gets pruned
+      // from <buildPath> by galactus, so we stage from project root before
+      // electron-packager runs. Pass the host platform — local cross-arch
+      // makes only ever run for the host platform, and Windows is the only
+      // ARM/x64 split (steamworks.js always uses the win64 subdir there).
+      await stagePrunedSteamworks(process.platform);
     },
     // Runs after Forge's @electron/rebuild has rebuilt native modules in
-    // <buildPath>/node_modules/ for the target arch + Electron ABI. We
-    // stage to dist/<mod>/ here so when electron-packager later processes
-    // extraResource (which reads from project root, not buildPath), the
-    // shipped binaries are arch-correct. See stageBetterSqlite for the
-    // rationale on why generateAssets was the wrong place.
-    packageAfterPrune: async (_config, buildPath, _electronVersion, platform) => {
-      await stagePrunedSteamworks(buildPath, platform);
+    // <buildPath>/node_modules/ for the target arch + Electron ABI. Only
+    // better-sqlite3 needs this — its .node binary is rebuilt against
+    // Electron's ABI here, and we copy that fresh build into dist/ before
+    // electron-packager processes extraResource.
+    packageAfterPrune: async (_config, buildPath) => {
       await stageBetterSqlite(buildPath);
     },
   },
