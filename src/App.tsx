@@ -391,7 +391,11 @@ export function App() {
       {/* Stays mounted across tab switches so ChatPanel's state and event
           subscription survive — otherwise in-flight streaming and the
           user's just-sent message vanish on the way back. */}
-      <div className={tab === 'build' ? 'flex min-h-0 flex-1' : 'hidden'}>
+      <div
+        className={
+          tab === 'build' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'
+        }
+      >
         <BuildView
           mods={mods}
           activeMod={activeMod}
