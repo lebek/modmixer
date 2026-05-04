@@ -74,6 +74,47 @@ describe('parseAboutXml', () => {
     assert.deepEqual(ids, ['a.always', 'b.for15', 'c.for16']);
   });
 
+  it('merges loadAfterByVersion / loadBeforeByVersion / incompatibleWithByVersion into the flat lists', () => {
+    // Some installed RimWorld mods declare load-order constraints only via
+    // the ByVersion variants. Autosort needs to see them in the flat list.
+    const xml = `<ModMetaData>
+  <loadAfter>
+    <li>Always.After</li>
+  </loadAfter>
+  <loadAfterByVersion>
+    <v1.6>
+      <li>Ludeon.RimWorld.Royalty</li>
+      <li>Ludeon.RimWorld.Biotech</li>
+    </v1.6>
+  </loadAfterByVersion>
+  <loadBeforeByVersion>
+    <v1.6><li>Some.Other</li></v1.6>
+  </loadBeforeByVersion>
+  <incompatibleWithByVersion>
+    <v1.5><li>Old.Incompat</li></v1.5>
+  </incompatibleWithByVersion>
+</ModMetaData>`;
+    const out = parseAboutXml(xml);
+    assert.deepEqual(out.loadAfter, [
+      'always.after',
+      'ludeon.rimworld.royalty',
+      'ludeon.rimworld.biotech',
+    ]);
+    assert.deepEqual(out.loadBefore, ['some.other']);
+    assert.deepEqual(out.incompatibleWith, ['old.incompat']);
+  });
+
+  it('dedupes when the same id appears in both flat and ByVersion lists', () => {
+    const xml = `<ModMetaData>
+  <loadAfter><li>Foo.Bar</li></loadAfter>
+  <loadAfterByVersion>
+    <v1.6><li>foo.bar</li><li>Other.Mod</li></v1.6>
+  </loadAfterByVersion>
+</ModMetaData>`;
+    const out = parseAboutXml(xml);
+    assert.deepEqual(out.loadAfter, ['foo.bar', 'other.mod']);
+  });
+
   it('lowercases loadAfter / loadBefore / incompatibleWith', () => {
     const xml = `<ModMetaData>
   <loadAfter><li>Foo.Bar</li><li>BAZ.QUX</li></loadAfter>

@@ -73,10 +73,34 @@ export function parseAboutXml(rawXml: string): AboutXml {
     description,
     supportedVersions,
     modDependencies: parseDependencies(xml),
-    loadAfter: extractListLc(xml, 'loadAfter'),
-    loadBefore: extractListLc(xml, 'loadBefore'),
-    incompatibleWith: extractListLc(xml, 'incompatibleWith'),
+    loadAfter: parseListWithVersions(xml, 'loadAfter'),
+    loadBefore: parseListWithVersions(xml, 'loadBefore'),
+    incompatibleWith: parseListWithVersions(xml, 'incompatibleWith'),
   };
+}
+
+// Merge <foo> with <fooByVersion><v1.x>...</v1.x></fooByVersion>. We flatten
+// across versions since ModMixer doesn't yet target a specific game version
+// per profile — same policy as parseDependencies.
+function parseListWithVersions(xml: string, tag: string): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (raw: string) => {
+    const v = raw.toLowerCase();
+    if (!v || seen.has(v)) return;
+    seen.add(v);
+    out.push(v);
+  };
+  for (const v of extractList(xml, tag)) push(v);
+  const byVersion = matchOuter(xml, `${tag}ByVersion`);
+  if (byVersion) {
+    const re = /<v[\d.]+\b[^>]*>([\s\S]*?)<\/v[\d.]+>/gi;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(byVersion)) !== null) {
+      for (const v of collectItems(m[1])) push(v);
+    }
+  }
+  return out;
 }
 
 function stripNestedBlocks(xml: string): string {
