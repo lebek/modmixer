@@ -1,4 +1,4 @@
-import { detectRimWorldPaths } from './paths.js';
+import { detectRimWorldPaths, detectGameVersionMajorMinorSync } from './paths.js';
 import { getWorkspacePaths } from './workspace.js';
 import { loadSettings } from './settings.js';
 import { buildIndexSync, LORE_TOPICS } from './lore.js';
@@ -12,6 +12,7 @@ interface PromptContext {
   modsConfig: string | null;
   workshopDir: string | null;
   defaultAuthor: string;
+  gameVersion: string | null;
 }
 
 function gatherContext(): PromptContext {
@@ -25,6 +26,7 @@ function gatherContext(): PromptContext {
     modsConfig: rw.modsConfig,
     workshopDir: rw.workshopDir,
     defaultAuthor: loadSettings().defaultAuthor,
+    gameVersion: detectGameVersionMajorMinorSync(),
   };
 }
 
@@ -75,6 +77,7 @@ function pathsBlock(ctx: PromptContext): string {
   return `Workspace (cwd): ${ctx.workspaceDir}
 RimWorld Mods/ (symlink target): ${ctx.rimworldModsDir}
 Default author handle: ${ctx.defaultAuthor} (use this as the packageId prefix unless the user specifies otherwise — e.g. ${ctx.defaultAuthor}.MyMod).
+RimWorld game version: ${ctx.gameVersion ?? '(unknown — game has not been launched yet)'} — this is what scaffold_mod uses as the default supportedVersions for new mods. Only override (e.g. ["1.5","1.6"]) when the user explicitly asks for back-compat.
 Detected install:
 - Assembly-CSharp.dll: ${ctx.managedDir ?? '(not found — RimWorld may not be installed via Steam)'}
 - Player.log: ${ctx.playerLog ?? '(not found — game has not been launched yet)'}

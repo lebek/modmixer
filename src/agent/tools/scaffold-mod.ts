@@ -2,7 +2,7 @@ import { Type } from 'typebox';
 import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
 import path from 'node:path';
 import fs from 'node:fs/promises';
-import { detectRimWorldPaths } from '../paths.js';
+import { detectRimWorldPaths, detectGameVersionMajorMinorSync } from '../paths.js';
 import { getWorkspacePaths } from '../workspace.js';
 import { track } from '../telemetry.js';
 
@@ -25,7 +25,7 @@ const Params = Type.Object({
   rimworldVersions: Type.Optional(
     Type.Array(Type.String(), {
       description:
-        'Supported RimWorld versions, e.g. ["1.5","1.6"]. Defaults to ["1.5"].',
+        'Supported RimWorld versions, e.g. ["1.5","1.6"]. Defaults to the user\'s detected installed version (or "1.5" if undetectable). Only set this when the user explicitly wants back-compat across multiple versions.',
     }),
   ),
   withCSharp: Type.Optional(
@@ -68,7 +68,7 @@ export const scaffoldModTool: AgentTool<typeof Params, ScaffoldModDetails> = {
     const versions =
       params.rimworldVersions && params.rimworldVersions.length > 0
         ? params.rimworldVersions
-        : ['1.5'];
+        : [detectGameVersionMajorMinorSync() ?? '1.5'];
 
     const aboutXml = renderAboutXml({
       name: params.name,

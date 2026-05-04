@@ -105,6 +105,28 @@ function workshopDirFromInstall(installRoot: string): string {
   );
 }
 
+/**
+ * Sync read of the major.minor RimWorld version from ModsConfig.xml
+ * (e.g. "1.6"). Returns null when ModsConfig.xml is missing or unparseable —
+ * which happens on a fresh install where RimWorld has never been launched.
+ *
+ * Used as the default supportedVersions for newly scaffolded mods so users
+ * on the latest game version don't get a stale 1.5 default.
+ */
+export function detectGameVersionMajorMinorSync(): string | null {
+  const file = detectRimWorldPaths().modsConfig;
+  if (!file) return null;
+  try {
+    const xml = fs.readFileSync(file, 'utf8');
+    const m = xml.match(/<version>\s*([^<]+?)\s*<\/version>/);
+    if (!m) return null;
+    const mm = m[1].match(/^(\d+)\.(\d+)/);
+    return mm ? `${mm[1]}.${mm[2]}` : null;
+  } catch {
+    return null;
+  }
+}
+
 export function detectRimWorldPaths(): RimWorldPaths {
   const home = homedir();
   const os = platform();

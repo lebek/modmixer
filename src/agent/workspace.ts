@@ -2,7 +2,7 @@ import { app } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
-import { detectRimWorldPaths } from './paths.js';
+import { detectRimWorldPaths, detectGameVersionMajorMinorSync } from './paths.js';
 import { readSchematic, type SchematicData } from './schematic.js';
 import { scanAssets } from './assets/scanner.js';
 import { parseAboutXml, type ModDependency } from './registry/about-xml.js';
@@ -339,7 +339,7 @@ export function escapeXml(s: string): string {
 export function renderFreshAboutXml(meta: AboutMetadata): string {
   const versions = meta.supportedVersions.length > 0
     ? meta.supportedVersions
-    : ['1.5'];
+    : [detectGameVersionMajorMinorSync() ?? '1.5'];
   const versionList = versions
     .map((v) => `    <li>${escapeXml(v)}</li>`)
     .join('\n');
