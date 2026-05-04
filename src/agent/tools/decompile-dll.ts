@@ -31,7 +31,7 @@ export const decompileDllTool: AgentTool<typeof Params, DecompileDllDetails> = {
   name: 'decompile_dll',
   label: 'Decompile DLL',
   description:
-    'Decompile a .NET DLL with ilspycmd to read its C# source. Use to investigate what a mod does at runtime — Harmony patches, Mod entrypoints, custom Defs. Pass `type` to decompile a single class for faster, smaller output. Requires ilspycmd (dotnet tool install -g ilspycmd).',
+    "Decompile a .NET DLL with ilspycmd to read its C# source. Use for ad-hoc inspection of a third-party mod DLL — for vanilla RimWorld code, prefer the indexed read_csharp_symbol / search_source / who_uses_def tools (cheaper and pre-built). ALWAYS use this tool to run ilspycmd; never invoke ilspycmd via bash, because the bash path triggers a user approval prompt while this tool is path-policy-guarded and runs without one. Pass `type` to decompile a single class for faster, smaller output. Requires ilspycmd (dotnet tool install -g ilspycmd).",
   parameters: Params,
   async execute(_id, params, signal): Promise<AgentToolResult<DecompileDllDetails>> {
     // Bound the prompt-injection blast radius: a hostile mod's About.xml or

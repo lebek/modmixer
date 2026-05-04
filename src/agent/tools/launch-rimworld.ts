@@ -15,7 +15,7 @@ export const launchRimWorldTool: AgentTool<typeof Params, LaunchResult> = {
   name: 'launch_rimworld',
   label: 'Launch RimWorld',
   description:
-    "Cold-start RimWorld by spawning the game executable directly (Steam still has to be running for Steamworks, but we don't go through the Steam URL). NO-OP if RimWorld is already running — this does NOT reload mods. Run sync_to_game and enable_mod_in_game first when testing a workspace mod. Pass quicktest=true (default in the test flow) to skip menus and land in a generated map.",
+    "Cold-start RimWorld by spawning the game executable directly (Steam still has to be running for Steamworks, but we don't go through the Steam URL). NO-OP if RimWorld is already running — does NOT reload mods. Prefer ship_and_launch when you're shipping a workspace mod (it bundles sync + enable + dep-walk + autosort + launch); only use this directly when the mod is already synced and enabled, or for a no-mod relaunch. Pass quicktest=true (default in the test flow) to skip menus and land in a generated map.",
   parameters: Params,
   async execute(_id, params): Promise<AgentToolResult<LaunchResult>> {
     const args = params.quicktest === true ? ['-quicktest'] : [];

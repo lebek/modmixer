@@ -76,7 +76,10 @@ import { sendToast } from './notifications.js';
 import { loadSettings } from './settings.js';
 import { getWorkspacePaths } from './workspace.js';
 import { ScopedResourceLoader } from './resource-loader.js';
-import { buildSystemPrompt } from './system-prompt.js';
+import {
+  buildSystemPrompt,
+  buildLogErrorTriageRubric,
+} from './system-prompt.js';
 import {
   addConversation,
   getConversation,
@@ -957,6 +960,8 @@ export class AgentHost {
       `Caught ${errors.length} ${errors.length === 1 ? 'error' : 'errors'} — investigating…`,
     );
 
+    const modFolder =
+      this.active.scope.type === 'mod' ? this.active.scope.modFolder : null;
     const message =
       `[automated — RimWorld emitted ${errors.length} ${errors.length === 1 ? 'error' : 'errors'} during the test session you started monitoring]\n\n` +
       errors
@@ -966,8 +971,9 @@ export class AgentHost {
         )
         .join('\n\n') +
       (errors.length > 8
-        ? `\n\n(${errors.length - 8} earlier errors omitted; tail Player.log if you need them.)`
-        : '');
+        ? `\n\n(${errors.length - 8} earlier errors omitted; tail Player.log if you need them.)\n\n`
+        : '\n\n') +
+      buildLogErrorTriageRubric(modFolder);
 
     try {
       const session = this.active.session;

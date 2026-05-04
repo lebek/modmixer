@@ -32,7 +32,7 @@ export const tailPlayerLogTool: AgentTool<
   name: 'tail_player_log',
   label: 'Tail Player.log',
   description:
-    "Read trailing lines from RimWorld's Player.log to find runtime errors. Provide a pattern (e.g. an exception class or a mod name) to focus on the relevant lines. Player.log is rewritten on each game launch, so call after the user has reproduced the issue.",
+    "Read trailing lines from RimWorld's Player.log to find runtime errors. Provide a pattern (e.g. an exception class or a mod name) to focus on the relevant lines. Use for ad-hoc diagnostics; for live monitoring during a test session use watch_player_log instead (it auto-prompts when errors arrive). Player.log is rewritten on each game launch, so call after the user has reproduced the issue.",
   parameters: Params,
   async execute(_id, params): Promise<AgentToolResult<TailPlayerLogDetails>> {
     const { playerLog } = detectRimWorldPaths();

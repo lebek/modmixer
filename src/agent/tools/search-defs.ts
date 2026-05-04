@@ -42,7 +42,7 @@ export const searchDefsTool: AgentTool<typeof Params, { hits: SearchDefsHit[] }>
   name: 'search_defs',
   label: 'Search defs',
   description:
-    'Search the RimWorld def index by defName, label, or description. Returns small summaries (defName/defType/file/pack). Pair with get_def_details to read the full XML for a hit. Indexes Core + the user\'s DLC.',
+    "Search the RimWorld def index by defName, label, or description. Returns small summaries (defName/defType/file/pack). Pair with get_def_details to read the full XML for a hit. Indexes Core + the user's DLCs. Always reach for this BEFORE shelling out to `bash strings ... | grep` against the game's DLLs or XML — the index is faster and structured.",
   parameters: Params,
   async execute(_id, params): Promise<AgentToolResult<{ hits: SearchDefsHit[] }>> {
     const status = getIndexStatus();

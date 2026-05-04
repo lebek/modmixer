@@ -98,7 +98,17 @@ export function createGuardedReadTool(cwd: string): AgentTool<any> {
 }
 
 export function createGuardedWriteTool(cwd: string): AgentTool<any> {
-  return wrapPathTool(createWriteTool(cwd), cwd, ['path']);
+  // Override pi's default description to nudge the agent toward `edit` for
+  // changes. Re-streaming a whole file every modification burns 5–10× the
+  // tokens of a diff; enforced socially via the description rather than at
+  // runtime so legitimate full rewrites still work.
+  const inner = createWriteTool(cwd) as AgentTool<any>;
+  const overridden: AgentTool<any> = {
+    ...inner,
+    description:
+      "Create a new file with the given content. Use this ONLY for files that don't exist yet — for any change to an existing file, use edit instead (token-cheaper, since edit only sends the diff). Automatically creates parent directories.",
+  };
+  return wrapPathTool(overridden, cwd, ['path']);
 }
 
 export function createGuardedEditTool(cwd: string): AgentTool<any> {
