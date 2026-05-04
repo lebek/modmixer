@@ -35,11 +35,14 @@ jobs:
         include:
           - os: windows-latest
             arch: x64
-          # Native Windows ARM64 runner. Catches host-arch divergences before
-          # they ship: ARM64 users were previously served by hand-built local
-          # installers that mis-cross-built.
-          - os: windows-11-arm
-            arch: arm64
+          # NB: windows-11-arm was tried and pulled in v0.6.6 — Trusted Signing
+          # fails on the ARM64 runner with `signtool exited with code 3`.
+          # @electron/windows-sign ships an x64 vendored signtool.exe; under
+          # ARM64 emulation the Azure CodeSigning dlib doesn't load. Re-add
+          # once we point WINDOWS_SIGNTOOL_PATH at a native ARM64 signtool
+          # from the Windows SDK and verify dlib compatibility, OR ship ARM64
+          # unsigned. Until then, ARM64 users run the x64 build via emulation
+          # (works fine).
           - os: macos-14
             arch: arm64
           - os: ubuntu-latest
