@@ -140,6 +140,10 @@ const config: ForgeConfig = {
       // shipped via extraResource, and resolved at runtime via the
       // dual-resolve pattern in render-svg-to-png.ts.
       'node_modules/@resvg/resvg-wasm',
+      // TTFs loaded by satori inside render_html_to_png. Flattens to
+      // resources/fonts/ (electron-packager basename rule), resolved at
+      // runtime via the same dual-resolve pattern as the wasm modules.
+      'assets/fonts',
     ],
   },
   hooks: {

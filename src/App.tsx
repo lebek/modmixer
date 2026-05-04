@@ -272,6 +272,29 @@ export function App() {
     }
   };
 
+  // "Generate Preview Image" hands off to the chat panel: switch the build
+  // sub-panel from publish → chat so the user can watch the agent compose
+  // the image, then auto-submit a request. The agent's system prompt
+  // teaches it to write to {folder}/About/Preview.png at 1280×720.
+  const generatePreview = async () => {
+    if (!activeConvo || !activeModFolder || !hasAi) return;
+    const mod = mods.find((m) => m.folder === activeModFolder);
+    const displayName = mod?.about.name || activeModFolder;
+    setBuildPanel('chat');
+    try {
+      await window.modmixer.send(
+        `Generate a Steam Workshop preview image for "${displayName}" and save it to ${activeModFolder}/About/Preview.png. Use render_html_to_png with a 1280×720 canvas.`,
+      );
+    } catch (err) {
+      console.error(err);
+      window.alert(
+        err instanceof Error
+          ? err.message
+          : 'Failed to start preview generation.',
+      );
+    }
+  };
+
   const newMod = async () => {
     if (!hasAi) {
       openSettings('providers');
@@ -407,6 +430,7 @@ export function App() {
           onNewMod={newMod}
           onBack={exitMod}
           onTest={test}
+          onGeneratePreview={generatePreview}
           onNewChat={startFreshChat}
           onModDeleted={async () => {
             exitMod();

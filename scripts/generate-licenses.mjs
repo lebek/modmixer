@@ -51,11 +51,38 @@ const MPL_2_0_LICENSE = readFileSync(
   'utf8',
 );
 
+// satori-html declares "license": "MIT" in package.json but doesn't ship a
+// LICENSE file in the npm tarball, and the GitHub repo has none either.
+// Standard MIT text with the upstream author's copyright (per package.json).
+const SATORI_HTML_LICENSE = `MIT License
+
+Copyright (c) Nate Moore
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+`;
+
 const LICENSE_OVERRIDES = {
   '@mariozechner/pi-agent-core': PI_MONO_LICENSE,
   '@mariozechner/pi-ai': PI_MONO_LICENSE,
   '@mariozechner/pi-coding-agent': PI_MONO_LICENSE,
   '@resvg/resvg-wasm': MPL_2_0_LICENSE,
+  'satori-html': SATORI_HTML_LICENSE,
 };
 
 const LICENSE_FILENAMES = [

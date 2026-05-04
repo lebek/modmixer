@@ -5,6 +5,7 @@ import fs from 'node:fs/promises';
 import { assertPathAllowed } from '../security/path-policy.js';
 import { getPathPolicyRoots } from '../security/policy-roots.js';
 import { getWorkspacePaths } from '../workspace.js';
+import { rasterizeSvg } from './lib/resvg-init.js';
 
 const Params = Type.Object({
   svg: Type.String({
@@ -30,67 +31,6 @@ export interface RenderSvgToPngDetails {
   height: number;
 }
 
-interface ResvgRendered {
-  asPng(): Uint8Array;
-  readonly width: number;
-  readonly height: number;
-}
-interface ResvgModule {
-  initWasm(input: BufferSource | Promise<BufferSource>): Promise<void>;
-  Resvg: new (
-    svg: string | Uint8Array,
-    opts?: {
-      fitTo?:
-        | { mode: 'original' }
-        | { mode: 'width'; value: number }
-        | { mode: 'height'; value: number }
-        | { mode: 'zoom'; value: number };
-    },
-  ) => { render(): ResvgRendered };
-}
-
-// Mirrors the dual-resolve pattern in src/agent/index/csharp-indexer.ts: bare
-// require for dev (where node_modules sits next to the source), resourcesPath
-// fallback for packaged builds where Forge ships node_modules/@resvg/resvg-wasm
-// via extraResource. Cached because Resvg's initWasm() can only run once per
-// process.
-let cached: { mod: ResvgModule; wasmPath: string } | null = null;
-function loadResvg(): { mod: ResvgModule; wasmPath: string } {
-  if (cached) return cached;
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const mod = require('@resvg/resvg-wasm') as ResvgModule;
-    const modDir = path.dirname(require.resolve('@resvg/resvg-wasm'));
-    cached = { mod, wasmPath: path.join(modDir, 'index_bg.wasm') };
-    return cached;
-  } catch (devErr) {
-    try {
-      // electron-packager flattens extraResource paths to basename, so
-      // 'node_modules/@resvg/resvg-wasm' lands at resources/resvg-wasm/
-      // (matching the same behavior as @vscode/ripgrep → resources/ripgrep).
-      const resolved = path.join(process.resourcesPath, 'resvg-wasm');
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const mod = require(resolved) as ResvgModule;
-      cached = { mod, wasmPath: path.join(resolved, 'index_bg.wasm') };
-      return cached;
-    } catch (prodErr) {
-      throw prodErr instanceof Error ? prodErr : devErr;
-    }
-  }
-}
-
-let initPromise: Promise<void> | null = null;
-function ensureInitialized(): Promise<void> {
-  if (!initPromise) {
-    initPromise = (async () => {
-      const { mod, wasmPath } = loadResvg();
-      const bytes = await fs.readFile(wasmPath);
-      await mod.initWasm(bytes);
-    })();
-  }
-  return initPromise;
-}
-
 export const renderSvgToPngTool: AgentTool<typeof Params, RenderSvgToPngDetails> = {
   name: 'render_svg_to_png',
   label: 'Render SVG → PNG',
@@ -104,16 +44,11 @@ export const renderSvgToPngTool: AgentTool<typeof Params, RenderSvgToPngDetails>
       : path.resolve(workspaceDir, params.outPath);
     assertPathAllowed(absOutPath, getPathPolicyRoots(), 'outPath');
 
-    await ensureInitialized();
-    const { mod } = loadResvg();
-
     const opts =
       typeof params.width === 'number'
         ? { fitTo: { mode: 'width' as const, value: params.width } }
         : undefined;
-    const resvg = new mod.Resvg(params.svg, opts);
-    const rendered = resvg.render();
-    const png = rendered.asPng();
+    const { png, width, height } = await rasterizeSvg(params.svg, opts);
 
     await fs.mkdir(path.dirname(absOutPath), { recursive: true });
     await fs.writeFile(absOutPath, png);
@@ -122,14 +57,14 @@ export const renderSvgToPngTool: AgentTool<typeof Params, RenderSvgToPngDetails>
       content: [
         {
           type: 'text',
-          text: `Wrote ${png.length} bytes to ${absOutPath} (${rendered.width}×${rendered.height} PNG).`,
+          text: `Wrote ${png.length} bytes to ${absOutPath} (${width}×${height} PNG).`,
         },
       ],
       details: {
         outPath: absOutPath,
         bytes: png.length,
-        width: rendered.width,
-        height: rendered.height,
+        width,
+        height,
       },
     };
   },

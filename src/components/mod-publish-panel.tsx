@@ -8,9 +8,13 @@ import { derivePackageId } from '@/lib/identifiers';
 
 export function ModPublishPanel({
   mod,
+  hasAi,
+  onGeneratePreview,
   onDeleted,
 }: {
   mod: WorkspaceMod;
+  hasAi: boolean;
+  onGeneratePreview: () => void;
   onDeleted?: () => void;
 }) {
   const [name, setName] = useState(mod.about.name);
@@ -34,6 +38,13 @@ export function ModPublishPanel({
       : null,
   );
   const [agreementUrl, setAgreementUrl] = useState<string | null>(null);
+
+  // Preview image state. About/Preview.png is what Steam ships as the
+  // workshop thumbnail; we load it into a data URL so the renderer can
+  // display the bytes without a custom file:// scheme handler.
+  const [previewDataUrl, setPreviewDataUrl] = useState<string | null>(null);
+  const [previewBusy, setPreviewBusy] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
 
   // Delete state
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -137,6 +148,50 @@ export function ModPublishPanel({
     });
     return off;
   }, [mod.folder]);
+
+  // Load Preview.png on mount + folder switch + relevant change events.
+  // The asset watcher is started by AssetsView/scan paths; we trigger it on
+  // mount via scanAssets so file changes (Browse copy, agent write) fire
+  // onAssetsChanged for this folder. Re-reads use a cache-busting suffix
+  // because the data URL itself doesn't change identity but the bytes do.
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = async () => {
+      const url = await window.modmixer.readAssetDataUrl(
+        mod.folder,
+        'About/Preview.png',
+      );
+      if (!cancelled) setPreviewDataUrl(url);
+    };
+    void refresh();
+    void window.modmixer.scanAssets(mod.folder).catch(() => undefined);
+    const offAssets = window.modmixer.onAssetsChanged(({ folder }) => {
+      if (folder === mod.folder) void refresh();
+    });
+    return () => {
+      cancelled = true;
+      offAssets();
+    };
+  }, [mod.folder]);
+
+  const browsePreview = async () => {
+    setPreviewError(null);
+    try {
+      const sourceAbs = await window.modmixer.pickAssetFile('texture');
+      if (!sourceAbs) return;
+      setPreviewBusy(true);
+      await window.modmixer.addAsset(mod.folder, 'About/Preview.png', sourceAbs);
+      const url = await window.modmixer.readAssetDataUrl(
+        mod.folder,
+        'About/Preview.png',
+      );
+      setPreviewDataUrl(url);
+    } catch (err) {
+      setPreviewError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPreviewBusy(false);
+    }
+  };
 
   const onNameChange = (v: string) => {
     setName(v);
@@ -338,6 +393,55 @@ export function ModPublishPanel({
                 : 'Publish this mod to the Steam Workshop. Steam must be running and you must own RimWorld.'
             }
           >
+            <Field
+              label="Preview image"
+              hint="Shown on the Workshop page and in the in-game browser. 1280×720 recommended."
+            >
+              <div className="flex items-start gap-3">
+                <div className="aspect-video w-40 shrink-0 overflow-hidden rounded-md border border-line bg-surface/60">
+                  {previewDataUrl ? (
+                    <img
+                      src={previewDataUrl}
+                      alt="Preview"
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center text-[10px] uppercase tracking-[0.18em] text-muted">
+                      no image
+                    </div>
+                  )}
+                </div>
+                <div className="flex flex-1 flex-col gap-2">
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      onClick={() => void browsePreview()}
+                      disabled={previewBusy}
+                      className="rounded-md border border-line bg-paper px-3 py-1 text-[10px] uppercase tracking-[0.18em] text-ink transition-colors hover:border-ink/40 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      {previewBusy ? 'Copying…' : previewDataUrl ? 'Replace…' : 'Browse…'}
+                    </button>
+                    <button
+                      onClick={onGeneratePreview}
+                      disabled={!hasAi || previewBusy}
+                      title={
+                        !hasAi
+                          ? 'Connect an AI provider in Settings to generate.'
+                          : undefined
+                      }
+                      className="rounded-md bg-accent px-3 py-1 text-[10px] uppercase tracking-[0.18em] text-accent-foreground transition-opacity hover:bg-accent-soft disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      {previewDataUrl ? 'Regenerate' : 'Generate'}
+                    </button>
+                  </div>
+                  {previewError && (
+                    <div className="rounded-md border border-failed/40 bg-failed/5 px-2.5 py-1.5 text-xs text-failed">
+                      {previewError}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </Field>
+
             {publishedUrl && (
               <div className="rounded-md border border-line bg-surface/60 px-3 py-2 text-xs text-ink">
                 <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted">

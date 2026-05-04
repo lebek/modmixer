@@ -32,6 +32,7 @@ import { tailPlayerLogTool } from './tools/tail-player-log.js';
 import { listInstalledModsTool } from './tools/list-installed-mods.js';
 import { decompileDllTool } from './tools/decompile-dll.js';
 import { renderSvgToPngTool } from './tools/render-svg-to-png.js';
+import { renderHtmlToPngTool } from './tools/render-html-to-png.js';
 import { searchDefsTool } from './tools/search-defs.js';
 import { getDefDetailsTool } from './tools/get-def-details.js';
 import { listDefDescendantsTool } from './tools/list-def-descendants.js';
@@ -131,6 +132,7 @@ function buildCustomTools(cwd: string): AgentTool<any>[] {
     listInstalledModsTool,
     decompileDllTool,
     renderSvgToPngTool,
+    renderHtmlToPngTool,
     // Mod-list manipulation: gated, but auto-approved inside an active fix
     // session so the agent can iterate freely.
     withSessionConfirmation(

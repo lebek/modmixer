@@ -94,7 +94,20 @@ After every meaningful feature add or change, call update_schematic to keep the 
 
 When you write or edit asset paths in defs (\`<texPath>\`, \`<clipPath>\`, etc.), annotate them per the rules in read_lore assets. The asset stub system also has triage implications during testing — read_lore assets covers both.
 
-For SVG → PNG rasterization (gizmo icons, ThingDef textures, UI buttons), use render_svg_to_png. No other image tooling is bundled — imagemagick, inkscape, python/PIL, sharp, and canvas are NOT available, so don't probe for them.
+Image generation: two complementary tools, no other image tooling is bundled — imagemagick, inkscape, python/PIL, sharp, and canvas are NOT available, so don't probe for them.
+- render_svg_to_png — for in-game textures (gizmo icons, ThingDef textures, UI buttons). Hand-author SVG, rasterize to PNG.
+- render_html_to_png — for composed images where typography and layout matter (Steam Workshop Preview.png, About-page banners, anything Canva-shaped). Hand-author HTML+inline CSS; Satori renders it. Bundled fonts: Inter (400/700) for body and RimWorld (400) for that game-flavored display look. Local <img src> paths auto-resolve against the workspace, so you can drop existing mod sprites straight into the layout without base64ing them yourself.
+
+Steam Workshop preview image: write to "${modFolder}/About/Preview.png" at 1280×720. Steam displays this thumbnail at ~270×150 in the in-game grid, so type must be MUCH larger than feels natural — every webpage instinct you have about font sizes is wrong here. HARD RULES on a 1280×720 canvas:
+- Title (RimWorld font): MUST span at least 80% of the canvas width. Pick the font-size that makes that true; if the title is short (1–2 words) you'll likely land at 200–280px, if longer (4+ words) it'll be 120–180px and may wrap to two lines (each line should still span ≥80%). NEVER under 110px.
+- Subtitle/tagline (Inter): 48–72px. Never under 48px.
+- Any other text on the canvas (footer label, badge, byline): 32px MINIMUM, full stop. If you find yourself reaching for a smaller value, delete the element instead — it's not legible at thumbnail scale anyway.
+- Featured sprites: a single hero sprite should be 400–600px tall; 3–4 sprites in a row each 220–300px. Don't shrink to fit a "designed" layout.
+- Padding: 48–80px from the edges. Whitespace beats density.
+
+If a number you wrote is below any minimum above, it's wrong — push it up. The squint test: if the title isn't readable from across the room at 1/4 zoom, the type is too small.
+
+When the user asks for a workshop image, scan the mod's Textures/ first — if sprites exist, compose them on a gradient background with the title in RimWorld font; if there are no sprites (XML-only mod), fall back to a typographic design with title + tagline + a motif element. Both are valid Workshop aesthetics.
 
 Test-in-game flow when the user wants to run their mod:
 1. is_rimworld_running. If running, ASK whether to quit_rimworld (they may have unsaved progress). Wait for confirmation. quit_rimworld blocks until exit, so the next call runs immediately — do NOT sleep between calls.
