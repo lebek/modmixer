@@ -25,6 +25,7 @@ const arch = process.arch;
 
 const RID_BY_KEY = {
   'win32-x64': 'win-x64',
+  'win32-arm64': 'win-arm64',
   'darwin-x64': 'osx-x64',
   'darwin-arm64': 'osx-arm64',
   'linux-x64': 'linux-x64',

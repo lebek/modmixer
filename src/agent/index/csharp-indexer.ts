@@ -59,7 +59,9 @@ let cachedParserCtor: ParserModule | null = null;
 // Mirrors the dual-resolve pattern in src/agent/index/db.ts: bare require for
 // dev (where node_modules is on disk), resourcesPath fallback for packaged
 // builds where Forge ships node_modules/web-tree-sitter via extraResource.
-function loadParser(): ParserModule {
+// Exported for the CI smoke test (src/agent/smoke-test.ts) so it exercises
+// the same code path as the real indexer.
+export function loadParser(): ParserModule {
   if (cachedParserCtor) return cachedParserCtor;
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -78,7 +80,7 @@ function loadParser(): ParserModule {
 
 let languagePromise: Promise<Language> | null = null;
 
-async function loadCSharpLanguage(): Promise<Language> {
+export async function loadCSharpLanguage(): Promise<Language> {
   if (languagePromise) return languagePromise;
   languagePromise = (async () => {
     const wasmPath = resolveTreeSitterCsharpWasm();

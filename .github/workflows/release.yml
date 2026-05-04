@@ -1,5 +1,13 @@
 name: Release
 
+# Two trigger modes:
+#   - push of a `v*` tag → full release: build + sign + publish to GitHub Releases
+#   - workflow_dispatch → tester build: build + sign, upload as workflow artifact
+#     (no tagging, no GitHub Release). Used to hand a signed installer to a
+#     specific tester without cutting a public release. Replaces the old
+#     practice of running `npm run make` locally and emailing the .exe — that
+#     path repeatedly shipped the wrong arch / wrong ABI / missing vendored
+#     binaries to testers.
 on:
   push:
     tags:
@@ -27,6 +35,11 @@ jobs:
         include:
           - os: windows-latest
             arch: x64
+          # Native Windows ARM64 runner. Catches host-arch divergences before
+          # they ship: ARM64 users were previously served by hand-built local
+          # installers that mis-cross-built.
+          - os: windows-11-arm
+            arch: arm64
           - os: macos-14
             arch: arm64
           - os: ubuntu-latest
@@ -82,7 +95,7 @@ jobs:
       # package step (electron-forge has no skip-package mode) — wasted
       # work, but cheaper than shipping a broken release.
       - name: Smoke-test packaged app
-        if: matrix.os == 'windows-latest'
+        if: runner.os == 'Windows'
         shell: pwsh
         timeout-minutes: 5
         run: |
@@ -107,7 +120,7 @@ jobs:
       # writes the cert profile metadata file. forge.config.ts picks both
       # paths up via env vars and feeds them to signtool.
       - name: Azure login (OIDC)
-        if: matrix.os == 'windows-latest'
+        if: runner.os == 'Windows'
         uses: azure/login@v3
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -115,7 +128,7 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Install Trusted Signing dlib
-        if: matrix.os == 'windows-latest'
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           nuget install Microsoft.Trusted.Signing.Client `
@@ -129,10 +142,12 @@ jobs:
             CertificateProfileName = 'modmixer-release'
           } | ConvertTo-Json
           Set-Content -Path "$env:RUNNER_TEMP\trusted-signing-metadata.json" -Value $metadata -Encoding utf8
-          "WINDOWS_SIGN_DLIB=$env:RUNNER_TEMP\tsclient\Microsoft.Trusted.Signing.Client\bin\x64\Azure.CodeSigning.Dlib.dll" >> $env:GITHUB_ENV
+          "WINDOWS_SIGN_DLIB=$env:RUNNER_TEMP\tsclient\Microsoft.Trusted.Signing.Client\bin\${{ matrix.arch }}\Azure.CodeSigning.Dlib.dll" >> $env:GITHUB_ENV
           "WINDOWS_SIGN_METADATA=$env:RUNNER_TEMP\trusted-signing-metadata.json" >> $env:GITHUB_ENV
 
+      # Tag-push path: build, sign, and publish to GitHub Releases.
       - name: Publish
+        if: github.event_name == 'push'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Baked into the bundle at build time via Vite's `define`. Empty in
@@ -141,3 +156,21 @@ jobs:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
           POSTHOG_KEY: ${{ secrets.POSTHOG_KEY }}
         run: npm run publish -- --arch=${{ matrix.arch }}
+
+      # workflow_dispatch path: build + sign, but skip the GitHub Release.
+      # Output is uploaded as a workflow artifact for handing to a tester.
+      - name: Make tester build
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          POSTHOG_KEY: ${{ secrets.POSTHOG_KEY }}
+        run: npx electron-forge make -- --arch=${{ matrix.arch }}
+
+      - name: Upload tester build artifact
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: modmixer-${{ matrix.os }}-${{ matrix.arch }}
+          path: out/make/**
+          if-no-files-found: error
+          retention-days: 14

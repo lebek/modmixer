@@ -111,7 +111,7 @@ import {
   pipeProgressToWindow,
   startRebuild,
 } from './agent/index/main-bridge.js';
-import { closeIndexDb, openIndexDb } from './agent/index/db.js';
+import { closeIndexDb } from './agent/index/db.js';
 import {
   checkForUpdates,
   getUpdaterState,
@@ -927,23 +927,21 @@ app.on('ready', () => {
   // process lifetime — the listener filters by mainWindow internally.
   pipeProgressToWindow(() => mainWindow);
   if (SMOKE_TEST) {
-    // CI smoke test: we got past every import + ready handler + window
-    // creation without throwing. Open + close the index DB to force the
-    // better-sqlite3 native binding to load (catches NODE_MODULE_VERSION
-    // mismatches that the rest of startup wouldn't trigger), then skip the
-    // index rebuild and exit cleanly.
-    try {
-      openIndexDb();
-      closeIndexDb();
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error('[smoke-test] index DB open failed:', err);
-      app.exit(1);
-      return;
-    }
-    // eslint-disable-next-line no-console
-    console.log('[smoke-test] startup OK, exiting');
-    app.exit(0);
+    // CI smoke test: exercises every packaging-time risk in the shipped
+    // installer (better-sqlite3, web-tree-sitter + grammar wasm, bundled
+    // ripgrep, vendored ilspycmd). See src/agent/smoke-test.ts for the
+    // step-by-step rationale.
+    void (async () => {
+      try {
+        const { runSmokeTest } = await import('./agent/smoke-test.js');
+        await runSmokeTest();
+        app.exit(0);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[smoke-test] failed:', err);
+        app.exit(1);
+      }
+    })();
     return;
   }
   // Kick off the index rebuild if the cache is stale/missing. Fire-and-
