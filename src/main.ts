@@ -951,7 +951,10 @@ app.on('ready', () => {
   void ensureIndexAtStartup();
 });
 
-app.on('window-all-closed', async () => {
+// Bound at ~4s: covers a normal flush, short of "did the app freeze?".
+const SHUTDOWN_TIMEOUT_MS = 4000;
+
+async function gracefulShutdown(): Promise<void> {
   stopAllWatches();
   monitor.stop();
   confirmGate.cancelAll();
@@ -959,8 +962,24 @@ app.on('window-all-closed', async () => {
   closeIndexDb();
   await host.shutdown();
   await shutdownTelemetry();
+}
+
+app.on('window-all-closed', async () => {
+  // Race teardown against a watchdog. PostHog's network flush and
+  // session.abort() (model HTTP calls that don't honour AbortSignal) can
+  // hang indefinitely; without this the main process lingers, holds the
+  // single-instance lock, and blocks future launches.
+  await Promise.race([
+    gracefulShutdown().catch((err) => {
+      console.error('Shutdown error:', err);
+    }),
+    new Promise<void>((resolve) => setTimeout(resolve, SHUTDOWN_TIMEOUT_MS)),
+  ]);
   if (process.platform !== 'darwin') {
-    app.quit();
+    // app.exit() bypasses Electron's own quit sequence, so we go down even
+    // if a wedged renderer or utility process would have kept app.quit()
+    // pending.
+    app.exit(0);
   }
 });
 
