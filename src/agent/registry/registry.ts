@@ -14,6 +14,12 @@ import { detectRimWorldPaths } from '../paths.js';
 import { getWorkspacePaths, syncModToGame } from '../workspace.js';
 import { parseAboutXml, type AboutXml } from './about-xml.js';
 import { readModsConfig, writeActiveMods } from './mods-config.js';
+import {
+  SKIP_DIRS,
+  containsDll,
+  isSymlinkedInto,
+  readPublishedFileId,
+} from '../fs-helpers.js';
 import type {
   ActiveMod,
   ModSource,
@@ -21,7 +27,6 @@ import type {
   RegistrySnapshot,
 } from './types.js';
 
-const SKIP = new Set(['.git', '.DS_Store', '.vs', 'bin', 'obj', 'node_modules']);
 const RESCAN_DEBOUNCE_MS = 400;
 
 type Listener = () => void;
@@ -318,7 +323,7 @@ async function scanRoot(
   const entries = await safeReaddir(root);
   const result: RegistryMod[] = [];
   for (const entry of entries) {
-    if (!entry.isDirectory() || SKIP.has(entry.name)) continue;
+    if (!entry.isDirectory() || SKIP_DIRS.has(entry.name)) continue;
     const modPath = path.join(root, entry.name);
     const aboutPath = path.join(modPath, 'About', 'About.xml');
     let about: AboutXml = parseAboutXml('');
@@ -360,46 +365,11 @@ async function scanRoot(
   return result;
 }
 
-async function readPublishedFileId(modPath: string): Promise<string | null> {
-  const f = path.join(modPath, 'About', 'PublishedFileId.txt');
-  try {
-    const raw = (await fsp.readFile(f, 'utf8')).trim();
-    return raw || null;
-  } catch {
-    return null;
-  }
-}
-
 async function safeReaddir(dir: string): Promise<fs.Dirent[]> {
   try {
     return await fsp.readdir(dir, { withFileTypes: true });
   } catch {
     return [];
-  }
-}
-
-async function containsDll(dir: string): Promise<boolean> {
-  try {
-    const files = await fsp.readdir(dir);
-    return files.some((f) => f.toLowerCase().endsWith('.dll'));
-  } catch {
-    return false;
-  }
-}
-
-async function isSymlinkedInto(
-  folder: string,
-  workspacePath: string,
-  rimworldModsDir: string,
-): Promise<boolean> {
-  const link = path.join(rimworldModsDir, folder);
-  try {
-    const st = await fsp.lstat(link);
-    if (!st.isSymbolicLink() && process.platform !== 'win32') return false;
-    const resolved = await fsp.realpath(link);
-    return resolved === (await fsp.realpath(workspacePath));
-  } catch {
-    return false;
   }
 }
 

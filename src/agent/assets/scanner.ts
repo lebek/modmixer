@@ -14,8 +14,7 @@ import type {
 } from './types.js';
 import { materializeStubs, readStubbedPaths } from './stubs.js';
 import { detectGameVersionMajorMinorSync } from '../paths.js';
-
-const SKIP_DIRS = new Set(['.git', '.DS_Store', '.vs', 'bin', 'obj', 'node_modules']);
+import { SKIP_DIRS } from '../fs-helpers.js';
 
 interface RawRef {
   /** Stem under the kind's root, e.g. "Things/Item/Stalker" for texPath, no ext. */

@@ -22,20 +22,34 @@ export interface ConfirmationCopy {
   summary: string;
 }
 
+export interface ConfirmationOptions<TParams> {
+  /**
+   * Customize the modal description from the actual params (e.g. show
+   * "enable Doormats in RimWorld" instead of "enable a mod"). Defaults to
+   * the static copy.summary.
+   */
+  summarize?: (params: TParams) => string;
+  /**
+   * If provided and returns true at request time, the prompt is skipped
+   * and the tool runs immediately. Used for the fix-session flow where
+   * the user has pre-authorized a class of mutations until apply/revert.
+   */
+  shouldAutoApprove?: () => boolean;
+}
+
 /**
  * Wrap a tool so the user must explicitly approve before its `execute()`
  * runs. Denial throws an Error so the agent's tool-result is marked as an
  * error (the agent surfaces this back to the LLM, which can self-correct).
- *
- * `summarize` lets the wrapper customize the modal description from the
- * actual params (e.g. show "enable Doormats in RimWorld" instead of just
- * "enable a mod"). Defaults to the static summary.
  */
 export function withConfirmation<TParams, TDetails>(
   tool: AgentTool<any, TDetails>,
   copy: ConfirmationCopy,
-  summarize?: (params: TParams) => string,
+  options: ConfirmationOptions<TParams> | ((params: TParams) => string) = {},
 ): AgentTool<any, TDetails> {
+  // Back-compat: callers used to pass `summarize` as the third positional arg.
+  const opts: ConfirmationOptions<TParams> =
+    typeof options === 'function' ? { summarize: options } : options;
   return {
     ...tool,
     async execute(
@@ -44,8 +58,11 @@ export function withConfirmation<TParams, TDetails>(
       signal?: AbortSignal,
       onUpdate?: AgentToolUpdateCallback<TDetails>,
     ): Promise<AgentToolResult<TDetails>> {
+      if (opts.shouldAutoApprove?.()) {
+        return tool.execute(toolCallId, params as any, signal, onUpdate);
+      }
       const typedParams = params as TParams;
-      const summary = summarize ? summarize(typedParams) : copy.summary;
+      const summary = opts.summarize ? opts.summarize(typedParams) : copy.summary;
       const request: Omit<ConfirmationRequest, 'id'> = {
         tool: tool.name,
         label: copy.label,

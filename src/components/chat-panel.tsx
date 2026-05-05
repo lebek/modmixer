@@ -4,6 +4,8 @@ import type { Conversation } from '../agent/conversations';
 import type { AgentEventEnvelope } from '../preload';
 import { cn } from '@/lib/cn';
 import { extractText, extractToolCalls } from '@/lib/agent-utils';
+import { useAsyncAction } from '@/lib/use-async-action';
+import { useScrollPin } from '@/lib/use-scroll-pin';
 import { Markdown } from './markdown';
 import { ToolResultBubble } from './tool-result-renderer';
 
@@ -27,14 +29,17 @@ export function ChatPanel({
   >({});
   const [busy, setBusy] = useState(false);
   const [compacting, setCompacting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const send = useAsyncAction((text: string) => window.modmixer.send(text));
+  const interruptAction = useAsyncAction(() => window.modmixer.interrupt());
+  const error = send.error ?? interruptAction.error;
   const [input, setInput] = useState('');
-  const [pinned, setPinned] = useState(true);
-  const [hasNewBelow, setHasNewBelow] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const justSwitchedRef = useRef(true);
-  const programmaticScrollRef = useRef(false);
-  const programmaticTimerRef = useRef<number | null>(null);
+
+  const visibleMessageCount = streaming ? messages.length + 1 : messages.length;
+  const { pinned, hasNewBelow, jumpToBottom, resetFirstRun } = useScrollPin(
+    scrollRef,
+    [visibleMessageCount, streaming, toolStates, compacting],
+  );
 
   // Reset on conversation switch.
   useEffect(() => {
@@ -43,10 +48,11 @@ export function ChatPanel({
     setToolStates({});
     setBusy(false);
     setCompacting(false);
-    setError(null);
-    setPinned(true);
-    setHasNewBelow(false);
-    justSwitchedRef.current = true;
+    send.reset();
+    interruptAction.reset();
+    resetFirstRun();
+    // send/interruptAction/resetFirstRun are stable refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversation.id, initialMessages]);
 
   useEffect(() => {
@@ -56,7 +62,7 @@ export function ChatPanel({
       switch (event.type) {
         case 'agent_start':
           setBusy(true);
-          setError(null);
+          send.reset();
           break;
         case 'agent_end':
           setBusy(false);
@@ -98,110 +104,18 @@ export function ChatPanel({
     });
   }, [conversation.id]);
 
-  // Track whether the user is "pinned" to the bottom. A user-initiated scroll
-  // away from the bottom unpins; scrolling back re-pins. Programmatic scrolls
-  // we trigger ourselves are flagged so we don't react to them — except for
-  // wheel/touch/keyboard events, which are unambiguously user input and cancel
-  // any in-flight auto-scroll (otherwise streaming chunks would yank the user
-  // back down mid-animation when they try to read older content).
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-
-    const updatePinned = () => {
-      const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-      const atBottom = distance < 64;
-      setPinned(atBottom);
-      if (atBottom) setHasNewBelow(false);
-    };
-
-    const onScroll = () => {
-      if (programmaticScrollRef.current) return;
-      updatePinned();
-    };
-
-    const onUserGesture = () => {
-      // A real user gesture cancels our programmatic scroll-following so the
-      // next scroll event is honored even if it lands inside our settle window.
-      programmaticScrollRef.current = false;
-      if (programmaticTimerRef.current !== null) {
-        window.clearTimeout(programmaticTimerRef.current);
-        programmaticTimerRef.current = null;
-      }
-      updatePinned();
-    };
-
-    el.addEventListener('scroll', onScroll, { passive: true });
-    el.addEventListener('wheel', onUserGesture, { passive: true });
-    el.addEventListener('touchstart', onUserGesture, { passive: true });
-    el.addEventListener('touchmove', onUserGesture, { passive: true });
-    el.addEventListener('keydown', onUserGesture);
-    return () => {
-      el.removeEventListener('scroll', onScroll);
-      el.removeEventListener('wheel', onUserGesture);
-      el.removeEventListener('touchstart', onUserGesture);
-      el.removeEventListener('touchmove', onUserGesture);
-      el.removeEventListener('keydown', onUserGesture);
-    };
-  }, []);
-
-  const scrollToBottom = (smooth: boolean) => {
-    const el = scrollRef.current;
-    if (!el) return;
-    programmaticScrollRef.current = true;
-    el.scrollTo({
-      top: el.scrollHeight,
-      behavior: smooth ? 'smooth' : 'auto',
-    });
-    // Smooth scrolls can take a few hundred ms to settle; instant scrolls
-    // settle within a frame. Hold the flag long enough to cover both so the
-    // scroll listener doesn't mistake our own animation for a user gesture.
-    if (programmaticTimerRef.current !== null) {
-      window.clearTimeout(programmaticTimerRef.current);
-    }
-    programmaticTimerRef.current = window.setTimeout(() => {
-      programmaticScrollRef.current = false;
-      programmaticTimerRef.current = null;
-    }, smooth ? 600 : 50);
-  };
-
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const instant = justSwitchedRef.current;
-    justSwitchedRef.current = false;
-    if (instant || pinned) {
-      scrollToBottom(!instant);
-    } else {
-      setHasNewBelow(true);
-    }
-  }, [messages, streaming, toolStates, compacting]);
-
-  const jumpToBottom = () => {
-    scrollToBottom(true);
-    setPinned(true);
-    setHasNewBelow(false);
-  };
-
   const submit = async () => {
     const text = input.trim();
     if (!text || busy) return;
     setInput('');
-    try {
-      await window.modmixer.send(text);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-      setBusy(false);
-    }
+    const result = await send.run(text);
+    // null = the IPC threw before any agent_end event would clear busy.
+    if (result === null) setBusy(false);
   };
 
   const interrupt = async () => {
     if (!busy) return;
-    try {
-      await window.modmixer.interrupt();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
+    await interruptAction.run();
   };
 
   // Esc cancels the in-flight turn. Skipped while typing in inputs/textareas

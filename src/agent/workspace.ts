@@ -9,6 +9,12 @@ import { scanAssets } from './assets/scanner.js';
 import { parseAboutXml, type ModDependency } from './registry/about-xml.js';
 import { loadSettings } from './settings.js';
 import { track } from './telemetry.js';
+import {
+  SKIP_DIRS,
+  containsDll,
+  isSymlinkedInto,
+  readPublishedFileId,
+} from './fs-helpers.js';
 
 export interface WorkspacePaths {
   /** ModMixer's owned mods directory. The user's WIP mods live here. */
@@ -54,8 +60,6 @@ export interface WorkspaceMod {
   publishedFileId: string | null;
 }
 
-const SKIP = new Set(['.git', '.DS_Store', '.vs', 'bin', 'obj', 'node_modules']);
-
 export function getWorkspacePaths(): WorkspacePaths {
   const workspaceDir = path.join(app.getPath('userData'), 'workspace', 'Mods');
   fs.mkdirSync(workspaceDir, { recursive: true });
@@ -72,32 +76,45 @@ export function getWorkspacePaths(): WorkspacePaths {
 export async function listWorkspaceMods(): Promise<WorkspaceMod[]> {
   const { workspaceDir, rimworldModsDir } = getWorkspacePaths();
   const entries = await fsp.readdir(workspaceDir, { withFileTypes: true });
-  const mods: WorkspaceMod[] = [];
-  for (const entry of entries) {
-    if (!entry.isDirectory() || SKIP.has(entry.name)) continue;
-    const workspacePath = path.join(workspaceDir, entry.name);
-    const aboutPath = path.join(workspacePath, 'About', 'About.xml');
-    const about = fs.existsSync(aboutPath)
-      ? parseAbout(await fsp.readFile(aboutPath, 'utf8'))
-      : emptyAbout(entry.name);
-    const hasCSharp = await containsCsproj(path.join(workspacePath, 'Source'));
-    const hasDlls = await containsDll(path.join(workspacePath, 'Assemblies'));
-    const active = await isModActive(entry.name, workspacePath, rimworldModsDir);
-    const schematic = await readSchematic(entry.name);
-    const publishedFileId = await readPublishedFileIdFile(workspacePath);
-    mods.push({
-      folder: entry.name,
-      workspacePath,
-      active,
-      about,
-      schematic,
-      hasCSharp,
-      hasDlls,
-      publishedFileId,
-    });
-  }
+  // Build each mod's record in parallel — the per-mod sub-reads are I/O-bound
+  // and independent. Sequential made this scale linearly with mod count and
+  // it's hit on every refresh.
+  const mods = await Promise.all(
+    entries
+      .filter((entry) => entry.isDirectory() && !SKIP_DIRS.has(entry.name))
+      .map((entry) => buildWorkspaceMod(entry.name, workspaceDir, rimworldModsDir)),
+  );
   mods.sort((a, b) => a.about.name.localeCompare(b.about.name));
   return mods;
+}
+
+async function buildWorkspaceMod(
+  folder: string,
+  workspaceDir: string,
+  rimworldModsDir: string,
+): Promise<WorkspaceMod> {
+  const workspacePath = path.join(workspaceDir, folder);
+  const aboutPath = path.join(workspacePath, 'About', 'About.xml');
+  const [aboutXml, hasCSharp, hasDlls, active, schematic, publishedFileId] =
+    await Promise.all([
+      fsp.readFile(aboutPath, 'utf8').catch(() => null),
+      containsCsproj(path.join(workspacePath, 'Source')),
+      containsDll(path.join(workspacePath, 'Assemblies')),
+      isSymlinkedInto(folder, workspacePath, rimworldModsDir),
+      readSchematic(folder),
+      readPublishedFileId(workspacePath),
+    ]);
+  const about = aboutXml ? parseAbout(aboutXml) : emptyAbout(folder);
+  return {
+    folder,
+    workspacePath,
+    active,
+    about,
+    schematic,
+    hasCSharp,
+    hasDlls,
+    publishedFileId,
+  };
 }
 
 export async function getWorkspaceMod(folder: string): Promise<WorkspaceMod | null> {
@@ -190,7 +207,7 @@ export async function syncModToGame(folder: string): Promise<void> {
     // non-fatal: bad XML / scanner failure / timeout shouldn't block sync.
     console.warn(`${SYNC_LOG_PREFIX} scanAssets failed (continuing):`, err);
   }
-  if (await withTimeout('isModActive', 5_000, () => isModActive(folder, target, rimworldModsDir))) {
+  if (await withTimeout('isSymlinkedInto', 5_000, () => isSymlinkedInto(folder, target, rimworldModsDir))) {
     console.log(`${SYNC_LOG_PREFIX} done (already active) total=${Date.now() - t0}ms`);
     return;
   }
@@ -208,7 +225,7 @@ export async function unsyncModFromGame(folder: string): Promise<void> {
   const { workspaceDir, rimworldModsDir } = getWorkspacePaths();
   const target = path.join(workspaceDir, folder);
   const link = path.join(rimworldModsDir, folder);
-  if (!(await isModActive(folder, target, rimworldModsDir))) {
+  if (!(await isSymlinkedInto(folder, target, rimworldModsDir))) {
     return; // not active or not ours, leave alone
   }
   await fsp.unlink(link);
@@ -291,7 +308,7 @@ export async function importModFromFolder(
     recursive: true,
     errorOnExist: true,
     force: false,
-    filter: (source) => !SKIP.has(path.basename(source)),
+    filter: (source) => !SKIP_DIRS.has(path.basename(source)),
   });
 
   let synthesizedAbout = false;
@@ -309,7 +326,7 @@ export async function importModFromFolder(
     // sensible default for the synthesized display name. User can rename via
     // the agent / About panel later; folder stays the same.
     const fallbackName =
-      sanitizeFolderName(path.basename(resolvedSrc)) || 'Imported Mod';
+      displayNameFromBasename(path.basename(resolvedSrc)) || 'Imported Mod';
     await fsp.writeFile(
       aboutDest,
       renderFreshAboutXml(emptyAbout(fallbackName)),
@@ -380,18 +397,8 @@ export function mintWorkspaceFolderId(workspaceDir: string): string {
   return randomBytes(12).toString('hex');
 }
 
-function sanitizeFolderName(raw: string): string {
+function displayNameFromBasename(raw: string): string {
   return raw.replace(/[^A-Za-z0-9_ -]/g, '').trim();
-}
-
-function uniqueWorkspaceFolder(workspaceDir: string, base: string): string {
-  let candidate = base;
-  let n = 2;
-  while (fs.existsSync(path.join(workspaceDir, candidate))) {
-    candidate = `${base} (${n})`;
-    n += 1;
-  }
-  return candidate;
 }
 
 /**
@@ -408,47 +415,11 @@ export async function deleteWorkspaceMod(folder: string): Promise<void> {
   await fsp.rm(target, { recursive: true, force: true });
 }
 
-async function isModActive(
-  folder: string,
-  workspacePath: string,
-  rimworldModsDir: string,
-): Promise<boolean> {
-  const link = path.join(rimworldModsDir, folder);
-  try {
-    const st = await fsp.lstat(link);
-    if (!st.isSymbolicLink() && process.platform !== 'win32') return false;
-    const resolved = await fsp.realpath(link);
-    return resolved === (await fsp.realpath(workspacePath));
-  } catch {
-    return false;
-  }
-}
-
 async function containsCsproj(dir: string): Promise<boolean> {
   if (!fs.existsSync(dir)) return false;
   try {
     const files = await fsp.readdir(dir);
     return files.some((f) => f.toLowerCase().endsWith('.csproj'));
-  } catch {
-    return false;
-  }
-}
-
-async function readPublishedFileIdFile(workspacePath: string): Promise<string | null> {
-  const file = path.join(workspacePath, 'About', 'PublishedFileId.txt');
-  try {
-    const raw = (await fsp.readFile(file, 'utf8')).trim();
-    return raw || null;
-  } catch {
-    return null;
-  }
-}
-
-async function containsDll(dir: string): Promise<boolean> {
-  if (!fs.existsSync(dir)) return false;
-  try {
-    const files = await fsp.readdir(dir);
-    return files.some((f) => f.toLowerCase().endsWith('.dll'));
   } catch {
     return false;
   }

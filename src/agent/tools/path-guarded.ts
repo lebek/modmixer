@@ -51,13 +51,9 @@ function resolveAndCheck(rawPath: string, cwd: string, label: string): string {
   return abs;
 }
 
-interface ParamShape {
-  [key: string]: unknown;
-}
-
 function getStringField(params: unknown, name: string): string | null {
   if (!params || typeof params !== 'object') return null;
-  const v = (params as ParamShape)[name];
+  const v = (params as Record<string, unknown>)[name];
   return typeof v === 'string' ? v : null;
 }
 

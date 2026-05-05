@@ -1,0 +1,327 @@
+import { ipcRenderer, type IpcRendererEvent } from 'electron';
+import type { AgentMessage } from '@mariozechner/pi-agent-core';
+import type {
+  Consent,
+  ModelSelection,
+  OnboardingState,
+  Settings,
+  ThemePreference,
+} from '../agent/settings';
+import type { EnvSnapshot } from '../agent/env-detect';
+import type { ModelOption } from '../agent/models';
+import type {
+  OAuthEvent,
+  OAuthLink,
+  OpenRouterConfig,
+} from '../agent/agent-host';
+import type { Conversation, ConversationScope } from '../agent/conversations';
+import type {
+  AboutMetadata,
+  ImportModResult,
+  WorkspaceMod,
+  WorkspacePaths,
+} from '../agent/workspace';
+import type { SchematicData } from '../agent/schematic';
+import type { DefEntry } from '../agent/defs-scan';
+import type { DefGraph } from '../agent/def-graph';
+import type { EnableResult, DisableResult } from '../agent/game';
+import type { AssetKind, AssetScan } from '../agent/assets/types';
+import type {
+  BridgeMessage,
+  ModsSnapshot,
+  MonitorConnectionState,
+} from '../agent/monitor/protocol';
+import type {
+  PublishProgressEvent,
+  PublishResult,
+} from '../agent/workshop';
+import type { ConfirmationRequest } from '../agent/security/confirmation-gate';
+import type { IndexSnapshot } from '../agent/index/main-bridge';
+import type { UpdaterState } from '../agent/updater';
+import type { IndexProgressEvent } from '../agent/index/progress';
+import type {
+  ActiveDiff,
+  ActiveSession,
+  AutosortResult,
+  ModDependency,
+} from '../agent/registry';
+
+export interface AgentEventEnvelope {
+  conversationId: string | null;
+  event: import('@mariozechner/pi-coding-agent').AgentSessionEvent;
+}
+
+export interface RegistryEnvelope {
+  snapshot: import('../agent/registry').RegistrySnapshot;
+  analysis: import('../agent/registry').AnalysisResult;
+}
+
+export interface AssetsChangedEnvelope {
+  folder: string;
+}
+
+export interface ModChangedEnvelope {
+  folder: string;
+}
+
+export interface ScopeUpgradedEnvelope {
+  conversationId: string;
+  scope: ConversationScope;
+}
+
+export interface HydratedConversation {
+  conversation: Conversation;
+  messages: AgentMessage[];
+}
+
+export interface EnableWithDepsResult {
+  envelope: RegistryEnvelope;
+  added: string[];
+  missing: string[];
+  alreadyActive: boolean;
+  conflicts: import('../agent/registry').AutosortConflict[];
+}
+
+export interface CommunityRulesInfo {
+  fetchedAt: string | null;
+  source: 'cache' | 'fetched' | 'bundled' | 'empty';
+  count: number;
+  rules?: Record<string, unknown>;
+}
+
+/**
+ * Single source of truth for every request/response IPC channel — channel
+ * name to function shape. Helpers below derive args/return from this map,
+ * so preload methods can't accidentally call a renamed channel and main
+ * handlers can't drift from what the renderer expects (each entry is
+ * shared by both ends through this file's type imports).
+ *
+ * Use a function shape (e.g. `(text: string) => void`) rather than a
+ * tuple — easier to read, and `Parameters<T>` / `ReturnType<T>` recover
+ * everything we need.
+ */
+export interface Channels {
+  // App
+  'modmixer:app:version': () => string;
+
+  // Updater
+  'modmixer:updater:get-state': () => UpdaterState;
+  'modmixer:updater:check': () => UpdaterState;
+  'modmixer:updater:quit-and-install': () => void;
+
+  // Consent
+  'modmixer:consent:get': () => { required: string; accepted: Consent | null };
+  'modmixer:consent:accept': (options?: { analyticsOptIn?: boolean }) => Settings;
+
+  // Onboarding
+  'modmixer:onboarding:get-status': () => {
+    required: string;
+    completed: OnboardingState | null;
+    shouldShow: boolean;
+  };
+  'modmixer:onboarding:complete': () => Settings;
+  'modmixer:onboarding:reset': () => Settings;
+
+  // Env
+  'modmixer:env:detect': () => EnvSnapshot;
+  'modmixer:env:browse-rimworld-install': () => string | null;
+  'modmixer:env:clear-rimworld-install-override': () => null;
+
+  // Agent
+  'modmixer:agent:send': (text: string) => void;
+  'modmixer:agent:interrupt': () => void;
+
+  // Settings
+  'modmixer:settings:get': () => Settings;
+  'modmixer:settings:set-model': (selection: ModelSelection) => Settings;
+  'modmixer:settings:set-default-author': (author: string) => Settings;
+  'modmixer:settings:set-analytics-opt-in': (optIn: boolean) => Settings;
+  'modmixer:settings:set-theme': (theme: ThemePreference) => Settings;
+  'modmixer:models:list': () => ModelOption[];
+
+  // Conversations
+  'modmixer:conversations:list': () => Conversation[];
+  'modmixer:conversations:create': (
+    scope: ConversationScope,
+    title?: string,
+  ) => Conversation;
+  'modmixer:conversations:switch': (id: string) => HydratedConversation;
+  'modmixer:conversations:delete': (id: string) => void;
+  'modmixer:conversations:get-active': () => string | null;
+  'modmixer:conversations:get-active-messages': () => AgentMessage[];
+  'modmixer:conversations:open-for-mod': (folder: string) => HydratedConversation;
+  'modmixer:conversations:start-fresh-for-mod': (
+    folder: string,
+  ) => HydratedConversation;
+
+  // Mods (workspace)
+  'modmixer:mods:list-workspace': () => WorkspaceMod[];
+  'modmixer:mods:sync-to-game': (folder: string) => WorkspaceMod[];
+  'modmixer:mods:unsync-from-game': (folder: string) => WorkspaceMod[];
+  'modmixer:mods:delete': (folder: string) => WorkspaceMod[];
+  'modmixer:mods:import-from-folder': () => {
+    result: ImportModResult;
+    mods: WorkspaceMod[];
+  } | null;
+  'modmixer:mods:create-untitled': () => {
+    folder: string;
+    mods: WorkspaceMod[];
+  };
+  'modmixer:mods:read-about': (folder: string) => AboutMetadata | null;
+  'modmixer:mods:read-schematic': (folder: string) => SchematicData | null;
+  'modmixer:mods:scan-defs': (folder: string) => DefEntry[];
+  'modmixer:mods:def-graph': (folder: string) => DefGraph;
+  'modmixer:mods:write-about': (
+    folder: string,
+    patch: Partial<AboutMetadata>,
+  ) => WorkspaceMod | null;
+  'modmixer:mods:write-deps': (
+    folder: string,
+    deps: {
+      modDependencies: ModDependency[];
+      loadAfter: string[];
+      loadBefore: string[];
+      incompatibleWith: string[];
+    },
+  ) => WorkspaceMod | null;
+  'modmixer:mods:enable-in-game': (folder: string) => EnableResult;
+  'modmixer:mods:disable-in-game': (folder: string) => DisableResult;
+  'modmixer:workspace:paths': () => WorkspacePaths;
+
+  // Game
+  'modmixer:game:launch': () => {
+    executable: string;
+    args: string[];
+    alreadyRunning: boolean;
+  };
+  'modmixer:game:is-running': () => boolean;
+  'modmixer:game:quit': () => { killed: boolean };
+
+  // Assets
+  'modmixer:assets:scan': (folder: string) => AssetScan;
+  'modmixer:assets:add': (
+    folder: string,
+    destRelPath: string,
+    sourceAbsPath: string,
+  ) => AssetScan;
+  'modmixer:assets:remove': (folder: string, relPath: string) => AssetScan;
+  'modmixer:assets:read-data-url': (
+    folder: string,
+    relPath: string,
+  ) => string | null;
+  'modmixer:assets:pick-file': (kind: AssetKind) => string | null;
+
+  // Monitor (in-game bridge)
+  'modmixer:monitor:get-state': () => MonitorConnectionState;
+  'modmixer:monitor:get-snapshot': () => ModsSnapshot | null;
+
+  // OAuth
+  'modmixer:oauth:list': () => OAuthLink[];
+  'modmixer:oauth:login': (providerId: string) => void;
+  'modmixer:oauth:cancel-login': () => void;
+  'modmixer:oauth:provide-code': (providerId: string, value: string) => void;
+  'modmixer:oauth:logout': (providerId: string) => void;
+
+  // OpenRouter
+  'modmixer:openrouter:get-config': () => OpenRouterConfig;
+  'modmixer:openrouter:set-api-key': (key: string | null) => OpenRouterConfig;
+  'modmixer:openrouter:add-model': (slug: string) => OpenRouterConfig;
+  'modmixer:openrouter:remove-model': (slug: string) => OpenRouterConfig;
+
+  // Shell
+  'modmixer:shell:open-external': (url: string) => void;
+  'modmixer:shell:open-folder': (folder: string) => string | null;
+
+  // Lore reveal (power-user)
+  'modmixer:lore:reveal': (args: {
+    tier: 'user' | 'mod';
+    modFolder?: string;
+  }) => string | null;
+
+  // Index
+  'modmixer:index:get-snapshot': () => IndexSnapshot;
+  'modmixer:index:rebuild': (options?: { force?: boolean }) => IndexSnapshot;
+  'modmixer:index:cancel': () => IndexSnapshot;
+
+  // Workshop
+  'modmixer:workshop:publish': (folder: string) => PublishResult;
+  'modmixer:workshop:unlink': (folder: string) => WorkspaceMod | null;
+  'modmixer:workshop:link': (
+    folder: string,
+    workshopId: string,
+  ) => WorkspaceMod | null;
+
+  // Registry
+  'modmixer:registry:get': () => RegistryEnvelope;
+  'modmixer:registry:refresh': () => RegistryEnvelope;
+  'modmixer:registry:set-active': (packageIds: string[]) => RegistryEnvelope;
+  'modmixer:registry:autosort': () => AutosortResult;
+  'modmixer:registry:apply-autosort': () => {
+    envelope: RegistryEnvelope;
+    conflicts: AutosortResult['conflicts'];
+  };
+  'modmixer:registry:enable-with-deps': (
+    packageId: string,
+  ) => EnableWithDepsResult;
+  'modmixer:registry:community-rules': () => CommunityRulesInfo;
+  'modmixer:registry:refresh-community-rules': () => CommunityRulesInfo;
+
+  // Sessions
+  'modmixer:session:get-active': () => ActiveSession | null;
+  'modmixer:session:start-test': (args: {
+    folder: string;
+    packageId: string;
+  }) => {
+    session: ActiveSession;
+    testSet: { reducedActive: string[]; missing: string[] };
+    envelope: RegistryEnvelope;
+  };
+  'modmixer:session:start-fix': () => {
+    session: ActiveSession;
+    envelope: RegistryEnvelope;
+  };
+  'modmixer:session:apply': () => { envelope: RegistryEnvelope };
+  'modmixer:session:revert': () => { envelope: RegistryEnvelope };
+  'modmixer:session:diff': () => ActiveDiff | null;
+}
+
+/**
+ * One-way main → renderer broadcast channels (no reply expected). The
+ * value type is the payload sent.
+ */
+export interface Events {
+  'modmixer:agent:event': AgentEventEnvelope;
+  'modmixer:agent:scope-upgraded': ScopeUpgradedEnvelope;
+  'modmixer:assets:changed': AssetsChangedEnvelope;
+  'modmixer:mod:changed': ModChangedEnvelope;
+  'modmixer:registry:changed': RegistryEnvelope;
+  'modmixer:session:changed': ActiveSession | null;
+  'modmixer:monitor:state': MonitorConnectionState;
+  'modmixer:monitor:message': BridgeMessage;
+  'modmixer:workshop:progress': PublishProgressEvent;
+  'modmixer:oauth:event': OAuthEvent;
+  'modmixer:confirm:request': ConfirmationRequest;
+  'modmixer:index:progress': IndexProgressEvent;
+  'modmixer:updater:state': UpdaterState;
+}
+
+type ChannelArgs<K extends keyof Channels> = Parameters<Channels[K]>;
+type ChannelReturn<K extends keyof Channels> = Awaited<ReturnType<Channels[K]>>;
+
+/** Typed wrapper around `ipcRenderer.invoke`. */
+export function invoke<K extends keyof Channels>(
+  channel: K,
+  ...args: ChannelArgs<K>
+): Promise<ChannelReturn<K>> {
+  return ipcRenderer.invoke(channel, ...args);
+}
+
+/** Subscribe to a one-way main→renderer broadcast. Returns an unsubscribe. */
+export function on<K extends keyof Events>(
+  channel: K,
+  handler: (payload: Events[K]) => void,
+): () => void {
+  const wrapped = (_e: IpcRendererEvent, payload: Events[K]) => handler(payload);
+  ipcRenderer.on(channel, wrapped);
+  return () => ipcRenderer.off(channel, wrapped);
+}

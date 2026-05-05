@@ -17,9 +17,19 @@ interface PromptContext {
   gameVersion: string | null;
 }
 
+// Cache the bits of context that don't change across a process lifetime.
+// `gameVersion` reads ModsConfig.xml from disk synchronously; the workspace
+// + RimWorld path resolution touches the filesystem too. The user can change
+// `defaultAuthor` and `rimworldInstallOverride` mid-session, so paths +
+// settings re-read each time and only `gameVersion` is memoized.
+let cachedGameVersion: { value: string | null } | null = null;
+
 function gatherContext(): PromptContext {
   const ws = getWorkspacePaths();
   const rw = detectRimWorldPaths();
+  if (!cachedGameVersion) {
+    cachedGameVersion = { value: detectGameVersionMajorMinorSync() };
+  }
   return {
     workspaceDir: ws.workspaceDir,
     rimworldModsDir: ws.rimworldModsDir,
@@ -28,7 +38,7 @@ function gatherContext(): PromptContext {
     modsConfig: rw.modsConfig,
     workshopDir: rw.workshopDir,
     defaultAuthor: loadSettings().defaultAuthor,
-    gameVersion: detectGameVersionMajorMinorSync(),
+    gameVersion: cachedGameVersion.value,
   };
 }
 
