@@ -1,5 +1,6 @@
 import type { WorkspaceMod } from '../agent/workspace';
 import { cn } from '@/lib/cn';
+import { useModPreview } from '@/lib/use-mod-preview';
 
 export function ModsView({
   mods,
@@ -88,73 +89,73 @@ function ModCard({
   onSync: () => void;
   onUnsync: () => void;
 }) {
+  const previewUrl = useModPreview(mod.folder);
   return (
-    <div className="group flex flex-col gap-2 rounded-lg border border-line bg-surface/40 p-4 transition-colors hover:border-ink/30">
-      <button
-        onClick={onOpen}
-        className="text-left"
-      >
-        <div className="flex items-baseline gap-3">
-          <span className="font-display text-base font-medium text-ink">
-            {mod.about.name || mod.folder}
-          </span>
-          <span
-            className={cn(
-              'inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.18em]',
-              isEnabled
-                ? 'bg-ready/15 text-ready'
-                : 'bg-raised text-muted',
-            )}
-          >
-            <span
-              className={cn(
-                'h-1.5 w-1.5 rounded-full',
-                isEnabled ? 'bg-ready' : 'bg-pending',
-              )}
-            />
-            {isEnabled ? 'enabled' : 'disabled'}
-          </span>
+    <div className="group flex gap-3 rounded-lg border border-line bg-surface/40 p-4 transition-colors hover:border-ink/30">
+      {previewUrl && (
+        <div className="aspect-square h-24 w-24 shrink-0 self-start overflow-hidden rounded-md border border-line bg-surface/60">
+          <img
+            src={previewUrl}
+            alt=""
+            className="h-full w-full object-cover"
+          />
         </div>
-        {mod.about.packageId && (
-          <div className="mt-0.5 truncate font-mono text-[10px] uppercase tracking-[0.18em] text-subtle">
-            {mod.about.packageId}
-          </div>
-        )}
-        {(mod.schematic?.shortDescription || mod.about.description) && (
-          <p className="mt-2 line-clamp-3 text-sm text-muted">
-            {mod.schematic?.shortDescription || mod.about.description}
-          </p>
-        )}
-        <div className="mt-3 flex items-center gap-3 font-mono text-[10px] uppercase tracking-[0.18em] text-subtle">
-          {mod.hasCSharp && <span>C#</span>}
-          {mod.hasDlls && <span>has dll</span>}
-          {mod.about.supportedVersions.length > 0 && (
-            <span>v={mod.about.supportedVersions.join(',')}</span>
-          )}
-        </div>
-      </button>
-      <div className="mt-2 flex items-center gap-2">
-        {isEnabled ? (
-          <button
-            onClick={onUnsync}
-            className="rounded-md border border-line bg-paper px-3 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-muted transition-colors hover:border-ink/30 hover:text-ink"
-          >
-            disable
-          </button>
-        ) : (
-          <button
-            onClick={onSync}
-            className="rounded-md border border-accent bg-accent px-3 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-accent-foreground transition-colors hover:bg-accent-soft"
-          >
-            enable
-          </button>
-        )}
+      )}
+      <div className="flex min-w-0 flex-1 flex-col gap-2">
         <button
           onClick={onOpen}
-          className="rounded-md border border-line bg-paper px-3 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-muted transition-colors hover:border-ink/30 hover:text-ink"
+          className="text-left"
         >
-          open chat
+          <div className="flex items-baseline gap-3">
+            <span className="font-display text-base font-medium text-ink">
+              {mod.about.name || mod.folder}
+            </span>
+            <span
+              className={cn(
+                'inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.18em]',
+                isEnabled
+                  ? 'bg-ready/15 text-ready'
+                  : 'bg-raised text-muted',
+              )}
+            >
+              <span
+                className={cn(
+                  'h-1.5 w-1.5 rounded-full',
+                  isEnabled ? 'bg-ready' : 'bg-pending',
+                )}
+              />
+              {isEnabled ? 'enabled' : 'disabled'}
+            </span>
+          </div>
+          {(mod.schematic?.shortDescription || mod.about.description) && (
+            <p className="mt-2 line-clamp-3 text-sm text-muted">
+              {mod.schematic?.shortDescription || mod.about.description}
+            </p>
+          )}
         </button>
+        <div className="mt-2 flex items-center gap-2">
+          {isEnabled ? (
+            <button
+              onClick={onUnsync}
+              className="rounded-md border border-line bg-paper px-3 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-muted transition-colors hover:border-ink/30 hover:text-ink"
+            >
+              disable
+            </button>
+          ) : (
+            <button
+              onClick={onSync}
+              className="rounded-md border border-accent bg-accent px-3 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-accent-foreground transition-colors hover:bg-accent-soft"
+            >
+              enable
+            </button>
+          )}
+          <button
+            onClick={onOpen}
+            className="rounded-md border border-line bg-paper px-3 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-muted transition-colors hover:border-ink/30 hover:text-ink"
+          >
+            open chat
+          </button>
+        </div>
       </div>
     </div>
   );
