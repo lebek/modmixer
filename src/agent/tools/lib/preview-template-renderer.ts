@@ -1,8 +1,8 @@
 // Renderer for the template-based Steam-Workshop preview pipeline.
 //
-// Replaces the satori path: the agent picks a template ('classic',
-// 'icon-left', 'banner') and supplies semantic slots (title, sprite, colors).
-// Real Chromium handles layout, font loading, and auto-fit text sizing.
+// The agent picks a template ('classic', 'icon-left', 'banner') and supplies
+// semantic slots (title, sprite, colors); real Chromium handles layout,
+// font loading, and auto-fit text sizing.
 //
 // Window strategy: show:true at (0, 0) with opacity 0. Hidden windows
 // (show:false + paintWhenInitiallyHidden) and far-offscreen positions

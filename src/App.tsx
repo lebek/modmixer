@@ -284,7 +284,7 @@ export function App() {
     setBuildPanel('chat');
     try {
       await window.modmixer.send(
-        `Generate a Steam Workshop preview image for "${displayName}" and save it to ${activeModFolder}/About/Preview.png. Use render_html_to_png with a 1280×720 canvas.`,
+        `Generate a Steam Workshop preview image for "${displayName}" and save it to ${activeModFolder}/About/Preview.png. Use render_preview — pick a template, choose a sprite from Textures/ if any exist, and pick a background and title treatment that fits the mod's tone.`,
       );
     } catch (err) {
       console.error(err);

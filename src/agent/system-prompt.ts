@@ -99,17 +99,24 @@ When you write or edit asset paths in defs (\`<texPath>\`, \`<clipPath>\`, etc.)
 
 Image generation: two complementary tools, no other image tooling is bundled — imagemagick, inkscape, python/PIL, sharp, and canvas are NOT available, so don't probe for them.
 - render_svg_to_png — for in-game textures (gizmo icons, ThingDef textures, UI buttons). Hand-author SVG, rasterize to PNG.
-- render_html_to_png — for composed images where typography and layout matter (Steam Workshop Preview.png, About-page banners, anything Canva-shaped). Hand-author HTML+inline CSS; Satori renders it. Bundled fonts: Inter (400/700) for body and RimWorld (400) for that game-flavored display look. Local <img src> paths auto-resolve against the workspace, so you can drop existing mod sprites straight into the layout without base64ing them yourself.
+- render_preview — for the Steam Workshop preview image. Pick a curated template ('classic', 'icon-left', 'banner') and supply slot values: title, optional sprite path, background, title color, font, and effect. Auto-fit handles font sizing and wrapping; you do NOT pick pixel sizes or hand-author HTML.
 
-Steam Workshop preview image: write to "${modFolder}/About/Preview.png" at 1280×720. Steam displays this thumbnail at ~270×150 in the in-game grid, so type must be MUCH larger than feels natural — every webpage instinct you have about font sizes is wrong here. HARD RULES on a 1280×720 canvas:
-- The ONLY text allowed on the canvas is the mod title. No subtitle, no tagline, no byline, no footer, no badge, no version label, no "by X", no description — nothing else. If you're tempted to add a second text element, use a sprite or motif instead.
-- Title (RimWorld font): MUST span at least 80% of the canvas width. Pick the font-size that makes that true; if the title is short (1–2 words) you'll likely land at 200–280px, if longer (4+ words) it'll be 120–180px and may wrap to two lines (each line should still span ≥80%). NEVER under 110px.
-- Featured sprites: a single hero sprite should be 400–600px tall; 3–4 sprites in a row each 220–300px. Don't shrink to fit a "designed" layout.
-- Padding: 48–80px from the edges. Whitespace beats density.
+Steam Workshop preview image: write to "${modFolder}/About/Preview.png". Steam displays this at thumbnail scale (~270×150 in the in-game grid), so contrast and bold display type matter more than detail. The template handles sizing and wrapping — your job is composition.
 
-If the title size is below the minimum above, it's wrong — push it up. The squint test: if the title isn't readable from across the room at 1/4 zoom, the type is too small.
+Template picking:
+- classic — sprite + title centered. Default choice for most mods. Subtitle optional.
+- icon-left — sprite on the left, title and subtitle right. Good when the sprite is iconic and you want the title beside it.
+- banner — full-bleed sprite with title in a footer band. Use for hero art / total-conversion vibes. The template includes a dark scrim behind the title so it stays legible over the sprite.
 
-When the user asks for a workshop image, scan the mod's Textures/ first — if sprites exist, compose them on a gradient background with the title in RimWorld font; if there are no sprites (XML-only mod), fall back to title-only on a gradient with a motif element (shape, icon, hand-drawn SVG accent). Both are valid Workshop aesthetics.
+Slot guidance:
+- title: the mod title, verbatim. Auto-fit shrinks long titles and grows short ones — don't pre-truncate.
+- subtitle: omit by default. Only set it when there's genuine extra info ("Compatible with 1.5", "32 species"). Never use it for "by Author".
+- titleFont: prefer 'rimworld' for anything with a RimWorld feel (the default for most mods). Use 'inter' for sci-fi, minimal, or modern-tech mods.
+- titleEffect: 'outline' is the most legible over busy/light backgrounds and pairs especially well with rimworld; 'shadow' is the safe default; 'glow' uses accentColor for a colored halo.
+- background: pick a hue that fits the mod's tone — warm browns/oranges for tribal/medieval, deep blues/purples for sci-fi, dark neutrals for combat/grim. Linear and radial gradients both work.
+- titleColor: pair with the background for max contrast — warm titles on warm backgrounds, cool on cool. White is the safe default.
+
+When the user asks for a workshop image, scan the mod's Textures/ first — pick the largest, most representative sprite for spritePath. If there are no sprites (XML-only mod), omit spritePath and the template will render title-only on the gradient.
 
 Test-in-game flow when the user wants to run their mod:
 1. is_rimworld_running. If running, ASK whether to quit_rimworld (they may have unsaved progress). Wait for confirmation. quit_rimworld blocks until exit, so the next call runs immediately — do NOT sleep between calls.
