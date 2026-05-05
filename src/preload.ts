@@ -10,7 +10,11 @@ import type {
 } from './agent/settings';
 import type { EnvSnapshot } from './agent/env-detect';
 import type { ModelOption } from './agent/models';
-import type { OAuthEvent, OAuthLink } from './agent/agent-host';
+import type {
+  OAuthEvent,
+  OAuthLink,
+  OpenRouterConfig,
+} from './agent/agent-host';
 import type {
   Conversation,
   ConversationScope,
@@ -386,6 +390,20 @@ const api = {
     const wrapped = (_e: unknown, event: OAuthEvent) => handler(event);
     ipcRenderer.on('modmixer:oauth:event', wrapped);
     return () => ipcRenderer.off('modmixer:oauth:event', wrapped);
+  },
+
+  // OpenRouter — paste-a-key + paste-a-slug provider.
+  getOpenRouterConfig(): Promise<OpenRouterConfig> {
+    return ipcRenderer.invoke('modmixer:openrouter:get-config');
+  },
+  setOpenRouterApiKey(key: string | null): Promise<OpenRouterConfig> {
+    return ipcRenderer.invoke('modmixer:openrouter:set-api-key', key);
+  },
+  addOpenRouterModel(slug: string): Promise<OpenRouterConfig> {
+    return ipcRenderer.invoke('modmixer:openrouter:add-model', slug);
+  },
+  removeOpenRouterModel(slug: string): Promise<OpenRouterConfig> {
+    return ipcRenderer.invoke('modmixer:openrouter:remove-model', slug);
   },
 
   // Shell

@@ -638,7 +638,7 @@ function SourceBadge({
     : source === 'workshop'
     ? 'Workshop'
     : source === 'workspace'
-    ? 'Workspace'
+    ? 'Modmixer'
     : 'Local';
   const cls = isCore
     ? 'bg-amber-500/15 text-amber-700 border-amber-500/30'

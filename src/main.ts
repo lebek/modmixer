@@ -389,6 +389,25 @@ ipcMain.handle('modmixer:oauth:logout', async (_evt, providerId: string) => {
   await host.logoutOAuth(providerId);
 });
 
+// OpenRouter — BYO key + free-text slug list. Lives outside the OAuth flow
+// because OpenRouter is API-key-only and we don't curate models.
+ipcMain.handle('modmixer:openrouter:get-config', () => host.getOpenRouterConfig());
+
+ipcMain.handle(
+  'modmixer:openrouter:set-api-key',
+  async (_evt, key: string | null) => host.setOpenRouterApiKey(key),
+);
+
+ipcMain.handle(
+  'modmixer:openrouter:add-model',
+  async (_evt, slug: string) => host.addOpenRouterModel(slug),
+);
+
+ipcMain.handle(
+  'modmixer:openrouter:remove-model',
+  async (_evt, slug: string) => host.removeOpenRouterModel(slug),
+);
+
 ipcMain.handle('modmixer:conversations:list', () => listConversations());
 
 ipcMain.handle(

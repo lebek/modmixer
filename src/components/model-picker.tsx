@@ -45,7 +45,8 @@ export function ModelPicker({
       >
         {models.map((m) => (
           <option key={m.key} value={m.key} className="font-mono">
-            {m.providerLabel} — {m.label} {m.costTier}
+            {m.providerLabel} — {m.label}
+            {m.costTier ? ` ${m.costTier}` : ''}
           </option>
         ))}
       </select>

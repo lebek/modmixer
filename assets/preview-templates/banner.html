@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Banner preview</title>
+<link rel="stylesheet" href="_shared.css" />
+<style>
+  .canvas {
+    overflow: hidden;
+  }
+  .hero {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: cover;
+  }
+  .hero-img {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .hero-img img {
+    height: 78%;
+    width: auto;
+    max-width: 78%;
+    object-fit: contain;
+    filter: drop-shadow(0 24px 36px rgba(0,0,0,0.55));
+  }
+  .vignette {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    background: radial-gradient(ellipse at center, rgba(0,0,0,0) 30%, rgba(0,0,0,0.45) 100%);
+  }
+  /* Dedicated dark scrim behind the title footer so titles stay legible
+     when they overlap the sprite. Sized to comfortably cover the footer
+     (subtitle + 320px title-box + 56px bottom padding ≈ 60% of canvas
+     height) and feathered to nothing above. */
+  .scrim {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    background: linear-gradient(
+      to top,
+      rgba(0,0,0,0.92) 0%,
+      rgba(0,0,0,0.92) 48%,
+      rgba(0,0,0,0.7) 60%,
+      rgba(0,0,0,0.0) 78%
+    );
+  }
+  .footer {
+    position: absolute;
+    z-index: 3;
+    left: 64px;
+    right: 64px;
+    bottom: 56px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .subtitle {
+    color: rgba(255,255,255,0.92);
+    font-size: 26px;
+  }
+  .title-box {
+    width: 100%;
+    height: 320px;
+    display: flex;
+    align-items: flex-end;
+  }
+  .title {
+    width: 100%;
+    text-align: left;
+  }
+</style>
+</head>
+<body>
+<div class="canvas" id="canvas">
+  <div class="hero" id="hero"></div>
+  <div class="hero-img"><img id="sprite" alt="" /></div>
+  <div class="vignette"></div>
+  <div class="scrim"></div>
+  <div class="footer">
+    <div class="subtitle" id="subtitle" style="display:none"></div>
+    <div class="title-box" id="titleBox"><div class="title" id="title"></div></div>
+  </div>
+</div>
+<script src="_shared.js"></script>
+<script>
+window.__renderPreview = function (p) {
+  const hero = document.getElementById('hero');
+  hero.style.background = p.background || 'linear-gradient(160deg,#3a1d10 0%,#0d0d10 100%)';
+  const spriteEl = document.getElementById('sprite');
+  const heroImgWrap = spriteEl.parentElement;
+  if (p.spriteUrl) {
+    spriteEl.src = p.spriteUrl;
+    heroImgWrap.style.display = '';
+  } else {
+    heroImgWrap.style.display = 'none';
+  }
+  const title = document.getElementById('title');
+  title.textContent = p.title || '';
+  title.style.color = p.titleColor || '#fff';
+  title.classList.toggle('font-rimworld', p.titleFont === 'rimworld');
+  title.classList.remove('fx-shadow', 'fx-outline', 'fx-glow');
+  if (p.titleEffect && p.titleEffect !== 'none') {
+    title.classList.add('fx-' + p.titleEffect);
+  } else {
+    // banner default: always at least a soft shadow so text reads on hero art
+    title.classList.add('fx-shadow');
+  }
+  if (p.accentColor) document.documentElement.style.setProperty('--accent', p.accentColor);
+  const sub = document.getElementById('subtitle');
+  if (p.subtitle) {
+    sub.textContent = p.subtitle;
+    sub.style.display = '';
+    sub.style.color = p.subtitleColor || 'rgba(255,255,255,0.9)';
+  } else {
+    sub.style.display = 'none';
+  }
+  const titleBox = document.getElementById('titleBox');
+  window.fitText(title, titleBox, { min: 48, max: 200 });
+};
+</script>
+</body>
+</html>

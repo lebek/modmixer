@@ -1,0 +1,82 @@
+@font-face {
+  font-family: 'Inter';
+  font-weight: 400;
+  src: url('../fonts/Inter-Regular.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Inter';
+  font-weight: 700;
+  src: url('../fonts/Inter-Bold.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'RimWorld';
+  font-weight: 400;
+  src: url('../fonts/RimWordFont.ttf') format('truetype');
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  width: 1280px;
+  height: 720px;
+  overflow: hidden;
+  background: #000;
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
+}
+
+.canvas {
+  position: relative;
+  width: 1280px;
+  height: 720px;
+  overflow: hidden;
+}
+
+.title {
+  font-family: 'Inter', sans-serif;
+  font-weight: 700;
+  line-height: 1.0;
+  letter-spacing: -0.02em;
+  white-space: normal;
+  /* Wrap only at spaces. Any word-breaking option (word-break:break-word OR
+     overflow-wrap:break-word) lets the browser slice mid-word at large
+     sizes, which fools the auto-fit measurement into thinking the title
+     fits. We want long single words to overflow so scrollWidth exceeds
+     clientWidth and the binary search shrinks the font instead. */
+  word-break: normal;
+  overflow-wrap: normal;
+  hyphens: none;
+}
+
+.title.font-rimworld {
+  font-family: 'RimWorld', 'Inter', sans-serif;
+  letter-spacing: 0.01em;
+  line-height: 1.05;
+}
+
+.fx-shadow {
+  text-shadow: 0 6px 14px rgba(0,0,0,0.55), 0 2px 4px rgba(0,0,0,0.4);
+}
+.fx-outline {
+  -webkit-text-stroke: 6px #0d0d10;
+  paint-order: stroke fill;
+}
+.fx-glow {
+  text-shadow:
+    0 0 18px rgba(255,255,255,0.35),
+    0 0 36px var(--accent, #ff7a1a),
+    0 4px 10px rgba(0,0,0,0.55);
+}
+
+.subtitle {
+  font-family: 'Inter', sans-serif;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  opacity: 0.85;
+}

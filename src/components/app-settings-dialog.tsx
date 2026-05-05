@@ -1,6 +1,10 @@
 import { useEffect, useState } from 'react';
 import { sanitizeAuthorHandle } from '@/lib/identifiers';
-import type { OAuthEvent, OAuthLink } from '@/agent/agent-host';
+import type {
+  OAuthEvent,
+  OAuthLink,
+  OpenRouterConfig,
+} from '@/agent/agent-host';
 import type { ThemePreference } from '@/agent/settings';
 import type { UpdaterState } from '@/agent/updater';
 import { applyTheme } from '@/lib/theme';
@@ -495,6 +499,179 @@ function ProvidersSection() {
           <div className="px-3 py-3 text-xs text-muted">
             No OAuth providers registered.
           </div>
+        )}
+      </div>
+
+      <OpenRouterSection />
+    </div>
+  );
+}
+
+function OpenRouterSection() {
+  const [config, setConfig] = useState<OpenRouterConfig | null>(null);
+  const [keyInput, setKeyInput] = useState('');
+  const [slugInput, setSlugInput] = useState('');
+  const [savingKey, setSavingKey] = useState(false);
+  const [addingSlug, setAddingSlug] = useState(false);
+
+  useEffect(() => {
+    void window.modmixer.getOpenRouterConfig().then(setConfig);
+  }, []);
+
+  const saveKey = async () => {
+    setSavingKey(true);
+    try {
+      const next = await window.modmixer.setOpenRouterApiKey(keyInput);
+      setConfig(next);
+      setKeyInput('');
+    } finally {
+      setSavingKey(false);
+    }
+  };
+
+  const clearKey = async () => {
+    setSavingKey(true);
+    try {
+      const next = await window.modmixer.setOpenRouterApiKey(null);
+      setConfig(next);
+    } finally {
+      setSavingKey(false);
+    }
+  };
+
+  const addSlug = async () => {
+    const slug = slugInput.trim();
+    if (!slug) return;
+    setAddingSlug(true);
+    try {
+      const next = await window.modmixer.addOpenRouterModel(slug);
+      setConfig(next);
+      setSlugInput('');
+    } finally {
+      setAddingSlug(false);
+    }
+  };
+
+  const removeSlug = async (slug: string) => {
+    const next = await window.modmixer.removeOpenRouterModel(slug);
+    setConfig(next);
+  };
+
+  if (!config) return null;
+
+  return (
+    <div className="space-y-3 rounded-md border border-line">
+      <div className="border-b border-line px-3 py-2.5">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-sm font-medium text-ink">OpenRouter</div>
+            <div className="text-[11px] text-muted">
+              Paste an API key, then add the model slugs you use.
+            </div>
+          </div>
+          <span
+            className={
+              'font-mono text-[10px] uppercase tracking-[0.18em] ' +
+              (config.apiKeyConfigured ? 'text-ready' : 'text-muted')
+            }
+          >
+            {config.apiKeyConfigured ? 'linked' : 'not linked'}
+          </span>
+        </div>
+      </div>
+
+      <div className="space-y-2 px-3 pb-2">
+        <label className="block font-mono text-[10px] uppercase tracking-[0.18em] text-muted">
+          API key
+        </label>
+        <div className="flex items-center gap-2">
+          <input
+            type="password"
+            value={keyInput}
+            onChange={(e) => setKeyInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && keyInput.trim()) void saveKey();
+            }}
+            placeholder={
+              config.apiKeyConfigured
+                ? '••••••••  (paste to replace)'
+                : 'sk-or-v1-…'
+            }
+            className="flex-1 rounded-md border border-line bg-paper px-2 py-1 font-mono text-xs text-ink focus:border-accent focus:outline-none"
+          />
+          <button
+            onClick={() => void saveKey()}
+            disabled={savingKey || !keyInput.trim()}
+            className="rounded-md bg-accent px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-accent-foreground transition-opacity hover:bg-accent-soft disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Save
+          </button>
+          {config.apiKeyConfigured && (
+            <button
+              onClick={() => void clearKey()}
+              disabled={savingKey}
+              className="rounded-md border border-line bg-paper px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-muted transition-colors hover:border-ink/30 hover:text-ink disabled:opacity-40"
+            >
+              Remove
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="space-y-2 border-t border-line px-3 py-3">
+        <label className="block font-mono text-[10px] uppercase tracking-[0.18em] text-muted">
+          Models
+        </label>
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            value={slugInput}
+            onChange={(e) => setSlugInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && slugInput.trim()) void addSlug();
+            }}
+            placeholder="anthropic/claude-sonnet-4.5"
+            className="flex-1 rounded-md border border-line bg-paper px-2 py-1 font-mono text-xs text-ink focus:border-accent focus:outline-none"
+          />
+          <button
+            onClick={() => void addSlug()}
+            disabled={addingSlug || !slugInput.trim()}
+            className="rounded-md border border-line bg-paper px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-muted transition-colors hover:border-ink/30 hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Add
+          </button>
+        </div>
+        {config.models.length === 0 ? (
+          <p className="text-[11px] text-muted">
+            No models saved. Find slugs at{' '}
+            <button
+              type="button"
+              onClick={() =>
+                void window.modmixer.openExternal('https://openrouter.ai/models')
+              }
+              className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted/80 underline-offset-2 hover:text-ink hover:underline"
+            >
+              openrouter.ai/models
+            </button>
+            .
+          </p>
+        ) : (
+          <ul className="divide-y divide-line rounded-md border border-line">
+            {config.models.map((slug) => (
+              <li
+                key={slug}
+                className="flex items-center justify-between px-2.5 py-1.5"
+              >
+                <span className="font-mono text-xs text-ink">{slug}</span>
+                <button
+                  onClick={() => void removeSlug(slug)}
+                  className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted transition-colors hover:text-failed"
+                >
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
         )}
       </div>
     </div>

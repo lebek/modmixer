@@ -84,6 +84,13 @@ export interface Settings {
    * hard-coded candidate list.
    */
   rimworldInstallOverride: string | null;
+  /**
+   * OpenRouter model slugs the user has saved (e.g. "anthropic/claude-sonnet-4.5",
+   * "qwen/qwen3-coder"). Surfaces these in the model picker as additional
+   * options when an OpenRouter API key is stored. The API key itself lives
+   * in AuthStorage (encrypted), not here.
+   */
+  openrouterModels: string[];
 }
 
 let cached: Settings | null = null;
@@ -102,6 +109,7 @@ function computeDefaults(): Settings {
     theme: 'dark',
     onboarding: null,
     rimworldInstallOverride: null,
+    openrouterModels: [],
   };
 }
 
@@ -161,6 +169,12 @@ function normalize(raw: unknown, defaults: Settings): Settings {
     obj.rimworldInstallOverride.length > 0
   ) {
     next.rimworldInstallOverride = obj.rimworldInstallOverride;
+  }
+
+  if (Array.isArray(obj.openrouterModels)) {
+    next.openrouterModels = obj.openrouterModels.filter(
+      (s): s is string => typeof s === 'string' && s.length > 0,
+    );
   }
 
   const m = obj.model;

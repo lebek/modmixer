@@ -32,7 +32,7 @@ import { tailPlayerLogTool } from './tools/tail-player-log.js';
 import { listInstalledModsTool } from './tools/list-installed-mods.js';
 import { decompileDllTool } from './tools/decompile-dll.js';
 import { renderSvgToPngTool } from './tools/render-svg-to-png.js';
-import { renderHtmlToPngTool } from './tools/render-html-to-png.js';
+import { renderPreviewTool } from './tools/render-preview.js';
 import { searchDefsTool } from './tools/search-defs.js';
 import { getDefDetailsTool } from './tools/get-def-details.js';
 import { listDefDescendantsTool } from './tools/list-def-descendants.js';
@@ -75,7 +75,7 @@ import { isRimWorldRunningTool } from './tools/is-rimworld-running.js';
 import { watchPlayerLogTool } from './tools/watch-player-log.js';
 import { notifyTestStatusTool } from './tools/notify-test-status.js';
 import { sendToast } from './notifications.js';
-import { loadSettings } from './settings.js';
+import { loadSettings, saveSettings } from './settings.js';
 import { getWorkspacePaths } from './workspace.js';
 import { ScopedResourceLoader } from './resource-loader.js';
 import {
@@ -132,7 +132,7 @@ function buildCustomTools(cwd: string): AgentTool<any>[] {
     listInstalledModsTool,
     decompileDllTool,
     renderSvgToPngTool,
-    renderHtmlToPngTool,
+    renderPreviewTool,
     // Mod-list manipulation: gated, but auto-approved inside an active fix
     // session so the agent can iterate freely.
     withSessionConfirmation(
@@ -200,7 +200,11 @@ const PROVIDER_LABELS: Record<string, string> = {
   'github-copilot': 'GitHub Copilot',
   'google-gemini-cli': 'Gemini',
   'google-antigravity': 'Antigravity',
+  openrouter: 'OpenRouter',
 };
+
+const OPENROUTER_PROVIDER = 'openrouter';
+const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
 
 function providerLabel(provider: string): string {
   return PROVIDER_LABELS[provider] ?? provider;
@@ -272,6 +276,13 @@ const MODEL_COST_TIER: Record<string, '$' | '$$' | '$$$'> = {
   'gemini-2.5-pro': '$$',
   'gemini-2.5-flash': '$',
 };
+
+export interface OpenRouterConfig {
+  /** True when an API key is persisted in encrypted AuthStorage. */
+  apiKeyConfigured: boolean;
+  /** Slugs the user has saved (rendered as model picker entries). */
+  models: string[];
+}
 
 export interface OAuthLink {
   id: string;
@@ -434,9 +445,56 @@ export class AgentHost {
     try {
       this.authStorage.reload();
       this.modelRegistry.refresh();
+      this.applyOpenRouterRegistration();
     } catch (err) {
       console.error('AgentHost.primeAfterReady failed:', err);
     }
+  }
+
+  /**
+   * Register the user's saved OpenRouter slugs as runtime models in pi's
+   * registry. Pi's built-in openrouter catalog includes ~300 entries, but
+   * the picker only surfaces what the user has explicitly saved here —
+   * registering replaces those built-ins with our short list, which is
+   * fine: anything in pi's static list will simply route through the
+   * stub we register (cost data shows as zero in the UI; OpenRouter
+   * itself enforces actual pricing).
+   */
+  private applyOpenRouterRegistration(): void {
+    const { openrouterModels } = loadSettings();
+    if (openrouterModels.length === 0) {
+      // No models saved → don't touch pi's built-in openrouter list.
+      return;
+    }
+    // Pi's `registerProvider` validates that an apiKey is present whenever
+    // models are defined (the value isn't actually consumed at request time
+    // — the real lookup goes through AuthStorage — but it has to be set).
+    // Pull it sync from AuthStorage, falling back to the env var so users
+    // with `OPENROUTER_API_KEY` exported also get their slugs registered.
+    const cred = this.authStorage.get(OPENROUTER_PROVIDER);
+    const apiKey =
+      cred?.type === 'api_key' ? cred.key : process.env.OPENROUTER_API_KEY;
+    if (!apiKey) {
+      // No key available → skip registration. The slug still shows in the
+      // picker; sending a turn surfaces the missing-key error.
+      return;
+    }
+    this.modelRegistry.registerProvider(OPENROUTER_PROVIDER, {
+      baseUrl: OPENROUTER_BASE_URL,
+      api: 'openai-completions',
+      apiKey,
+      models: openrouterModels.map((slug) => ({
+        id: slug,
+        name: slug,
+        reasoning: false,
+        input: ['text'],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        // 200k is a safe upper bound for "modern" OpenRouter models; the
+        // actual limit is enforced server-side regardless of what we say.
+        contextWindow: 200_000,
+        maxTokens: 8192,
+      })),
+    });
   }
 
   /** Tear down the active session, if any. Used on app exit and on switch. */
@@ -772,7 +830,71 @@ export class AgentHost {
         });
       }
     }
+    // OpenRouter: surface every slug the user has explicitly saved. We
+    // deliberately don't gate on whether an API key is present — adding a
+    // slug is the explicit "I want this" signal, and if the key is missing
+    // OpenRouter will return a clear error at first prompt.
+    const { openrouterModels } = loadSettings();
+    for (const slug of openrouterModels) {
+      out.push({
+        key: `${OPENROUTER_PROVIDER}/${slug}`,
+        provider: OPENROUTER_PROVIDER,
+        providerLabel: providerLabel(OPENROUTER_PROVIDER),
+        modelId: slug,
+        label: slug,
+      });
+    }
     return out;
+  }
+
+  // ---------------------------------------------------------------------------
+  // OpenRouter (BYO API key + arbitrary slugs)
+  // ---------------------------------------------------------------------------
+
+  getOpenRouterConfig(): OpenRouterConfig {
+    return {
+      apiKeyConfigured:
+        this.authStorage.getAuthStatus(OPENROUTER_PROVIDER).source === 'stored',
+      models: loadSettings().openrouterModels,
+    };
+  }
+
+  /** Pass `null` to clear the stored key. */
+  async setOpenRouterApiKey(key: string | null): Promise<OpenRouterConfig> {
+    if (key && key.trim().length > 0) {
+      this.authStorage.set(OPENROUTER_PROVIDER, {
+        type: 'api_key',
+        key: key.trim(),
+      });
+    } else {
+      this.authStorage.remove(OPENROUTER_PROVIDER);
+    }
+    this.applyOpenRouterRegistration();
+    this.emitOAuth({ type: 'links-changed' });
+    await this.refreshActiveModel();
+    return this.getOpenRouterConfig();
+  }
+
+  async addOpenRouterModel(slug: string): Promise<OpenRouterConfig> {
+    const cleaned = slug.trim();
+    if (!cleaned) return this.getOpenRouterConfig();
+    const current = loadSettings().openrouterModels;
+    if (current.includes(cleaned)) return this.getOpenRouterConfig();
+    saveSettings({ openrouterModels: [...current, cleaned] });
+    this.applyOpenRouterRegistration();
+    this.emitOAuth({ type: 'links-changed' });
+    return this.getOpenRouterConfig();
+  }
+
+  async removeOpenRouterModel(slug: string): Promise<OpenRouterConfig> {
+    const current = loadSettings().openrouterModels;
+    const next = current.filter((s) => s !== slug);
+    if (next.length === current.length) return this.getOpenRouterConfig();
+    saveSettings({ openrouterModels: next });
+    this.applyOpenRouterRegistration();
+    this.emitOAuth({ type: 'links-changed' });
+    await this.refreshActiveModel();
+    return this.getOpenRouterConfig();
   }
 
   /** Provider catalog merged with current link status, for the settings UI. */
