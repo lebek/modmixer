@@ -23,7 +23,7 @@ import type {
 import type { AgentTool } from '@mariozechner/pi-agent-core';
 import { getLogWatcher, type LogError } from './log-watcher.js';
 import { isRimWorldRunning } from './game.js';
-import { scaffoldModTool } from './tools/scaffold-mod.js';
+import { createScaffoldModTool } from './tools/scaffold-mod.js';
 import { setModMetadataTool } from './tools/set-mod-metadata.js';
 import { updateSchematicTool } from './tools/update-schematic.js';
 import { buildModTool } from './tools/build-mod.js';
@@ -107,9 +107,12 @@ const HEARTBEAT_INTERVAL_MS = 60_000;
  * bash tool is constructed with a cwd, so it lives inside the host instead
  * of at module scope.
  */
-function buildCustomTools(cwd: string): AgentTool<any>[] {
+function buildCustomTools(
+  cwd: string,
+  getActiveScope: () => ConversationScope | null,
+): AgentTool<any>[] {
   return [
-    scaffoldModTool,
+    createScaffoldModTool(getActiveScope),
     setModMetadataTool,
     updateSchematicTool,
     syncToGameTool,
@@ -421,7 +424,7 @@ export class AgentHost {
       path.join(this.agentDir, 'models.json'),
     );
     this.settingsManager = SettingsManager.create(this.cwd, this.agentDir);
-    const customAgentTools = buildCustomTools(this.cwd);
+    const customAgentTools = buildCustomTools(this.cwd, () => this.active?.scope ?? null);
     this.allowedToolNames = [
       ...BUILTIN_TOOL_NAMES,
       ...customAgentTools

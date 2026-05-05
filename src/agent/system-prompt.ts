@@ -1,5 +1,7 @@
+import path from 'node:path';
+import fs from 'node:fs';
 import { detectRimWorldPaths, detectGameVersionMajorMinorSync } from './paths.js';
-import { getWorkspacePaths } from './workspace.js';
+import { getWorkspacePaths, parseAbout } from './workspace.js';
 import { loadSettings } from './settings.js';
 import { buildIndexSync, LORE_TOPICS } from './lore.js';
 import type { ConversationScope } from './conversations.js';
@@ -85,11 +87,38 @@ Detected install:
 - Workshop subscriptions: ${ctx.workshopDir ?? '(not found)'}`;
 }
 
+function isUntitledPlaceholder(modFolder: string, ctx: PromptContext): boolean {
+  // "Fresh placeholder mod" = the renderer-created scaffold from "+ new mod",
+  // which writes About.xml with an empty <packageId>. The agent uses this
+  // signal to fill in metadata before doing anything else.
+  try {
+    const aboutPath = path.join(
+      ctx.workspaceDir,
+      modFolder,
+      'About',
+      'About.xml',
+    );
+    const xml = fs.readFileSync(aboutPath, 'utf8');
+    return parseAbout(xml).packageId.trim() === '';
+  } catch {
+    return false;
+  }
+}
+
 function modScopeBlock(modFolder: string, ctx: PromptContext): string {
-  return `Active scope: working on the mod "${modFolder}".
+  const untitledIntro = isUntitledPlaceholder(modFolder, ctx)
+    ? `This mod was just created via "New Mod" and has placeholder metadata (empty packageId, "Untitled Mod" as the display name in About.xml). The user is about to describe what they want to build — the mod folder, About.xml, and standard subdirs already exist on disk.
+
+Once you understand the idea, restate the approach in 1–2 sentences and ask any one question that would change the design (C# vs XML-only when ambiguous, single feature vs framework). After the user confirms, call scaffold_mod with name + packageId (\`${ctx.defaultAuthor}.<PascalCaseName>\`) + description (and withCSharp=true if runtime code is clearly needed). scaffold_mod auto-targets this folder — you do NOT need to pass a folder param. Then call update_schematic to seed the agent's working spec.
+
+The on-disk folder name is an opaque random id — never user-facing and intentionally NOT derived from the mod's display name. The display name lives in About.xml's <name>, which scaffold_mod writes for you. Don't try to control or reason about the folder name.
+
+`
+    : '';
+  return `${untitledIntro}Active scope: working on the mod with folder id "${modFolder}".
 Mod path: ${ctx.workspaceDir}/${modFolder}
 
-Stay inside this mod's folder unless asked to inspect another mod.
+The folder name is an opaque internal id — the user-facing name and packageId live in About.xml. Stay inside this mod's folder unless asked to inspect another mod.
 
 To rename or reword the mod's identity, call set_mod_metadata folder="${modFolder}". About.xml's <description> is the user's marketing copy — only rewrite it when they ask. Use update_schematic for the agent's running spec.
 

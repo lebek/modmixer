@@ -2,10 +2,13 @@ import { app } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
+import { randomBytes } from 'node:crypto';
 import { detectRimWorldPaths, detectGameVersionMajorMinorSync } from './paths.js';
 import { readSchematic, type SchematicData } from './schematic.js';
 import { scanAssets } from './assets/scanner.js';
 import { parseAboutXml, type ModDependency } from './registry/about-xml.js';
+import { loadSettings } from './settings.js';
+import { track } from './telemetry.js';
 
 export interface WorkspacePaths {
   /** ModMixer's owned mods directory. The user's WIP mods live here. */
@@ -278,20 +281,10 @@ export async function importModFromFolder(
     );
   }
 
-  const aboutSrc = path.join(resolvedSrc, 'About', 'About.xml');
-  let aboutName = '';
-  try {
-    const xml = await fsp.readFile(aboutSrc, 'utf8');
-    aboutName = parseAbout(xml).name;
-  } catch {
-    // missing or unreadable; fall back to source basename
-  }
-
-  const baseName =
-    sanitizeFolderName(aboutName) ||
-    sanitizeFolderName(path.basename(resolvedSrc)) ||
-    'ImportedMod';
-  const folder = uniqueWorkspaceFolder(workspaceDir, baseName);
+  // Source's About.xml name is preserved inside the copied About.xml, so
+  // the mod's user-facing identity is intact — we just use a random folder
+  // id on disk so we never have to worry about renames or name collisions.
+  const folder = mintWorkspaceFolderId(workspaceDir);
   const dest = path.join(workspaceDir, folder);
 
   await fsp.cp(resolvedSrc, dest, {
@@ -312,9 +305,14 @@ export async function importModFromFolder(
   }
   if (needsFreshAbout) {
     await fsp.mkdir(path.join(dest, 'About'), { recursive: true });
+    // Folder is now a random hex id, so use the source dir's basename as a
+    // sensible default for the synthesized display name. User can rename via
+    // the agent / About panel later; folder stays the same.
+    const fallbackName =
+      sanitizeFolderName(path.basename(resolvedSrc)) || 'Imported Mod';
     await fsp.writeFile(
       aboutDest,
-      renderFreshAboutXml(emptyAbout(folder)),
+      renderFreshAboutXml(emptyAbout(fallbackName)),
       'utf8',
     );
     synthesizedAbout = true;
@@ -325,6 +323,61 @@ export async function importModFromFolder(
     workspacePath: dest,
     synthesizedAbout,
   };
+}
+
+/**
+ * Create a fresh "Untitled Mod" workspace folder with placeholder About.xml
+ * and the standard subdirs. Used by the renderer's "+ new mod" button so
+ * the chat is bound to a real on-disk mod from message zero — if scaffold
+ * never runs the mod is still preserved (and discoverable in the Mods view)
+ * instead of orphaned with the chat. The agent fills in the real metadata
+ * via set_mod_metadata / scaffold_mod once it understands what the user
+ * wants to build.
+ *
+ * The folder name is a random hex id, not "Untitled Mod" — we never want
+ * to rename folders, so the on-disk identifier stays stable for the mod's
+ * entire life and the user-facing name lives in About.xml's <name>.
+ */
+export async function createUntitledMod(): Promise<{
+  folder: string;
+  workspacePath: string;
+}> {
+  const { workspaceDir } = getWorkspacePaths();
+  const folder = mintWorkspaceFolderId(workspaceDir);
+  const modPath = path.join(workspaceDir, folder);
+  const subdirs = ['About', 'Defs', 'Patches', 'Source', 'Textures'];
+  await fsp.mkdir(modPath, { recursive: true });
+  await Promise.all(
+    subdirs.map((d) => fsp.mkdir(path.join(modPath, d), { recursive: true })),
+  );
+  const author = loadSettings().defaultAuthor || 'Modmixer User';
+  const aboutXml = renderFreshAboutXml({
+    ...emptyAbout('Untitled Mod'),
+    author,
+  });
+  await fsp.writeFile(
+    path.join(modPath, 'About', 'About.xml'),
+    aboutXml,
+    'utf8',
+  );
+  track({ name: 'mod_created' });
+  return { folder, workspacePath: modPath };
+}
+
+/**
+ * Mint a fresh random folder id for a workspace mod. 12 hex chars — short
+ * enough to type, long enough that collisions are vanishingly rare (~10^14
+ * possibilities). We retry on collision anyway so the contract is "always
+ * returns a free id."
+ */
+export function mintWorkspaceFolderId(workspaceDir: string): string {
+  for (let i = 0; i < 8; i += 1) {
+    const id = randomBytes(6).toString('hex');
+    if (!fs.existsSync(path.join(workspaceDir, id))) return id;
+  }
+  // Fall through to a longer id if we somehow hit 8 collisions in a row —
+  // the universe is broken but we still need to return something.
+  return randomBytes(12).toString('hex');
 }
 
 function sanitizeFolderName(raw: string): string {

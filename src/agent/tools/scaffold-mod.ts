@@ -2,14 +2,20 @@ import { Type } from 'typebox';
 import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
 import path from 'node:path';
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
 import { detectRimWorldPaths, detectGameVersionMajorMinorSync } from '../paths.js';
-import { getWorkspacePaths } from '../workspace.js';
+import {
+  getWorkspacePaths,
+  mintWorkspaceFolderId,
+  parseAbout,
+} from '../workspace.js';
 import { track } from '../telemetry.js';
+import type { ConversationScope } from '../conversations.js';
 
 const Params = Type.Object({
   name: Type.String({
     description:
-      "Mod display name. Used as the folder name and shown in RimWorld's mod list.",
+      "Mod display name. Used as the folder name (when creating a new mod) and shown in RimWorld's mod list.",
   }),
   packageId: Type.String({
     description:
@@ -34,6 +40,12 @@ const Params = Type.Object({
         'Generate a buildable C# project (Source/<name>.csproj + Source/Mod.cs) wired to RimWorld\'s Assembly-CSharp.dll. Set true when the mod needs runtime code; XML-only mods can leave this false.',
     }),
   ),
+  folder: Type.Optional(
+    Type.String({
+      description:
+        "Existing workspace folder to scaffold into. Almost never needed — when the active conversation is bound to a mod (including the untitled placeholder from \"+ new mod\"), scaffold_mod auto-operates on that folder. Only set this to scaffold a *different* mod's folder than the active scope.",
+    }),
+  ),
 });
 
 export interface ScaffoldModDetails {
@@ -43,18 +55,30 @@ export interface ScaffoldModDetails {
   csharp: boolean;
 }
 
-export const scaffoldModTool: AgentTool<typeof Params, ScaffoldModDetails> = {
-  name: 'scaffold_mod',
-  label: 'Scaffold mod',
-  description:
-    'Create a new RimWorld mod folder in the Modmixer workspace with About.xml and the standard subfolders (About/, Defs/, Patches/, Source/, Textures/). Pass withCSharp=true to also generate a buildable .csproj + Mod.cs. The mod is NOT yet active in the game — call sync_to_game to make it loadable.',
-  parameters: Params,
+/**
+ * Build scaffold_mod with access to the active conversation's scope. When the
+ * scope is mod-pointing-at-an-untitled-placeholder (the renderer's "+ new mod"
+ * pre-creates one), an explicit `folder` param is unnecessary — we redirect
+ * the call to operate on that folder so the agent can't accidentally orphan
+ * the placeholder by inventing a sibling folder.
+ */
+export function createScaffoldModTool(
+  getActiveScope: () => ConversationScope | null,
+): AgentTool<typeof Params, ScaffoldModDetails> {
+  return {
+    name: 'scaffold_mod',
+    label: 'Scaffold mod',
+    description:
+      "Set up a RimWorld mod's About.xml, README, and standard subfolders (About/, Defs/, Patches/, Source/, Textures/). Pass withCSharp=true to also generate a buildable .csproj + Mod.cs. The mod folder itself is an opaque internal id — when the active conversation is already bound to a mod (including the placeholder from \"+ new mod\"), scaffold_mod operates on that folder. Otherwise it mints a fresh folder id; do NOT try to control the folder name via `name`. The mod is NOT yet active in the game — call sync_to_game once scaffolding is done.",
+    parameters: Params,
   async execute(_id, params): Promise<AgentToolResult<ScaffoldModDetails>> {
     const { workspaceDir } = getWorkspacePaths();
     const { managedDir } = detectRimWorldPaths();
 
-    const folderName = params.name.replace(/[^A-Za-z0-9_ -]/g, '').trim();
-    if (!folderName) throw new Error('Invalid mod name.');
+    const folderName =
+      params.folder ??
+      activeUntitledPlaceholderFolder(getActiveScope(), workspaceDir) ??
+      mintWorkspaceFolderId(workspaceDir);
 
     const modPath = path.join(workspaceDir, folderName);
     const subdirs = ['About', 'Defs', 'Patches', 'Source', 'Textures'];
@@ -80,14 +104,25 @@ export const scaffoldModTool: AgentTool<typeof Params, ScaffoldModDetails> = {
 
     const written: string[] = [];
     await write(path.join(modPath, 'About', 'About.xml'), aboutXml, written);
-    await write(
-      path.join(modPath, 'README.md'),
-      `# ${params.name}\n\n${params.description}\n`,
-      written,
-    );
+    // Don't clobber an existing README on in-place scaffolds — the user (or a
+    // previous turn) may already have written one.
+    const readmePath = path.join(modPath, 'README.md');
+    try {
+      await fs.access(readmePath);
+    } catch {
+      await write(
+        readmePath,
+        `# ${params.name}\n\n${params.description}\n`,
+        written,
+      );
+    }
 
     if (params.withCSharp) {
-      const ident = identifierFor(folderName);
+      // Derive the assembly / namespace from the display name, not the
+      // folder — the folder is now an opaque hex id, which would produce
+      // gibberish like `Mod3a2f1b4c` everywhere RimWorld surfaces the
+      // assembly (Player.log, Harmony stack traces, def parse errors).
+      const ident = identifierFor(params.name);
       const csproj = renderCsproj({ assemblyName: ident, managedDir });
       const modCs = renderModCs({ identifier: ident, displayName: params.name });
       await write(
@@ -118,8 +153,36 @@ export const scaffoldModTool: AgentTool<typeof Params, ScaffoldModDetails> = {
       ],
       details: { modPath, folder: folderName, files: written, csharp: !!params.withCSharp },
     };
-  },
-};
+    },
+  };
+}
+
+/**
+ * Returns the active scope's mod folder name iff scope is mod and the mod's
+ * About.xml has an empty packageId — i.e. it's still in the placeholder state
+ * the renderer drops in when "+ new mod" is clicked. Used to redirect a bare
+ * scaffold_mod call to operate in-place rather than spawning a duplicate folder.
+ */
+function activeUntitledPlaceholderFolder(
+  scope: ConversationScope | null,
+  workspaceDir: string,
+): string | null {
+  if (!scope || scope.type !== 'mod') return null;
+  const aboutPath = path.join(
+    workspaceDir,
+    scope.modFolder,
+    'About',
+    'About.xml',
+  );
+  try {
+    const xml = fsSync.readFileSync(aboutPath, 'utf8');
+    if (parseAbout(xml).packageId.trim() === '') return scope.modFolder;
+  } catch {
+    // No About.xml or unreadable — treat as not-a-placeholder; let the caller
+    // fall through to the from-name folder behavior.
+  }
+  return null;
+}
 
 async function write(target: string, content: string, written: string[]) {
   await fs.writeFile(target, content, 'utf8');

@@ -45,6 +45,7 @@ import {
   type ConversationScope,
 } from './agent/conversations.js';
 import {
+  createUntitledMod,
   deleteWorkspaceMod,
   getWorkspaceMod,
   importModFromFolder,
@@ -536,6 +537,17 @@ ipcMain.handle('modmixer:mods:delete', async (_evt, folder: string) => {
 });
 
 ipcMain.handle('modmixer:workspace:paths', () => getWorkspacePaths());
+
+ipcMain.handle('modmixer:mods:create-untitled', async (): Promise<{
+  folder: string;
+  mods: WorkspaceMod[];
+}> => {
+  requireConsent();
+  const { folder } = await createUntitledMod();
+  emitModChanged(folder);
+  await registry.refresh();
+  return { folder, mods: await listWorkspaceMods() };
+});
 
 ipcMain.handle('modmixer:mods:import-from-folder', async (): Promise<{
   result: ImportModResult;

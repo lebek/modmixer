@@ -301,17 +301,20 @@ export function App() {
       openSettings('providers');
       return;
     }
-    // "New mod" is a chat-driven flow: spin up a fresh mod-scope-less
-    // conversation, switch to it, leave the user on the build tab to talk
-    // through the scaffold. After scaffold_mod runs the conversation
-    // rescopes to the new mod automatically.
-    const convo = await window.modmixer.createConversation({ type: 'new' });
-    const hydrated = await window.modmixer.switchConversation(convo.id);
-    setActiveModFolder(null);
-    setActiveConvo(hydrated.conversation);
-    setActiveMessages(hydrated.messages);
-    setBuildPanel('chat');
-    setTab('build');
+    // Create the mod folder up front (placeholder About.xml, standard
+    // subdirs) so the chat is bound to a real on-disk mod from message
+    // zero. If the user bails before the agent fills in metadata, the mod
+    // is still recoverable from the Mods view instead of orphaned.
+    try {
+      const { folder, mods: nextMods } = await window.modmixer.createUntitledMod();
+      setMods(nextMods);
+      await openMod(folder);
+    } catch (err) {
+      console.error(err);
+      void appAlert(
+        err instanceof Error ? err.message : 'Failed to create new mod.',
+      );
+    }
   };
 
   const importMod = async () => {

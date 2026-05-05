@@ -263,6 +263,9 @@ const api = {
   } | null> {
     return ipcRenderer.invoke('modmixer:mods:import-from-folder');
   },
+  createUntitledMod(): Promise<{ folder: string; mods: WorkspaceMod[] }> {
+    return ipcRenderer.invoke('modmixer:mods:create-untitled');
+  },
   readModAbout(folder: string): Promise<AboutMetadata | null> {
     return ipcRenderer.invoke('modmixer:mods:read-about', folder);
   },
