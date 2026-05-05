@@ -80,9 +80,15 @@ function detectExecutable(managedDir: string, os: NodeJS.Platform): string | nul
 
 function detectDataDir(managedDir: string): string | null {
   const installRoot = path.dirname(path.dirname(managedDir));
+  // macOS RimWorldMac.app has a non-standard layout: Managed lives under
+  // Contents/Resources/Data/, but the DLC packs (Core, Biotech, …) sit at
+  // <bundle>/Data/ — a sibling of Contents/, not under Resources/. Probe
+  // four levels up from Managed so we find the bundle root.
+  const bundleRoot = path.dirname(path.dirname(installRoot));
   const candidates = [
     path.join(installRoot, 'Data'),
     installRoot,
+    path.join(bundleRoot, 'Data'),
   ];
   for (const c of candidates) {
     if (fs.existsSync(path.join(c, 'Core', 'Defs'))) return c;
