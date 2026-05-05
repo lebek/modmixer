@@ -2,7 +2,7 @@
 // handlers before any other module body runs. Catches startup crashes that
 // happen during bundled require() — too early for initSentry() to help.
 import { SMOKE_TEST } from './agent/early-error.js';
-import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, shell } from 'electron';
 import path from 'node:path';
 import fsp from 'node:fs/promises';
 import started from 'electron-squirrel-startup';
@@ -149,6 +149,13 @@ app.on('second-instance', () => {
 // rather than package.json's productName. Force it so the dock tooltip,
 // About menu, and userData paths match the packaged app.
 app.setName('Modmixer');
+
+// Hide the default Electron menu strip on Windows/Linux. The Mac menubar lives
+// in the OS chrome so it's free real estate; on other platforms it duplicates
+// our in-app navigation and steals vertical space.
+if (process.platform !== 'darwin') {
+  Menu.setApplicationMenu(null);
+}
 
 // CLI escape hatch for development: `--reset-onboarding` wipes the
 // onboarding record (and optionally the consent record with `--reset-all`)
