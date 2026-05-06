@@ -501,7 +501,7 @@ export class AgentHost {
         'HTTP-Referer': 'https://modmixer.com',
         'X-Title': 'Modmixer',
         'X-OpenRouter-Title': 'Modmixer',
-        'X-OpenRouter-Categories': 'desktop-app',
+        'X-OpenRouter-Categories': 'programming-app,game',
       },
       models: openrouterModels.map((slug) => ({
         id: slug,
