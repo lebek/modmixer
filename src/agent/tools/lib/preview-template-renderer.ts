@@ -15,6 +15,7 @@ import { app, BrowserWindow } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import fssync from 'node:fs';
+import { normalizePreviewBuffer } from '../../assets/preview-normalize.js';
 
 export type PreviewTemplate = 'classic' | 'icon-left' | 'banner';
 export type TitleEffect = 'none' | 'shadow' | 'outline' | 'glow';
@@ -155,10 +156,19 @@ export async function renderPreview(
     }
     if (!png) throw new Error('capturePage returned blank after retries');
 
-    await fs.mkdir(path.dirname(outPath), { recursive: true });
-    await fs.writeFile(outPath, png);
+    // Steam Workshop rejects preview images > 1 MiB; the renderer's PNG can
+    // exceed that for busy gradients/photographic sprites. Run every output
+    // through the shared normalizer so the file on disk is always uploadable.
+    const normalized = await normalizePreviewBuffer(png);
 
-    return { width: W, height: H, bytes: png.length };
+    await fs.mkdir(path.dirname(outPath), { recursive: true });
+    await fs.writeFile(outPath, normalized.buffer);
+
+    return {
+      width: normalized.width,
+      height: normalized.height,
+      bytes: normalized.buffer.length,
+    };
   } finally {
     win.destroy();
   }

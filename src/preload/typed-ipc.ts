@@ -204,6 +204,10 @@ export interface Channels {
     destRelPath: string,
     sourceAbsPath: string,
   ) => AssetScan;
+  'modmixer:assets:set-preview-image': (
+    folder: string,
+    sourceAbsPath: string,
+  ) => AssetScan;
   'modmixer:assets:remove': (folder: string, relPath: string) => AssetScan;
   'modmixer:assets:read-data-url': (
     folder: string,

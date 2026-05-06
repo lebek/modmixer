@@ -101,6 +101,9 @@ dist/
 # Local design mockups / scratch
 .mockups/
 
+# Local-only npm config (e.g. forcing arch=x64 when running dev on Windows-on-ARM)
+.npmrc
+
 # C# build artifacts (vendor/modmixer-bridge)
 bin/
 obj/

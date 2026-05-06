@@ -115,6 +115,8 @@ const api = {
   scanAssets: (folder: string) => invoke('modmixer:assets:scan', folder),
   addAsset: (folder: string, destRelPath: string, sourceAbsPath: string) =>
     invoke('modmixer:assets:add', folder, destRelPath, sourceAbsPath),
+  setPreviewImage: (folder: string, sourceAbsPath: string) =>
+    invoke('modmixer:assets:set-preview-image', folder, sourceAbsPath),
   removeAsset: (folder: string, relPath: string) =>
     invoke('modmixer:assets:remove', folder, relPath),
   pickAssetFile: (kind: import('./agent/assets/types').AssetKind) =>

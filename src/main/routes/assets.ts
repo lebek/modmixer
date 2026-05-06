@@ -5,6 +5,7 @@ import {
   addAssetFile,
   readAssetDataUrl,
   removeAssetFile,
+  setPreviewImageFile,
 } from '../../agent/assets/store.js';
 import { ensureWatching } from '../../agent/assets/watcher.js';
 import type { AssetKind } from '../../agent/assets/types.js';
@@ -40,6 +41,15 @@ export function registerAssetsRoutes(ctx: RouteContext): void {
       sourceAbsPath: string,
     ) => {
       await addAssetFile(folder, destRelPath, sourceAbsPath);
+      const { workspaceDir } = getWorkspacePaths();
+      return scanAssets(path.join(workspaceDir, folder));
+    },
+  );
+
+  ipc.handle(
+    'modmixer:assets:set-preview-image',
+    async (_evt, folder: string, sourceAbsPath: string) => {
+      await setPreviewImageFile(folder, sourceAbsPath);
       const { workspaceDir } = getWorkspacePaths();
       return scanAssets(path.join(workspaceDir, folder));
     },

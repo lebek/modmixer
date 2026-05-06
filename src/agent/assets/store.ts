@@ -2,6 +2,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import { getWorkspacePaths } from '../workspace.js';
+import { normalizePreviewToFile } from './preview-normalize.js';
 
 function modRoot(folder: string): string {
   const { workspaceDir } = getWorkspacePaths();
@@ -32,6 +33,21 @@ export async function addAssetFile(
   const dest = safeJoin(modDir, destRelPath);
   await fsp.mkdir(path.dirname(dest), { recursive: true });
   await fsp.copyFile(sourceAbsPath, dest);
+}
+
+/**
+ * Writes a user-supplied source image to About/Preview.png after running it
+ * through the Steam Workshop normalizer (≤ ~975 KiB, dimension-clamped).
+ * Use this rather than addAssetFile when the user picks a preview image —
+ * Steam rejects oversize previews with k_EResultLimitExceeded at publish.
+ */
+export async function setPreviewImageFile(
+  folder: string,
+  sourceAbsPath: string,
+): Promise<void> {
+  const modDir = modRoot(folder);
+  const dest = safeJoin(modDir, path.join('About', 'Preview.png'));
+  await normalizePreviewToFile(sourceAbsPath, dest);
 }
 
 export async function removeAssetFile(folder: string, relPath: string): Promise<void> {

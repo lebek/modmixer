@@ -20,7 +20,9 @@ export function PreviewImage({
   const browse = useAsyncAction(async () => {
     const sourceAbs = await window.modmixer.pickAssetFile('texture');
     if (!sourceAbs) return;
-    await window.modmixer.addAsset(modFolder, 'About/Preview.png', sourceAbs);
+    // Run through setPreviewImage (not addAsset) so the file is normalized
+    // to fit Steam's 1 MiB preview cap before it lands on disk.
+    await window.modmixer.setPreviewImage(modFolder, sourceAbs);
     const url = await window.modmixer.readAssetDataUrl(modFolder, 'About/Preview.png');
     setPreviewDataUrl(url);
   });

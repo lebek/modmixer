@@ -60,16 +60,31 @@ export function onPublishProgress(
 }
 
 let cachedClient: SteamClient | null = null;
-let initError: Error | null = null;
+
+/**
+ * Steamworks looks for steam_appid.txt in the process cwd when the host wasn't
+ * launched by Steam itself. Electron's default cwd (often a system dir) isn't
+ * reliably writable, so we drop the file in userData and chdir there.
+ */
+function ensureSteamAppIdFile(): void {
+  const dir = app.getPath('userData');
+  const file = path.join(dir, 'steam_appid.txt');
+  if (!fs.existsSync(file)) {
+    fs.writeFileSync(file, String(RIMWORLD_APP_ID), 'utf8');
+  }
+  if (process.cwd() !== dir) process.chdir(dir);
+}
 
 /**
  * Lazy-init the Steamworks client. Throws a descriptive error if Steam isn't
  * running or the SDK fails to load — the caller surfaces that in the UI.
+ * We deliberately don't cache failures: the user can fix Steam state (start
+ * the client, log in, etc.) and retry without restarting the app.
  */
 function ensureSteamInit(): SteamClient {
   if (cachedClient) return cachedClient;
-  if (initError) throw initError;
   try {
+    ensureSteamAppIdFile();
     // In packaged builds the Forge Vite plugin doesn't ship node_modules; we
     // route to the copy placed in Contents/Resources/ via packagerConfig.extraResource.
     const steamworksModule = app.isPackaged
@@ -83,11 +98,11 @@ function ensureSteamInit(): SteamClient {
     cachedClient = steamworks.init(RIMWORLD_APP_ID);
     return cachedClient;
   } catch (err) {
-    initError = new Error(
+    console.error('[workshop] steamworks init failed:', err);
+    throw new Error(
       'Could not connect to Steam. Make sure Steam is running and you own RimWorld, then try again.',
       { cause: err },
     );
-    throw initError;
   }
 }
 
