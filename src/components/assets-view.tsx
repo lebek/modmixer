@@ -198,7 +198,6 @@ function Card({
   const acceptsMask =
     req.kind === 'texture' && (req.spec as TextureSpec).acceptsMask && req.mask;
   const maskPresent = req.mask?.status === 'present';
-  const detailsOpen = req.status !== 'present';
   const showSpecInDetails = req.notes.length > 0;
 
   return (
@@ -283,10 +282,7 @@ function Card({
         )}
       </div>
 
-      <details
-        className="group mt-3 border-t border-line pt-2"
-        open={detailsOpen}
-      >
+      <details className="group mt-3 border-t border-line pt-2">
         <summary className="flex cursor-pointer items-center gap-2 font-mono text-[10px] uppercase tracking-[0.18em] text-muted marker:hidden hover:text-ink">
           <span className="transition-transform group-open:rotate-90">›</span>
           Details
