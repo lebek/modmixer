@@ -75,9 +75,28 @@ export function createScaffoldModTool(
     const { workspaceDir } = getWorkspacePaths();
     const { managedDir } = detectRimWorldPaths();
 
+    const scope = getActiveScope();
+    const placeholderFolder = activeUntitledPlaceholderFolder(scope, workspaceDir);
+    // Refuse if the active conversation already owns a fully-scaffolded mod
+    // and the caller didn't pass an explicit folder. Otherwise the next branch
+    // mints a sibling folder id and orphans the existing mod — which is what
+    // a model in a recovery loop will typically do after an unrelated tool
+    // error (observed in 2026-05-06 Inside-zone session: a failed `edit` led
+    // to three back-to-back scaffold_mod calls, each producing a fresh empty
+    // mod folder). Modify-in-place via update_schematic / set_mod_metadata /
+    // write is what's wanted here.
+    if (!params.folder && !placeholderFolder && scope?.type === 'mod') {
+      const existing = readScopeAbout(scope.modFolder, workspaceDir);
+      const label = existing?.name ?? scope.modFolder;
+      const pkg = existing?.packageId ? `, packageId="${existing.packageId}"` : '';
+      throw new Error(
+        `This conversation is already attached to mod "${label}" (folder="${scope.modFolder}"${pkg}). scaffold_mod would create a sibling folder and orphan the existing mod. To modify it, use update_schematic / set_mod_metadata or write the files directly. To intentionally re-scaffold this mod's standard files, pass folder="${scope.modFolder}". To create a different mod, start a new conversation.`,
+      );
+    }
+
     const folderName =
       params.folder ??
-      activeUntitledPlaceholderFolder(getActiveScope(), workspaceDir) ??
+      placeholderFolder ??
       mintWorkspaceFolderId(workspaceDir);
 
     const modPath = path.join(workspaceDir, folderName);
@@ -182,6 +201,23 @@ function activeUntitledPlaceholderFolder(
     // fall through to the from-name folder behavior.
   }
   return null;
+}
+
+/** Best-effort read of an existing mod's About.xml for use in error messages. */
+function readScopeAbout(
+  modFolder: string,
+  workspaceDir: string,
+): { name: string; packageId: string } | null {
+  try {
+    const xml = fsSync.readFileSync(
+      path.join(workspaceDir, modFolder, 'About', 'About.xml'),
+      'utf8',
+    );
+    const parsed = parseAbout(xml);
+    return { name: parsed.name, packageId: parsed.packageId };
+  } catch {
+    return null;
+  }
 }
 
 async function write(target: string, content: string, written: string[]) {
