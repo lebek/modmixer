@@ -110,6 +110,7 @@ export function BuildView({
         >
           <ChatPanel
             conversation={activeConvo}
+            activeMod={activeMod}
             initialMessages={activeMessages}
             hasAi={hasAi}
             onConnect={onConnect}

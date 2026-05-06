@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AgentMessage } from '@mariozechner/pi-agent-core';
 import type { Conversation } from '../agent/conversations';
+import type { WorkspaceMod } from '../agent/workspace';
 import type { AgentEventEnvelope } from '../preload';
 import { cn } from '@/lib/cn';
 import { extractText, extractToolCalls } from '@/lib/agent-utils';
@@ -13,15 +14,28 @@ type ToolStatus = 'running' | 'done' | 'error';
 
 export function ChatPanel({
   conversation,
+  activeMod,
   initialMessages,
   hasAi,
   onConnect,
 }: {
   conversation: Conversation;
+  activeMod: WorkspaceMod | null;
   initialMessages: AgentMessage[];
   hasAi: boolean;
   onConnect: () => void;
 }) {
+  // A mod-scoped chat with an empty packageId is the renderer-created
+  // placeholder from "+ new mod" — no scaffold_mod yet, so the UX should
+  // still read like a fresh-idea conversation, not an edit-this-mod one.
+  // Mirrors the system prompt's isUntitledPlaceholder check.
+  const effectiveScope: 'mod' | 'new' =
+    conversation.scope.type === 'mod' &&
+    activeMod &&
+    activeMod.folder === conversation.scope.modFolder &&
+    activeMod.about.packageId.trim() === ''
+      ? 'new'
+      : conversation.scope.type;
   const [messages, setMessages] = useState<AgentMessage[]>(initialMessages);
   const [streaming, setStreaming] = useState<AgentMessage | null>(null);
   const [toolStates, setToolStates] = useState<
@@ -151,7 +165,7 @@ export function ChatPanel({
       <div className="relative min-h-0 flex-1">
       <div ref={scrollRef} className="absolute inset-0 space-y-3 overflow-auto px-6 py-4">
         {visible.length === 0 && (
-          <ScopeEmptyState scope={conversation.scope.type} />
+          <ScopeEmptyState scope={effectiveScope} />
         )}
         {visible.map((m, i) => (
           <MessageBubble
@@ -208,7 +222,7 @@ export function ChatPanel({
                   void interrupt();
                 }
               }}
-              placeholder={placeholderForScope(conversation.scope.type)}
+              placeholder={placeholderForScope(effectiveScope)}
               className="block h-20 w-full resize-none bg-transparent text-sm text-ink placeholder:text-subtle focus:outline-none"
             />
             <div className="mt-2 flex items-center justify-end gap-2">
