@@ -194,6 +194,13 @@ function Card({
   req: AssetRequirement;
   onChanged: () => void;
 }) {
+  const headline = req.notes[0] ?? req.spec.description;
+  const acceptsMask =
+    req.kind === 'texture' && (req.spec as TextureSpec).acceptsMask && req.mask;
+  const maskPresent = req.mask?.status === 'present';
+  const detailsOpen = req.status !== 'present';
+  const showSpecInDetails = req.notes.length > 0;
+
   return (
     <div
       className={cn(
@@ -205,43 +212,28 @@ function Card({
             : 'border-ready/30',
       )}
     >
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <code className="truncate font-mono text-sm text-ink">{req.path}</code>
-            <StatusPill status={req.status} />
-            {req.stubbed && (
-              <span
-                title="modmixer wrote a placeholder here so RimWorld won't error. Drop your real file in to replace it."
-                className="inline-flex items-center rounded-full border border-line bg-surface px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.18em] text-subtle"
-              >
-                placeholder
-              </span>
-            )}
-          </div>
-          {req.notes.length > 0 ? (
-            <p className="mt-1 text-sm text-ink">{req.notes[0]}</p>
-          ) : (
-            <p className="mt-1 text-xs italic text-subtle">
-              No description in the def — ask modmixer to annotate this reference.
-            </p>
+      <div className="min-w-0">
+        <div className="flex items-center gap-2">
+          <h3 className="truncate text-sm font-semibold text-ink">
+            {humanizeAssetTitle(req)}
+          </h3>
+          <StatusPill status={req.status} />
+          {req.stubbed && (
+            <span
+              title="modmixer wrote a placeholder here so RimWorld won't error. Drop your real file in to replace it."
+              className="inline-flex items-center rounded-full border border-line bg-surface px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.18em] text-subtle"
+            >
+              placeholder
+            </span>
           )}
-          {req.notes.slice(1).map((n, i) => (
-            <p key={i} className="mt-1 text-xs text-muted">
-              {n}
-            </p>
-          ))}
-          <p className="mt-1 text-xs text-muted">{req.spec.description}</p>
-          {'sizeHint' in req.spec && req.spec.sizeHint && (
-            <p className="mt-0.5 font-mono text-[10px] uppercase tracking-[0.18em] text-subtle">
-              {req.spec.sizeHint}
-            </p>
-          )}
-          <ReferencedBy req={req} />
         </div>
+        <p className="mt-1 text-sm text-ink">{headline}</p>
+        {'sizeHint' in req.spec && req.spec.sizeHint && (
+          <p className="mt-1 text-xs text-muted">{req.spec.sizeHint}</p>
+        )}
       </div>
 
-      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+      <div className="mt-3 space-y-2">
         <DropSlot
           folder={folder}
           relPath={req.path}
@@ -252,25 +244,90 @@ function Card({
           onChanged={onChanged}
           label="Main file"
         />
-        {req.kind === 'texture' &&
-          (req.spec as TextureSpec).acceptsMask &&
-          req.mask && (
-            <DropSlot
-              folder={folder}
-              relPath={req.mask.path}
-              kind="texture"
-              present={req.mask.status === 'present'}
-              issues={req.mask.current?.issues ?? []}
-              meta={req.mask.current?.meta}
-              onChanged={onChanged}
-              label="Team-color mask"
-              optional
-              hint="Optional — only used if you want team-color tinting (apparel, faction items). Skip if not needed."
-            />
-          )}
+        {acceptsMask && req.mask && maskPresent && (
+          <DropSlot
+            folder={folder}
+            relPath={req.mask.path}
+            kind="texture"
+            present={true}
+            issues={req.mask.current?.issues ?? []}
+            meta={req.mask.current?.meta}
+            onChanged={onChanged}
+            label="Team-color mask"
+            optional
+          />
+        )}
+        {acceptsMask && req.mask && !maskPresent && (
+          <details className="group">
+            <summary className="flex cursor-pointer items-center gap-2 text-xs text-subtle marker:hidden hover:text-ink">
+              <span className="font-mono text-[10px] transition-transform group-open:rotate-90">
+                ›
+              </span>
+              add team-color mask
+              <span className="text-[10px] text-subtle">(optional)</span>
+            </summary>
+            <div className="mt-2">
+              <DropSlot
+                folder={folder}
+                relPath={req.mask.path}
+                kind="texture"
+                present={false}
+                issues={[]}
+                onChanged={onChanged}
+                label="Team-color mask"
+                optional
+                hint="Only used if you want team-color tinting (apparel, faction items)."
+              />
+            </div>
+          </details>
+        )}
       </div>
+
+      <details
+        className="group mt-3 border-t border-line pt-2"
+        open={detailsOpen}
+      >
+        <summary className="flex cursor-pointer items-center gap-2 font-mono text-[10px] uppercase tracking-[0.18em] text-muted marker:hidden hover:text-ink">
+          <span className="transition-transform group-open:rotate-90">›</span>
+          Details
+        </summary>
+        <div className="mt-2 space-y-2 pl-4">
+          <div>
+            <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-subtle">
+              Path
+            </div>
+            <code className="block break-all font-mono text-[11px] text-muted">
+              {req.path}
+            </code>
+          </div>
+          {req.notes.length === 0 && (
+            <p className="text-xs italic text-subtle">
+              No description in the def — ask modmixer to annotate this reference.
+            </p>
+          )}
+          {showSpecInDetails && (
+            <p className="text-xs text-muted">{req.spec.description}</p>
+          )}
+          {req.notes.slice(1).map((n, i) => (
+            <p key={i} className="text-xs text-muted">
+              {n}
+            </p>
+          ))}
+          <ReferencedBy req={req} />
+        </div>
+      </details>
     </div>
   );
+}
+
+function humanizeAssetTitle(req: AssetRequirement): string {
+  const basename = req.path.split('/').pop()?.replace(/\.[^.]+$/, '') ?? req.path;
+  const parts = basename.split('_').filter(Boolean);
+  if (parts.length === 0) return basename;
+  const head = parts[0].replace(/([a-z0-9])([A-Z])/g, '$1 $2');
+  if (parts.length === 1) return head;
+  const tail = parts.slice(1).map((p) => p.toLowerCase()).join(', ');
+  return `${head} — ${tail}`;
 }
 
 function StatusPill({ status }: { status: AssetRequirement['status'] }) {
