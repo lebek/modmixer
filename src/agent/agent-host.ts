@@ -499,6 +499,13 @@ export class AgentHost {
         // actual limit is enforced server-side regardless of what we say.
         contextWindow: 200_000,
         maxTokens: 8192,
+        // Kimi K2 emits tool calls in its native `<|tool_call_begin|>` format
+        // that requires the `kimi_k2` parser; not every OpenRouter sub-provider
+        // ships it, so pin to Moonshot's own infra to avoid raw tokens leaking
+        // into tool-call args.
+        ...(slug.startsWith('moonshotai/kimi-k2')
+          ? { compat: { openRouterRouting: { only: ['moonshotai'] } } }
+          : {}),
       })),
     });
   }
