@@ -1,9 +1,11 @@
 import { Type } from 'typebox';
 import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
+import path from 'node:path';
 import {
   resolveSymbol,
   type SymbolMatch,
 } from '../index/resolve-symbol.js';
+import { getIndexPaths } from '../index/paths.js';
 import { getIndexStatus } from '../index/rebuild.js';
 
 const Params = Type.Object({
@@ -50,7 +52,16 @@ export const resolveSymbolTool: AgentTool<typeof Params, ResolveSymbolDetails> =
           details: { matches: [] },
         };
       }
-      const matches = resolveSymbol(params.name, { kind: params.kind });
+      const rawMatches = resolveSymbol(params.name, { kind: params.kind });
+      // Lib returns `filePath` relative to the source-index root (kept that
+      // way for the in-process build-error-hints consumer). At the tool
+      // boundary we surface absolute paths so the agent can pass them
+      // straight to `read` without hallucinating an index prefix.
+      const { sourceRoot } = getIndexPaths();
+      const matches: SymbolMatch[] = rawMatches.map((m) => ({
+        ...m,
+        filePath: path.resolve(sourceRoot, m.filePath),
+      }));
       if (matches.length === 0) {
         return {
           content: [

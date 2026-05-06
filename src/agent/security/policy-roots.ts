@@ -23,6 +23,7 @@ export function getPathPolicyRoots(): PathPolicyRoots {
   cached = {
     workspaceDir,
     managedDir: rim.managedDir,
+    dataDir: rim.dataDir,
     workshopDir: rim.workshopDir,
     rimworldModsDir: rim.modsDir,
     playerLogDir: rim.playerLog ? path.dirname(rim.playerLog) : null,

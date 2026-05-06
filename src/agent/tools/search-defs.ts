@@ -1,6 +1,8 @@
 import { Type } from 'typebox';
 import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
+import path from 'node:path';
 import { openIndexDb } from '../index/db.js';
+import { getIndexPaths } from '../index/paths.js';
 import { getIndexStatus } from '../index/rebuild.js';
 
 const Params = Type.Object({
@@ -121,7 +123,14 @@ export const searchDefsTool: AgentTool<typeof Params, { hits: SearchDefsHit[] }>
         details: { hits: [] },
       };
     }
-    const lines = rows.map(
+    // DB stores `filePath` relative to the def-index root. Surface it
+    // absolute so the agent can pass it straight to `read`/`get_def_details`.
+    const { defsRoot } = getIndexPaths();
+    const absRows: SearchDefsHit[] = rows.map((r) => ({
+      ...r,
+      filePath: path.resolve(defsRoot, r.filePath),
+    }));
+    const lines = absRows.map(
       (r) =>
         `${r.pack} • ${r.defType} • ${r.defName ?? '(abstract)'}${r.label ? ` — ${r.label}` : ''}\n    ${r.filePath}`,
     );
@@ -130,11 +139,11 @@ export const searchDefsTool: AgentTool<typeof Params, { hits: SearchDefsHit[] }>
         {
           type: 'text',
           text:
-            `Found ${rows.length} def${rows.length === 1 ? '' : 's'}.\n\n` +
+            `Found ${absRows.length} def${absRows.length === 1 ? '' : 's'}.\n\n` +
             lines.join('\n'),
         },
       ],
-      details: { hits: rows },
+      details: { hits: absRows },
     };
   },
 };

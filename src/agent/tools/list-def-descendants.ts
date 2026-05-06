@@ -1,6 +1,8 @@
 import { Type } from 'typebox';
 import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
+import path from 'node:path';
 import { openIndexDb } from '../index/db.js';
+import { getIndexPaths } from '../index/paths.js';
 import { getIndexStatus } from '../index/rebuild.js';
 
 const Params = Type.Object({
@@ -69,6 +71,9 @@ export const listDefDescendantsTool: AgentTool<typeof Params, { hits: Descendant
     const seen = new Set<string>();
     const queue: { parent: string; depth: number }[] = [{ parent: params.parent, depth: 0 }];
     const hits: DescendantHit[] = [];
+    // DB stores `filePath` relative to the def-index root; absolutize at the
+    // tool boundary so the agent can pass paths straight to `read`.
+    const { defsRoot } = getIndexPaths();
 
     while (queue.length > 0 && hits.length < limit) {
       const { parent, depth } = queue.shift()!;
@@ -81,7 +86,11 @@ export const listDefDescendantsTool: AgentTool<typeof Params, { hits: Descendant
         const key = `${r.pack}|${r.defType}|${r.defName ?? r.inheritName ?? '?'}`;
         if (seen.has(key)) continue;
         seen.add(key);
-        hits.push({ ...r, depth: depth + 1 });
+        hits.push({
+          ...r,
+          filePath: path.resolve(defsRoot, r.filePath),
+          depth: depth + 1,
+        });
         if (hits.length >= limit) break;
         if (recursive && r.inheritName) {
           queue.push({ parent: r.inheritName, depth: depth + 1 });

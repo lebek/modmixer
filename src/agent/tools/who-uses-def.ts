@@ -1,6 +1,8 @@
 import { Type } from 'typebox';
 import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
+import path from 'node:path';
 import { openIndexDb } from '../index/db.js';
+import { getIndexPaths } from '../index/paths.js';
 import { getIndexStatus } from '../index/rebuild.js';
 
 const Params = Type.Object({
@@ -36,13 +38,13 @@ export const whoUsesDefTool: AgentTool<typeof Params, { hits: RefHit[] }> = {
     }
     const db = openIndexDb();
     const limit = Math.min(Math.max(params.limit ?? 50, 1), 500);
-    const rows = db
+    const rawRows = db
       .prepare(
         'SELECT filePath, line FROM def_reference WHERE defName = ? ORDER BY filePath, line LIMIT ?',
       )
       .all(params.defName, limit) as RefHit[];
 
-    if (rows.length === 0) {
+    if (rawRows.length === 0) {
       return {
         content: [
           { type: 'text', text: `No C# references to "${params.defName}".` },
@@ -50,6 +52,13 @@ export const whoUsesDefTool: AgentTool<typeof Params, { hits: RefHit[] }> = {
         details: { hits: [] },
       };
     }
+    // DB stores `filePath` relative to the source-index root. Surface it
+    // absolute so the agent can pass it straight to `read`.
+    const { sourceRoot } = getIndexPaths();
+    const rows: RefHit[] = rawRows.map((r) => ({
+      ...r,
+      filePath: path.resolve(sourceRoot, r.filePath),
+    }));
     const lines = rows.map((r) => `${r.filePath}:${r.line}`);
     return {
       content: [

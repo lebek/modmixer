@@ -98,7 +98,7 @@ export const readCsharpSymbolTool: AgentTool<typeof Params, { hits: SymbolHit[] 
     const { sourceRoot } = getIndexPaths();
     const hits: SymbolHit[] = [];
     for (const r of rows) {
-      const abs = path.join(sourceRoot, r.filePath);
+      const abs = path.resolve(sourceRoot, r.filePath);
       let body = '';
       let truncated = false;
       try {
@@ -114,7 +114,9 @@ export const readCsharpSymbolTool: AgentTool<typeof Params, { hits: SymbolHit[] 
       } catch {
         body = '<could not read source file>';
       }
-      hits.push({ ...r, body, truncated });
+      // Surface the absolute path so the agent can `read` it for more context
+      // without guessing where the index lives on disk.
+      hits.push({ ...r, filePath: abs, body, truncated });
     }
 
     const text = hits

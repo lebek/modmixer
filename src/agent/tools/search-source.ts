@@ -97,7 +97,13 @@ export const searchSourceTool: AgentTool<typeof Params, { matchedLines: number; 
       params.caseSensitive ? '-s' : '-i',
     ];
     if (params.filePattern) args.push('-g', params.filePattern);
-    args.push('-e', params.query, '.');
+    // Pass `sourceRoot` as the search path (rather than '.' with cwd=sourceRoot)
+    // so ripgrep's `--heading` output prints absolute file paths. The agent's
+    // `read` tool can pass those straight through; relative paths would have
+    // resolved against the agent cwd (the mod workspace) and 404'd, which used
+    // to push the model into hallucinating a `.cache/rimworld-source/...`
+    // prefix.
+    args.push('-e', params.query, sourceRoot);
 
     const result = await runRg(rg, args, sourceRoot, signal);
 

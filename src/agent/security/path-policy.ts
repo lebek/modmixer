@@ -15,6 +15,14 @@ export interface PathPolicyRoots {
   workspaceDir: string;
   /** RimWorld install Managed/ dir (Assembly-CSharp.dll lives here). */
   managedDir: string | null;
+  /**
+   * RimWorld DLC-pack parent dir (`<install>/Data/` on Win/Linux,
+   * `<bundle>/Data/` on macOS). Holds Core/Royalty/Ideology/etc. with their
+   * Defs/Sounds/Textures. Allowed so the agent can read canonical XML when
+   * the def index isn't built — the data is read-only game content with the
+   * same risk profile as the Workshop and Managed dirs.
+   */
+  dataDir: string | null;
   /** Steam Workshop subscriptions root for RimWorld (294100). */
   workshopDir: string | null;
   /** RimWorld user-data Mods/ dir (where sync_to_game drops symlinks). */
@@ -149,6 +157,7 @@ export function assertPathAllowed(
   const candidates = [
     roots.workspaceDir,
     roots.managedDir,
+    roots.dataDir,
     roots.workshopDir,
     roots.rimworldModsDir,
     roots.playerLogDir,

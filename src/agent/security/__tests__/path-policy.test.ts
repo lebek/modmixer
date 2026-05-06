@@ -17,6 +17,10 @@ const ROOTS: PathPolicyRoots = {
     HOME,
     'Library/Application Support/Steam/steamapps/common/RimWorld/RimWorldMac.app/Contents/Resources/Data/Managed',
   ),
+  dataDir: path.join(
+    HOME,
+    'Library/Application Support/Steam/steamapps/common/RimWorld/RimWorldMac.app/Data',
+  ),
   workshopDir: path.join(
     HOME,
     'Library/Application Support/Steam/steamapps/workshop/content/294100',
@@ -45,6 +49,11 @@ describe('assertPathAllowed', () => {
 
   it('accepts a Workshop subscription path', () => {
     const ok = path.join(ROOTS.workshopDir!, '12345/Assemblies/Foo.dll');
+    assert.equal(assertPathAllowed(ok, ROOTS), ok);
+  });
+
+  it('accepts a canonical DLC-pack def XML under dataDir', () => {
+    const ok = path.join(ROOTS.dataDir!, 'Core/Defs/RecipeDefs/Recipes_Meals.xml');
     assert.equal(assertPathAllowed(ok, ROOTS), ok);
   });
 

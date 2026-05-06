@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { promises as fs } from 'node:fs';
+import fsSync, { promises as fs } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import type { ForgeConfig } from '@electron-forge/shared-types';
@@ -17,12 +17,46 @@ const requireCJS = createRequire(__filename);
 
 const ICON_BASE = path.resolve(__dirname, 'assets/icon');
 
+// Probe the installed Electron binary's PE machine type so cross-arch dev
+// environments (Windows-on-ARM running an x64 Electron under Prism) rebuild
+// native modules against the *Electron* arch, not the host arch. Without
+// this, `@electron/rebuild` defaults to process.arch (arm64) and produces a
+// .node the x64 Electron refuses to load with "not a valid Win32
+// application". On non-Windows or when the probe fails, falls back to
+// process.arch — which is correct on real native installs and in CI (where
+// host arch always equals Electron arch).
+function detectElectronArch(): NodeJS.Architecture {
+  if (process.platform !== 'win32') return process.arch;
+  const electronExe = path.resolve(
+    __dirname,
+    'node_modules/electron/dist/electron.exe',
+  );
+  try {
+    const fd = fsSync.openSync(electronExe, 'r');
+    try {
+      const buf = Buffer.alloc(1024);
+      fsSync.readSync(fd, buf, 0, 1024, 0);
+      const peOff = buf.readInt32LE(0x3c);
+      const machine = buf.readUInt16LE(peOff + 4);
+      if (machine === 0x8664) return 'x64';
+      if (machine === 0xaa64) return 'arm64';
+    } finally {
+      fsSync.closeSync(fd);
+    }
+  } catch {
+    // Electron not installed yet, or the path differs from expectations —
+    // fall through to the host-arch fallback.
+  }
+  return process.arch;
+}
+
 // Resolve the target arch for staging. Forge's CLI passes --arch=<arch> to
 // the make/package command; we parse it out of process.argv here so that
 // cross-arch local makes (e.g. `npm run make -- --arch=x64` from an ARM64
 // host) produce dist/<mod>/ with the right-arch binary. Falls back to
-// process.arch — in CI that's correct because we now use native runners
-// per matrix entry (host arch always equals target arch).
+// detectElectronArch() — i.e. whichever arch the installed Electron itself
+// is — so dev (`npm start`, no --arch flag) doesn't produce a .node that
+// Electron can't load.
 function getTargetArch(): NodeJS.Architecture {
   for (let i = 0; i < process.argv.length; i++) {
     const arg = process.argv[i];
@@ -33,7 +67,7 @@ function getTargetArch(): NodeJS.Architecture {
       return arg.slice('--arch='.length) as NodeJS.Architecture;
     }
   }
-  return process.arch;
+  return detectElectronArch();
 }
 
 // Stage better-sqlite3 with its `bindings` and `file-uri-to-path` runtime
@@ -198,6 +232,11 @@ const config: ForgeConfig = {
       await stageBetterSqlite();
     },
   },
+  // Forge's ForgeRebuildOptions explicitly omits `arch`; the value is read
+  // from `process.env.npm_config_arch || process.arch` inside its start()
+  // entrypoint. scripts/dev-start.mjs probes Electron's actual PE arch and
+  // sets that env var before invoking electron-forge, so on Windows-on-ARM
+  // (host arm64, Electron x64 via Prism) the rebuild lands on x64.
   rebuildConfig: {},
   makers: [
     new MakerSquirrel({
