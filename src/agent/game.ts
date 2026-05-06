@@ -149,6 +149,13 @@ export interface LaunchOptions {
    * testing a mod without grinding through colony setup).
    */
   args?: string[];
+  /**
+   * When set, prepends `-savedatafolder=<path>` so RimWorld relocates its
+   * entire LocalLow tree (Config/ModsConfig.xml, Prefs.xml, saves, scenarios)
+   * to this dir for the session. Used by the isolated-test launch path so
+   * the user's real mod list is never touched even on a crash.
+   */
+  savedataFolder?: string;
 }
 
 export interface LaunchResult {
@@ -173,7 +180,10 @@ export interface LaunchResult {
 export async function launchRimWorld(
   opts: LaunchOptions = {},
 ): Promise<LaunchResult> {
-  const args = opts.args ?? [];
+  const userArgs = opts.args ?? [];
+  const args = opts.savedataFolder
+    ? [`-savedatafolder=${opts.savedataFolder}`, ...userArgs]
+    : userArgs;
   const { executable } = detectRimWorldPaths();
   if (!executable) {
     throw new Error(

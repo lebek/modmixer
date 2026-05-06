@@ -108,7 +108,7 @@ export async function snapshotModsConfig(): Promise<string | null> {
   return fsp.readFile(file, 'utf8');
 }
 
-function renderModsConfigXml(c: ModsConfigContents): string {
+export function renderModsConfigXml(c: ModsConfigContents): string {
   const active = c.activeMods.map((p) => `    <li>${escapeXml(p)}</li>`).join('\n');
   const known = c.knownExpansions
     .map((p) => `    <li>${escapeXml(p)}</li>`)
