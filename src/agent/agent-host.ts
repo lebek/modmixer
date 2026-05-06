@@ -489,6 +489,20 @@ export class AgentHost {
       baseUrl: OPENROUTER_BASE_URL,
       api: 'openai-completions',
       apiKey,
+      // OpenRouter app-attribution headers — show our app name and link on
+      // https://openrouter.ai/rankings. Overrides pi-coding-agent's built-in
+      // defaults (which point to pi.dev / "pi"). `HTTP-Referer` is what
+      // OpenRouter scrapes for the listing; `X-Title` is the display
+      // override. The `X-OpenRouter-*` keys are pi-mono's own bespoke
+      // labels (not part of OpenRouter's spec) — overridden so we don't
+      // identify as "pi" anywhere in the request.
+      // https://openrouter.ai/docs/app-attribution
+      headers: {
+        'HTTP-Referer': 'https://modmixer.com',
+        'X-Title': 'Modmixer',
+        'X-OpenRouter-Title': 'Modmixer',
+        'X-OpenRouter-Categories': 'desktop-app',
+      },
       models: openrouterModels.map((slug) => ({
         id: slug,
         name: slug,
