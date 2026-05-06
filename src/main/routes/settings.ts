@@ -1,3 +1,4 @@
+import type { ThinkingLevel } from '@mariozechner/pi-agent-core';
 import {
   loadSettings,
   saveSettings,
@@ -41,6 +42,15 @@ export function registerSettingsRoutes(ctx: RouteContext): void {
   ipc.handle(
     'modmixer:settings:set-theme',
     (_evt, theme: ThemePreference) => saveSettings({ theme }),
+  );
+
+  ipc.handle(
+    'modmixer:settings:set-thinking-level',
+    (_evt, level: ThinkingLevel) => {
+      const next = saveSettings({ thinkingLevel: level });
+      host.setThinkingLevel(level);
+      return next;
+    },
   );
 
   ipc.handle('modmixer:models:list', () => host.listAvailableModels());

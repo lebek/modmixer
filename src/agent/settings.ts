@@ -3,6 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
+import type { ThinkingLevel } from '@mariozechner/pi-agent-core';
 import { sanitizeAuthorHandle } from '../lib/identifiers.js';
 
 export interface ModelSelection {
@@ -11,6 +12,22 @@ export interface ModelSelection {
 }
 
 export type ThemePreference = 'dark' | 'light' | 'auto';
+
+export const THINKING_LEVELS: ThinkingLevel[] = [
+  'off',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+];
+
+function isThinkingLevel(value: unknown): value is ThinkingLevel {
+  return (
+    typeof value === 'string' &&
+    (THINKING_LEVELS as readonly string[]).includes(value)
+  );
+}
 
 export interface Consent {
   /** Consent version the user accepted. Matches CURRENT_CONSENT_VERSION at acceptance time. */
@@ -91,6 +108,13 @@ export interface Settings {
    * in AuthStorage (encrypted), not here.
    */
   openrouterModels: string[];
+  /**
+   * User's preferred reasoning level. Surfaced as a dropdown next to the
+   * model picker. Pi clamps this against the active model's capabilities
+   * (e.g. "xhigh" → "high" on anything that's not Opus 4.7), so the value
+   * here is the user's intent — not necessarily what the next turn will use.
+   */
+  thinkingLevel: ThinkingLevel;
 }
 
 let cached: Settings | null = null;
@@ -110,6 +134,7 @@ function computeDefaults(): Settings {
     onboarding: null,
     rimworldInstallOverride: null,
     openrouterModels: [],
+    thinkingLevel: 'medium',
   };
 }
 
@@ -176,6 +201,10 @@ function normalize(raw: unknown, defaults: Settings): Settings {
     next.openrouterModels = obj.openrouterModels.filter(
       (s): s is string => typeof s === 'string' && s.length > 0,
     );
+  }
+
+  if (isThinkingLevel(obj.thinkingLevel)) {
+    next.thinkingLevel = obj.thinkingLevel;
   }
 
   const model = readObjectShape<ModelSelection>(obj.model, {

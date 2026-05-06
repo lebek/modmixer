@@ -4,7 +4,7 @@ import type { Conversation } from '../agent/conversations';
 import type { WorkspaceMod } from '../agent/workspace';
 import type { AgentEventEnvelope } from '../preload';
 import { cn } from '@/lib/cn';
-import { extractText, extractToolCalls } from '@/lib/agent-utils';
+import { extractText, extractThinking, extractToolCalls } from '@/lib/agent-utils';
 import { useAsyncAction } from '@/lib/use-async-action';
 import { useScrollPin } from '@/lib/use-scroll-pin';
 import { Markdown } from './markdown';
@@ -177,6 +177,7 @@ export function ChatPanel({
                 ? findToolCallArgs(visible, i, m.toolCallId)
                 : undefined
             }
+            isStreaming={streaming != null && i === visible.length - 1}
           />
         ))}
         {compacting && (
@@ -352,10 +353,12 @@ function MessageBubble({
   message,
   toolStates,
   toolCallArgs,
+  isStreaming,
 }: {
   message: AgentMessage;
   toolStates: Record<string, { name: string; status: ToolStatus }>;
   toolCallArgs?: Record<string, unknown>;
+  isStreaming: boolean;
 }) {
   if (message.role === 'user') {
     return (
@@ -370,14 +373,30 @@ function MessageBubble({
   if (message.role === 'assistant') {
     const text = extractText(message.content);
     const toolCalls = extractToolCalls(message.content);
-    const isEmpty = !text && toolCalls.length === 0;
+    const hasContent = !!text || toolCalls.length > 0;
+    // Some models (e.g. Kimi K2.6 via OpenRouter) ignore reasoning=none and
+    // return their entire answer inside a thinking block. Surface it instead
+    // of leaving the bubble blank — but only when the turn is actually done,
+    // since mid-stream a thinking-only state usually means text is still on
+    // its way.
+    const fallbackThinking =
+      !hasContent && !isStreaming ? extractThinking(message.content) : '';
+    const showSpinner = !hasContent && !fallbackThinking && isStreaming;
+    // Slugs like "moonshotai/kimi-k2.6" or "accounts/fireworks/models/kimi-k2p6"
+    // — only the tail is meaningful in the bubble header.
+    const modelLabel = message.model.split('/').pop() || message.model;
     return (
       <div className="rounded-md border border-line bg-paper/70 p-3">
         <div className="mb-1 font-mono text-[10px] uppercase tracking-[0.18em] text-muted">
-          modmixer
+          modmixer <span className="text-subtle">·</span> {modelLabel}
         </div>
         {text && <Markdown>{text}</Markdown>}
-        {isEmpty && <ThinkingIndicator />}
+        {fallbackThinking && (
+          <div className="opacity-80">
+            <Markdown>{fallbackThinking}</Markdown>
+          </div>
+        )}
+        {showSpinner && <ThinkingIndicator />}
         {toolCalls.map((c) => (
           <ToolBadge
             key={c.id}

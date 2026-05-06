@@ -58,6 +58,8 @@ const api = {
     invoke('modmixer:settings:set-analytics-opt-in', optIn),
   setTheme: (theme: import('./agent/settings').ThemePreference) =>
     invoke('modmixer:settings:set-theme', theme),
+  setThinkingLevel: (level: import('@mariozechner/pi-agent-core').ThinkingLevel) =>
+    invoke('modmixer:settings:set-thinking-level', level),
   listModels: () => invoke('modmixer:models:list'),
 
   // Conversations

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { AgentMessage } from '@mariozechner/pi-agent-core';
+import type { AgentMessage, ThinkingLevel } from '@mariozechner/pi-agent-core';
 import type { Conversation } from './agent/conversations';
 import type { WorkspaceMod } from './agent/workspace';
 import type { ModelOption } from './agent/models';
@@ -8,6 +8,7 @@ import type { ActiveSession } from './agent/registry';
 import type { RegistryEnvelope } from './preload';
 import { GridMark } from './components/grid-mark';
 import { ModelPicker } from './components/model-picker';
+import { ThinkingPicker } from './components/thinking-picker';
 import { AppSettingsDialog, type SettingsSection } from './components/app-settings-dialog';
 import { IndexProgressModal } from './components/index-progress-modal';
 import { TabNav, type Tab } from './components/tab-nav';
@@ -29,6 +30,7 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [availableModels, setAvailableModels] = useState<ModelOption[]>([]);
   const [currentModel, setCurrentModel] = useState<ModelSelection | null>(null);
+  const [thinkingLevel, setThinkingLevelState] = useState<ThinkingLevel>('medium');
   const [settingsSection, setSettingsSection] = useState<SettingsSection | null>(
     null,
   );
@@ -54,7 +56,10 @@ export function App() {
 
   useEffect(() => {
     void refreshModels();
-    void window.modmixer.getSettings().then((s) => setCurrentModel(s.model));
+    void window.modmixer.getSettings().then((s) => {
+      setCurrentModel(s.model);
+      setThinkingLevelState(s.thinkingLevel);
+    });
     // links-changed and login-success/logout all imply the available-model
     // list may have changed.
     return window.modmixer.onOAuthEvent((event) => {
@@ -164,6 +169,11 @@ export function App() {
   const setModel = useCallback(async (selection: ModelSelection) => {
     setCurrentModel(selection);
     await window.modmixer.setModel(selection);
+  }, []);
+
+  const setThinkingLevel = useCallback(async (level: ThinkingLevel) => {
+    setThinkingLevelState(level);
+    await window.modmixer.setThinkingLevel(level);
   }, []);
 
   const openMod = useCallback(
@@ -364,6 +374,9 @@ export function App() {
             onChange={setModel}
             onConnect={() => openSettings('providers')}
           />
+          {hasAi && (
+            <ThinkingPicker current={thinkingLevel} onChange={setThinkingLevel} />
+          )}
           <button
             onClick={() =>
               void window.modmixer.openExternal(

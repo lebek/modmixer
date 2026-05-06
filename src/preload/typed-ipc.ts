@@ -1,5 +1,5 @@
 import { ipcRenderer, type IpcRendererEvent } from 'electron';
-import type { AgentMessage } from '@mariozechner/pi-agent-core';
+import type { AgentMessage, ThinkingLevel } from '@mariozechner/pi-agent-core';
 import type {
   Consent,
   ModelSelection,
@@ -137,6 +137,7 @@ export interface Channels {
   'modmixer:settings:set-default-author': (author: string) => Settings;
   'modmixer:settings:set-analytics-opt-in': (optIn: boolean) => Settings;
   'modmixer:settings:set-theme': (theme: ThemePreference) => Settings;
+  'modmixer:settings:set-thinking-level': (level: ThinkingLevel) => Settings;
   'modmixer:models:list': () => ModelOption[];
 
   // Conversations

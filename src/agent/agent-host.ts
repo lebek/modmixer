@@ -20,7 +20,7 @@ import type {
   OAuthPrompt,
   OAuthProviderId,
 } from '@mariozechner/pi-ai';
-import type { AgentTool } from '@mariozechner/pi-agent-core';
+import type { AgentTool, ThinkingLevel } from '@mariozechner/pi-agent-core';
 import { getLogWatcher, type LogError } from './log-watcher.js';
 import { isRimWorldRunning } from './game.js';
 import { createScaffoldModTool } from './tools/scaffold-mod.js';
@@ -571,6 +571,7 @@ export class AgentHost {
       buildSystemPrompt(convo.scope),
     );
 
+    const { thinkingLevel } = loadSettings();
     const { session } = await createAgentSession({
       cwd: this.cwd,
       agentDir: this.agentDir,
@@ -580,6 +581,7 @@ export class AgentHost {
       sessionManager,
       resourceLoader,
       model,
+      thinkingLevel,
       tools: this.allowedToolNames,
       customTools: this.customTools,
     });
@@ -782,6 +784,19 @@ export class AgentHost {
     }
     if (this.active) {
       await this.active.session.setModel(model);
+    }
+  }
+
+  /**
+   * Apply the user's preferred thinking level to the active session. Pi
+   * clamps internally against the model's available levels, so passing
+   * "xhigh" to Kimi quietly becomes "high" inside the session — that's
+   * fine; the saved preference (in settings.json) is the source of truth
+   * across model switches.
+   */
+  setThinkingLevel(level: ThinkingLevel): void {
+    if (this.active) {
+      this.active.session.setThinkingLevel(level);
     }
   }
 

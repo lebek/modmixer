@@ -12,6 +12,20 @@ export function extractText(content: unknown): string {
     .join('');
 }
 
+export function extractThinking(content: unknown): string {
+  if (!Array.isArray(content)) return '';
+  return content
+    .filter(
+      (c) =>
+        c &&
+        typeof c === 'object' &&
+        (c as { type?: string }).type === 'thinking',
+    )
+    .map((c) => (c as { thinking?: string }).thinking ?? '')
+    .join('\n\n')
+    .trim();
+}
+
 export function extractToolCalls(
   content: unknown,
 ): Array<{ id: string; name: string; arguments: Record<string, unknown> }> {
