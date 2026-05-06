@@ -13,6 +13,10 @@ export const SKIP_DIRS = new Set([
   'bin',
   'obj',
   'node_modules',
+  // Modmixer sidecar dir living at the workspace root. Holds per-mod data
+  // we explicitly don't want shipped to Steam (e.g. preview BG sources)
+  // and which RimWorld must never see as a candidate mod folder.
+  '.modmixer',
 ]);
 
 /**

@@ -44,7 +44,13 @@ const Params = Type.Object({
   background: Type.Optional(
     Type.String({
       description:
-        "CSS background — either a color (`#1c2030`) or a gradient (`linear-gradient(160deg,#3a1d10 0%,#0d0d10 100%)`, `radial-gradient(circle at 30% 20%, #ff7a1a 0%, #7a1f00 55%, #0d0d10 100%)`). Pick a hue that fits the mod's tone. Defaults to a dark neutral.",
+        "CSS background — either a color (`#1c2030`) or a gradient (`linear-gradient(160deg,#3a1d10 0%,#0d0d10 100%)`, `radial-gradient(circle at 30% 20%, #ff7a1a 0%, #7a1f00 55%, #0d0d10 100%)`). Pick a hue that fits the mod's tone. Defaults to a dark neutral. Ignored if `backgroundImagePath` is set.",
+    }),
+  ),
+  backgroundImagePath: Type.Optional(
+    Type.String({
+      description:
+        "Path to a full-bleed background image (typically a game screenshot the user supplied). Relative paths resolve against the workspace; absolute paths are also accepted. Must be inside the workspace. When set, the image is rendered as `cover` behind the composition and the `background` color/gradient is ignored. A legibility scrim is added automatically so the title stays readable. Use this whenever the user has provided a background image — pick a `titleEffect` like `outline` or `shadow` to keep the title legible over the image.",
     }),
   ),
   titleColor: Type.Optional(
@@ -116,6 +122,18 @@ export const renderPreviewTool: AgentTool<typeof Params, RenderPreviewDetails> =
       assertPathAllowed(absSpritePath, getPathPolicyRoots(), 'spritePath');
     }
 
+    let absBackgroundImagePath: string | undefined;
+    if (params.backgroundImagePath) {
+      absBackgroundImagePath = path.isAbsolute(params.backgroundImagePath)
+        ? params.backgroundImagePath
+        : path.resolve(workspaceDir, params.backgroundImagePath);
+      assertPathAllowed(
+        absBackgroundImagePath,
+        getPathPolicyRoots(),
+        'backgroundImagePath',
+      );
+    }
+
     const { width, height, bytes } = await renderPreview(
       {
         template: params.template,
@@ -123,6 +141,7 @@ export const renderPreviewTool: AgentTool<typeof Params, RenderPreviewDetails> =
         subtitle: params.subtitle,
         spritePath: absSpritePath,
         background: params.background,
+        backgroundImagePath: absBackgroundImagePath,
         titleColor: params.titleColor,
         subtitleColor: params.subtitleColor,
         titleFont: params.titleFont,

@@ -293,8 +293,16 @@ export function App() {
     const displayName = mod?.about.name || activeModFolder;
     setBuildPanel('chat');
     try {
+      // If the user has supplied a background image (Preview panel drop zone),
+      // tell the agent to use it as render_preview's `backgroundImagePath`
+      // and skip the gradient/color choice. Path lives in the workspace
+      // sidecar, which is allowed by render_preview's path policy.
+      const bg = await window.modmixer.getPreviewBg(activeModFolder);
+      const bgInstruction = bg
+        ? ` The user has supplied a background image at ${bg.path} — pass it as render_preview's backgroundImagePath (do not pick a background color/gradient) and choose a titleEffect like "outline" or "shadow" so the title stays legible over the image.`
+        : '';
       await window.modmixer.send(
-        `Generate a Steam Workshop preview image for "${displayName}" and save it to ${activeModFolder}/About/Preview.png. Use render_preview — pick a template, choose a sprite from Textures/ if any exist, and pick a background and title treatment that fits the mod's tone.`,
+        `Generate a Steam Workshop preview image for "${displayName}" and save it to ${activeModFolder}/About/Preview.png. Use render_preview — pick a template, choose a sprite from Textures/ if any exist, and pick a background and title treatment that fits the mod's tone.${bgInstruction}`,
       );
     } catch (err) {
       console.error(err);

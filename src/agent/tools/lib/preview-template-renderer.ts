@@ -29,6 +29,14 @@ export interface PreviewParams {
   spritePath?: string;
   /** CSS color or `linear-gradient(...)` / `radial-gradient(...)` string. */
   background?: string;
+  /**
+   * Absolute or workspace-relative path to a full-bleed background image
+   * (typically a game screenshot). Read and inlined as a data URL. When
+   * present, the templates render it as `cover` behind the rest of the
+   * composition and replace the `background` color/gradient slot. A
+   * legibility scrim is applied automatically so the title stays readable.
+   */
+  backgroundImagePath?: string;
   titleColor?: string;
   subtitleColor?: string;
   titleFont?: TitleFont;
@@ -60,15 +68,15 @@ function templatesDir(): string {
   return path.join(process.resourcesPath, 'preview-templates');
 }
 
-async function spriteToDataUrl(
-  spritePath: string,
+async function imageToDataUrl(
+  imagePath: string,
   workspaceDir: string | undefined,
 ): Promise<string> {
-  const abs = path.isAbsolute(spritePath)
-    ? spritePath
+  const abs = path.isAbsolute(imagePath)
+    ? imagePath
     : workspaceDir
-      ? path.resolve(workspaceDir, spritePath)
-      : path.resolve(spritePath);
+      ? path.resolve(workspaceDir, imagePath)
+      : path.resolve(imagePath);
   const ext = path.extname(abs).toLowerCase();
   const mime = MIME_BY_EXT[ext] ?? 'application/octet-stream';
   const buf = await fs.readFile(abs);
@@ -93,10 +101,13 @@ export async function renderPreview(
   // image slot empty even after img.decode() resolves. Inlining bypasses
   // the fetch path entirely.
   const spriteUrl = params.spritePath
-    ? await spriteToDataUrl(params.spritePath, opts.workspaceDir)
+    ? await imageToDataUrl(params.spritePath, opts.workspaceDir)
+    : undefined;
+  const backgroundImageUrl = params.backgroundImagePath
+    ? await imageToDataUrl(params.backgroundImagePath, opts.workspaceDir)
     : undefined;
 
-  const slot = { ...params, spriteUrl };
+  const slot = { ...params, spriteUrl, backgroundImageUrl };
 
   const win = new BrowserWindow({
     width: W,

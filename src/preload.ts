@@ -123,6 +123,13 @@ const api = {
     invoke('modmixer:assets:remove', folder, relPath),
   pickAssetFile: (kind: import('./agent/assets/types').AssetKind) =>
     invoke('modmixer:assets:pick-file', kind),
+  pickPreviewBg: () => invoke('modmixer:assets:pick-preview-bg'),
+  setPreviewBg: (folder: string, sourceAbsPath: string) =>
+    invoke('modmixer:assets:set-preview-bg', folder, sourceAbsPath),
+  clearPreviewBg: (folder: string) =>
+    invoke('modmixer:assets:clear-preview-bg', folder),
+  getPreviewBg: (folder: string) =>
+    invoke('modmixer:assets:get-preview-bg', folder),
   getPathForFile: (file: File) => webUtils.getPathForFile(file),
   readAssetDataUrl: (folder: string, relPath: string) =>
     invoke('modmixer:assets:read-data-url', folder, relPath),

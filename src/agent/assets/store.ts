@@ -81,3 +81,65 @@ export async function readAssetDataUrl(
 export function modAbsPath(folder: string): string {
   return modRoot(folder);
 }
+
+/**
+ * Sidecar dir that holds per-mod modmixer-private data — currently only the
+ * preview-image background source. Lives at the workspace root rather than
+ * inside the mod folder so it doesn't ship to Steam (publish uploads
+ * `<workspaceDir>/<folder>` only) and doesn't get scanned as a mod by
+ * RimWorld or by our own listWorkspaceMods (`.modmixer` is in SKIP_DIRS).
+ */
+function previewBgDir(folder: string): string {
+  const { workspaceDir } = getWorkspacePaths();
+  // Refuse path traversal in the folder id.
+  if (folder.includes('/') || folder.includes('\\') || folder.includes('..')) {
+    throw new Error(`Invalid mod folder id: ${folder}`);
+  }
+  return path.join(workspaceDir, '.modmixer', 'preview-bg', folder);
+}
+
+function previewBgFile(folder: string): string {
+  return path.join(previewBgDir(folder), 'source.png');
+}
+
+/**
+ * Copy the user-picked image into the preview-BG sidecar, normalized through
+ * the same long-edge / size ladder as the published Preview.png. Returns the
+ * absolute path of the stored copy. Existing source is overwritten.
+ */
+export async function setPreviewBgSource(
+  folder: string,
+  sourceAbsPath: string,
+): Promise<string> {
+  // Validate the folder exists as a workspace mod before we write.
+  modRoot(folder);
+  const dest = previewBgFile(folder);
+  await normalizePreviewToFile(sourceAbsPath, dest);
+  return dest;
+}
+
+/** Absolute path to the current BG source for a mod, or null if none. */
+export function getPreviewBgSource(folder: string): string | null {
+  const dest = previewBgFile(folder);
+  return fs.existsSync(dest) ? dest : null;
+}
+
+export async function clearPreviewBgSource(folder: string): Promise<void> {
+  const dest = previewBgFile(folder);
+  try {
+    await fsp.unlink(dest);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code !== 'ENOENT') throw err;
+  }
+}
+
+/** Read the BG source as a data URL for the renderer thumbnail, or null. */
+export async function readPreviewBgSourceDataUrl(
+  folder: string,
+): Promise<string | null> {
+  const abs = getPreviewBgSource(folder);
+  if (!abs) return null;
+  const buf = await fsp.readFile(abs);
+  return `data:image/png;base64,${buf.toString('base64')}`;
+}

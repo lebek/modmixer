@@ -3,8 +3,12 @@ import { dialog } from 'electron';
 import { scanAssets } from '../../agent/assets/scanner.js';
 import {
   addAssetFile,
+  clearPreviewBgSource,
+  getPreviewBgSource,
   readAssetDataUrl,
+  readPreviewBgSourceDataUrl,
   removeAssetFile,
+  setPreviewBgSource,
   setPreviewImageFile,
 } from '../../agent/assets/store.js';
 import { ensureWatching } from '../../agent/assets/watcher.js';
@@ -70,6 +74,31 @@ export function registerAssetsRoutes(ctx: RouteContext): void {
       readAssetDataUrl(folder, relPath),
   );
 
+  ipc.handle(
+    'modmixer:assets:set-preview-bg',
+    async (_evt, folder: string, sourceAbsPath: string) => {
+      return await setPreviewBgSource(folder, sourceAbsPath);
+    },
+  );
+
+  ipc.handle(
+    'modmixer:assets:clear-preview-bg',
+    async (_evt, folder: string) => {
+      await clearPreviewBgSource(folder);
+    },
+  );
+
+  ipc.handle(
+    'modmixer:assets:get-preview-bg',
+    async (_evt, folder: string) => {
+      const abs = getPreviewBgSource(folder);
+      if (!abs) return null;
+      const dataUrl = await readPreviewBgSourceDataUrl(folder);
+      if (!dataUrl) return null;
+      return { path: abs, dataUrl };
+    },
+  );
+
   ipc.handle('modmixer:assets:pick-file', async (_evt, kind: AssetKind) => {
     const filters =
       kind === 'audio'
@@ -80,6 +109,21 @@ export function registerAssetsRoutes(ctx: RouteContext): void {
     const result = await dialog.showOpenDialog(win, {
       properties: ['openFile'],
       filters,
+    });
+    if (result.canceled || result.filePaths.length === 0) return null;
+    return result.filePaths[0];
+  });
+
+  ipc.handle('modmixer:assets:pick-preview-bg', async () => {
+    const win = getWindow();
+    if (!win) return null;
+    // Steam screenshots land as JPG (F12 capture); allow PNG/WebP too so users
+    // can drop in anything they've cropped/edited.
+    const result = await dialog.showOpenDialog(win, {
+      properties: ['openFile'],
+      filters: [
+        { name: 'Image', extensions: ['png', 'jpg', 'jpeg', 'webp'] },
+      ],
     });
     if (result.canceled || result.filePaths.length === 0) return null;
     return result.filePaths[0];

@@ -94,7 +94,12 @@
 <script>
 window.__renderPreview = function (p) {
   const hero = document.getElementById('hero');
-  hero.style.background = p.background || 'linear-gradient(160deg,#3a1d10 0%,#0d0d10 100%)';
+  if (p.backgroundImageUrl) {
+    hero.style.background = '#000';
+    hero.style.backgroundImage = `url("${p.backgroundImageUrl}")`;
+  } else {
+    hero.style.background = p.background || 'linear-gradient(160deg,#3a1d10 0%,#0d0d10 100%)';
+  }
   const spriteEl = document.getElementById('sprite');
   const heroImgWrap = spriteEl.parentElement;
   if (p.spriteUrl) {

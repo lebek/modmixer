@@ -215,6 +215,15 @@ export interface Channels {
     relPath: string,
   ) => string | null;
   'modmixer:assets:pick-file': (kind: AssetKind) => string | null;
+  'modmixer:assets:pick-preview-bg': () => string | null;
+  'modmixer:assets:set-preview-bg': (
+    folder: string,
+    sourceAbsPath: string,
+  ) => string;
+  'modmixer:assets:clear-preview-bg': (folder: string) => void;
+  'modmixer:assets:get-preview-bg': (
+    folder: string,
+  ) => { path: string; dataUrl: string } | null;
 
   // Monitor (in-game bridge)
   'modmixer:monitor:get-state': () => MonitorConnectionState;

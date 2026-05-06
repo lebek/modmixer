@@ -14,7 +14,26 @@
     position: absolute;
     inset: 0;
     z-index: 0;
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: cover;
   }
+  /* Scrim added on top of a user-supplied background image so the title and
+     sprite stay legible over busy screenshots. Heavier on the right (where
+     the title sits) and lighter on the left (where the sprite sits). */
+  .bg-scrim {
+    display: none;
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    background: linear-gradient(
+      to right,
+      rgba(0,0,0,0.5) 0%,
+      rgba(0,0,0,0.55) 40%,
+      rgba(0,0,0,0.82) 100%
+    );
+  }
+  .bg-scrim.active { display: block; }
   .row {
     position: relative;
     z-index: 1;
@@ -66,6 +85,7 @@
 <body>
 <div class="canvas" id="canvas">
   <div class="bg" id="bg"></div>
+  <div class="bg-scrim" id="bgScrim"></div>
   <div class="row">
     <div class="sprite-wrap"><img id="sprite" alt="" /></div>
     <div class="right">
@@ -77,7 +97,16 @@
 <script src="_shared.js"></script>
 <script>
 window.__renderPreview = function (p) {
-  document.getElementById('bg').style.background = p.background || 'linear-gradient(135deg,#222 0%,#0d0d10 100%)';
+  const bg = document.getElementById('bg');
+  const bgScrim = document.getElementById('bgScrim');
+  if (p.backgroundImageUrl) {
+    bg.style.background = '#000';
+    bg.style.backgroundImage = `url("${p.backgroundImageUrl}")`;
+    bgScrim.classList.add('active');
+  } else {
+    bg.style.background = p.background || 'linear-gradient(135deg,#222 0%,#0d0d10 100%)';
+    bgScrim.classList.remove('active');
+  }
   const sprite = document.getElementById('sprite');
   if (p.spriteUrl) {
     sprite.src = p.spriteUrl;
