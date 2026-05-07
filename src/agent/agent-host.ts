@@ -619,17 +619,35 @@ export class AgentHost {
     };
   }
 
+  /**
+   * `win.isDestroyed()` and `webContents.isDestroyed()` aren't enough on
+   * their own — the underlying render frame can be disposed mid-send (during
+   * navigation, reload, or after a renderer crash) while the BrowserWindow
+   * still reports alive, and `webContents.send` then throws
+   * "Render frame was disposed before WebFrameMain could be accessed". The
+   * AgentSession is decoupled from the renderer lifecycle and keeps emitting
+   * events from in-flight work, so we just swallow the race here.
+   */
+  private sendToRenderer(channel: string, payload: unknown): void {
+    const win = this.getWindow();
+    if (!win || win.isDestroyed()) return;
+    const wc = win.webContents;
+    if (wc.isDestroyed() || wc.isCrashed()) return;
+    try {
+      wc.send(channel, payload);
+    } catch {
+      // Render frame disposed mid-send; nothing actionable.
+    }
+  }
+
   private onSessionEvent(
     conversationId: string,
     event: AgentSessionEvent,
   ): void {
-    const win = this.getWindow();
-    if (win && !win.isDestroyed()) {
-      win.webContents.send('modmixer:agent:event', {
-        conversationId,
-        event,
-      });
-    }
+    this.sendToRenderer('modmixer:agent:event', {
+      conversationId,
+      event,
+    });
 
     // Auto-title from the first user message as soon as it lands. Don't wait
     // for agent_end, which may never fire if the user closes the window
@@ -671,13 +689,10 @@ export class AgentHost {
         this.pendingScopeReload = nextScope;
         // Tell the renderer to re-hydrate the active conversation since the
         // scope (and thus the displayed mod context) changed underneath it.
-        const win = this.getWindow();
-        if (win && !win.isDestroyed()) {
-          win.webContents.send('modmixer:agent:scope-upgraded', {
-            conversationId,
-            scope: nextScope,
-          });
-        }
+        this.sendToRenderer('modmixer:agent:scope-upgraded', {
+          conversationId,
+          scope: nextScope,
+        });
       }
     }
   }
@@ -1063,10 +1078,7 @@ export class AgentHost {
   }
 
   private emitOAuth(event: OAuthEvent): void {
-    const win = this.getWindow();
-    if (win && !win.isDestroyed()) {
-      win.webContents.send('modmixer:oauth:event', event);
-    }
+    this.sendToRenderer('modmixer:oauth:event', event);
   }
 
   // =========================================================================
