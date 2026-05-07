@@ -15,7 +15,7 @@ export const watchPlayerLogTool: AgentTool<
   name: 'watch_player_log',
   label: 'Watch Player.log',
   description:
-    "Start watching Player.log in the background. Returns IMMEDIATELY — no blocking. If new errors arrive during the user's test session, you will automatically be prompted with their content so you can investigate. Watching stops automatically when (a) errors arrive (one-shot), (b) RimWorld closes, or (c) the user switches to a different chat. Use this right after launch_rimworld; do NOT block in a long-running tool.",
+    "Start watching Player.log in the background. Returns IMMEDIATELY — no blocking. Errors are coalesced (deduped by RimWorld's [Ref] tag) and delivered as a summary auto-prompt; subsequent cascades in the same session deliver again automatically — do NOT re-call this tool to 'resume monitoring'. Watching stops only when (a) RimWorld closes or (b) the user switches to a different chat. Use this right after launch_rimworld; do NOT block in a long-running tool.",
   parameters: Params,
   async execute(): Promise<AgentToolResult<WatchPlayerLogDetails>> {
     const host = getAgentHost();

@@ -22,7 +22,11 @@ import type {
   OAuthProviderId,
 } from '@mariozechner/pi-ai';
 import type { AgentTool, ThinkingLevel } from '@mariozechner/pi-agent-core';
-import { getLogWatcher, type LogError } from './log-watcher.js';
+import {
+  formatErrorSummary,
+  getLogWatcher,
+  type LogErrorGroup,
+} from './log-watcher.js';
 import { isRimWorldRunning } from './game.js';
 import { createScaffoldModTool } from './tools/scaffold-mod.js';
 import { setModMetadataTool } from './tools/set-mod-metadata.js';
@@ -88,10 +92,7 @@ import {
 } from './openrouter-credits.js';
 import { getWorkspacePaths } from './workspace.js';
 import { ScopedResourceLoader } from './resource-loader.js';
-import {
-  buildSystemPrompt,
-  buildLogErrorTriageRubric,
-} from './system-prompt.js';
+import { buildSystemPrompt } from './system-prompt.js';
 import {
   addConversation,
   getConversation,
@@ -1188,8 +1189,8 @@ export class AgentHost {
     this.stopLogMonitoring();
     this.monitoringConversationId = conversationId;
     const watcher = getLogWatcher();
-    this.logUnsubscribe = watcher.subscribe((errors) => {
-      void this.handleLogErrors(errors, conversationId);
+    this.logUnsubscribe = watcher.subscribe((groups) => {
+      void this.handleLogErrors(groups, conversationId);
     });
     this.rimworldPollTimer = setInterval(() => {
       void this.checkRimWorldStillRunning();
@@ -1225,40 +1226,33 @@ export class AgentHost {
   }
 
   private async handleLogErrors(
-    errors: LogError[],
+    groups: LogErrorGroup[],
     conversationId: string,
   ): Promise<void> {
-    if (errors.length === 0) return;
+    if (groups.length === 0) return;
     if (this.monitoringConversationId !== conversationId) return;
-    this.stopLogMonitoring();
-
+    // Don't stop monitoring — the watcher batches across the deadline window
+    // and re-arms automatically. If a second cascade fires later in the same
+    // test session, we want to catch it without the agent re-calling
+    // watch_player_log.
     if (this.active?.conversationId !== conversationId) return;
 
+    const total = groups.reduce((acc, g) => acc + g.count, 0);
+    const errorWord = total === 1 ? 'error' : 'errors';
     sendToast(
       'Modmixer',
-      `Caught ${errors.length} ${errors.length === 1 ? 'error' : 'errors'} — investigating…`,
+      `Caught ${total} ${errorWord} (${groups.length} unique) — investigating…`,
     );
-
-    const modFolder =
-      this.active.scope.type === 'mod' ? this.active.scope.modFolder : null;
-    const message =
-      `[automated — RimWorld emitted ${errors.length} ${errors.length === 1 ? 'error' : 'errors'} during the test session you started monitoring]\n\n` +
-      errors
-        .slice(0, 8)
-        .map(
-          (e, i) => `### Error ${i + 1}\n\`\`\`\n${e.text}\n\`\`\``,
-        )
-        .join('\n\n') +
-      (errors.length > 8
-        ? `\n\n(${errors.length - 8} earlier errors omitted; tail Player.log if you need them.)\n\n`
-        : '\n\n') +
-      buildLogErrorTriageRubric(modFolder);
 
     try {
       const session = this.active.session;
       // session.prompt() picks the right path automatically (queues via steer
-      // if a turn is already in flight, otherwise starts a new turn).
-      await session.prompt(message, { streamingBehavior: 'steer' });
+      // if a turn is already in flight, otherwise starts a new turn). The
+      // triage rubric for interpreting this summary lives in the system
+      // prompt — only the dynamic summary lands in the chat.
+      await session.prompt(formatErrorSummary(groups), {
+        streamingBehavior: 'steer',
+      });
     } catch (err) {
       console.error('Failed to prompt session with log errors:', err);
     }

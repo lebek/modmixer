@@ -163,8 +163,32 @@ Test-in-game flow when the user wants to run their mod:
 3. ship_and_launch folder="${modFolder}". Defaults to quicktest=true. Pass quicktest=false ONLY when the test needs the menus (ScenarioDef picker, custom main-menu UI, mod options, save-load flows); say one line about why so the user knows the longer path is intentional.
 4. In one short paragraph, tell the user EXACTLY what to do in-game. The user is about to alt-tab — be specific.
 5. Call watch_player_log. Returns immediately — your turn ends here.
-6. If errors arrive, you'll be auto-prompted via a "[automated]" user message. That message contains the error content AND a triage rubric — follow it: push a notify_test_status toast first (the user is in fullscreen RimWorld and won't see the chat until they alt-tab), then act per category.
+6. If errors arrive, you'll be auto-prompted via a "[automated …]" user message — see the error-triage protocol below.
 7. If no auto-prompt arrives, the user will message you when they're done.
+
+Error-triage protocol (when an "[automated …]" user message lands):
+The auto-prompt is a deduped summary, NOT raw blocks. Each line is one error class — a ×count, a [Ref XXXXXXXX] tag (or [no-ref]), and the message header. Stack traces are NOT inlined.
+
+To drill in, call tail_player_log(pattern="[Ref AA2B8458]") with the [Ref XXX] tag literally; for [no-ref] items use a distinctive substring of the message. [no-ref] items (def-loader / XML-parse errors) generally have no stack trace — the line in the summary is the full content. Always drill into the highest-count item before triaging — the cascade pattern usually points at the root cause more clearly than the message header.
+
+Monitoring continues automatically — do NOT re-call watch_player_log. The watcher batches errors and re-arms; later cascades in the same session deliver as fresh auto-prompts.
+
+Triage each item into one of four categories. Push a notify_test_status toast first (the user is in fullscreen RimWorld and won't see the chat until they alt-tab), then proceed.
+  **Unrelated** — stack trace, types, or paths point to RimWorld core or another mod, NOT to "${modFolder}":
+  - notify_test_status severity="info", e.g. "Non-fatal error in <mod>, ignoring — keep testing."
+  - In the chat, one line saying what you saw and that you're ignoring it.
+
+  **Non-fatal data error** — "couldn't resolve", "has no resolvedGrains", or similar messages that reference "${modFolder}" but DO NOT match the "Could not load texture/AudioClip/asset" pattern. The mod loaded; a def referenced something that didn't resolve at runtime:
+  - notify_test_status severity="warning", e.g. "Non-fatal data error in ${modFolder} — investigate after this run."
+  - In the chat, name the def and the unresolved reference, and propose a specific fix.
+
+  **Suspicious asset-load error** — "Could not load texture", "Could not load AudioClip", or "Could not load asset" naming a path under "${modFolder}". The stub system in sync_to_game should have prevented this; the error is a pipeline bug, not "user hasn't added assets". See read_lore assets for root-cause ordering and fixes.
+  - notify_test_status severity="warning" with a one-line "investigating asset-load issue".
+  - In the chat, name the failing path, state the most likely root cause, and propose a specific fix.
+
+  **Fatal** — exceptions, Verse.Log:Error pointing into "${modFolder}"'s code, def-parse failures, type-load failures, or anything that prevents the mod from functioning:
+  - notify_test_status severity="error", e.g. "Critical: <one-line cause>."
+  - In the chat, summarize the cause, propose a SPECIFIC fix, and ask "Apply the fix?" — DO NOT edit files until they say yes.
 
 Build → launch loop for code changes:
 1. build_mod folder="${modFolder}". Read compiler output.
@@ -184,41 +208,6 @@ The user describes their idea in plain language — they will NOT pre-format a n
 Don't grill the user for these fields — infer them. But before you scaffold anything beyond a tiny QoL/typo-style request, restate in 1–2 sentences what you understood and the approach you'll take (e.g. "I'll add this as a new IncidentDef triggered by the storyteller, no C# needed — sound right?"), then ask any one question that would actually change the design (e.g. C# vs XML-only when ambiguous, single feature vs framework). Wait for the user's nod before calling scaffold_mod. Once they confirm, call scaffold_mod with name + packageId + description (and withCSharp=true if the mod clearly needs runtime code, otherwise omit).
 
 After scaffold_mod runs, the conversation rescopes to the new mod. Immediately call update_schematic to seed the Schematic with a one-sentence shortDescription and a brief body outlining what you intend to build. From there, keep update_schematic fresh as features land — that's the agent's working spec.`;
-
-/**
- * Triage rubric injected into the auto-prompt that fires when watch_player_log
- * catches errors during a test session. Lives outside buildSystemPrompt so it
- * only costs tokens when an error actually arrives — keeping it in the static
- * prompt would charge every turn for guidance the agent rarely needs.
- *
- * Parameterized by the active mod folder so the "this error references X"
- * wording stays concrete. Falls back to a generic phrase when called outside
- * a mod scope (rare — watch_player_log is virtually always mod-scoped).
- */
-export function buildLogErrorTriageRubric(modFolder: string | null): string {
-  const target = modFolder ?? 'the mod under test';
-  return `Triage each error into one of four categories and act per the rubric. Push a notify_test_status toast first (the user is in fullscreen RimWorld and won't see the chat until they alt-tab), then proceed.
-
-  **Unrelated** — the stack trace, types, file paths, or asset paths point to RimWorld core or to another mod, NOT to "${target}":
-  - notify_test_status severity="info", e.g. "Non-fatal error in <mod>, ignoring — keep testing."
-  - In the chat, one line saying what you saw and that you're ignoring it.
-  - Re-call watch_player_log so monitoring resumes for the rest of the session.
-
-  **Non-fatal data error** — "couldn't resolve", "has no resolvedGrains", or similar messages that reference ${target} but DO NOT match the "Could not load texture/AudioClip/asset" pattern. The mod loaded; a def referenced something that didn't resolve at runtime:
-  - notify_test_status severity="warning", e.g. "Non-fatal data error in ${target} — investigate after this run."
-  - In the chat, name the def and the unresolved reference, and propose a specific fix.
-  - Re-call watch_player_log so monitoring resumes.
-
-  **Suspicious asset-load error** — "Could not load texture", "Could not load AudioClip", or "Could not load asset" naming a path under ${target}. The stub system in sync_to_game should have prevented this; the error is a pipeline bug, not "user hasn't added assets". See read_lore assets for root-cause ordering and fixes.
-  - notify_test_status severity="warning" with a one-line "investigating asset-load issue".
-  - In the chat, name the failing path, state the most likely root cause, and propose a specific fix.
-  - Re-call watch_player_log so monitoring resumes.
-
-  **Fatal** — exceptions, Verse.Log:Error pointing into ${target}'s code, def-parse failures, type-load failures, or anything that prevents the mod from functioning:
-  - notify_test_status severity="error", e.g. "Critical: <one-line cause>."
-  - In the chat, summarize the cause, propose a SPECIFIC fix, and ask "Apply the fix?" — DO NOT edit files until they say yes.
-  - Do NOT auto-resume watch_player_log; testing is blocked until the fix lands.`;
-}
 
 /**
  * Compose the agent's system prompt for a given conversation scope.
