@@ -211,7 +211,7 @@ export function ChatPanel({
   } | null>(null);
   useEffect(() => {
     let cancelled = false;
-    const refresh = () => {
+    const refreshBalance = () => {
       window.modmixer
         .getOpenRouterCredits()
         .then((c) => {
@@ -221,6 +221,8 @@ export function ChatPanel({
         .catch(() => {
           // Network/auth errors are non-fatal — leave the prior value alone.
         });
+    };
+    const refreshContext = () => {
       window.modmixer
         .getContextUsage(conversation.id)
         .then((u) => {
@@ -231,10 +233,18 @@ export function ChatPanel({
         })
         .catch(() => {});
     };
-    refresh();
+    refreshBalance();
+    refreshContext();
     const off = window.modmixer.onEvent((env) => {
       if (env.conversationId !== conversation.id) return;
-      if (env.event.type === 'agent_end') refresh();
+      // Context usage updates after every message (tool results land as their
+      // own messages, so the chip steps up mid-turn instead of waiting).
+      if (env.event.type === 'message_end' || env.event.type === 'agent_end') {
+        refreshContext();
+      }
+      // Balance only refreshes once per turn — avoid hammering the credits
+      // endpoint on every tool result.
+      if (env.event.type === 'agent_end') refreshBalance();
     });
     return () => {
       cancelled = true;
