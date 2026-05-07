@@ -14,6 +14,25 @@ export interface Conversation {
   title: string;
   createdAt: number;
   updatedAt: number;
+  /**
+   * System prompt frozen at conversation creation (and refreshed on scope
+   * upgrade). Reused on every rehydration — never rebuilt against current
+   * disk/settings state on a per-turn basis.
+   *
+   * Why this is persisted instead of recomputed: OpenRouter hashes the first
+   * system message + first non-system message to identify a conversation for
+   * sticky provider routing, which is what keeps the upstream provider's
+   * prompt cache warm. If the system prompt drifts by even one byte across
+   * restarts (lore index counts shift, RimWorld first-launch flips
+   * `(not found)` paths, scope upgrades from `new` → `mod`, etc.) the hash
+   * changes, sticky resets, and the next turn lands on a fresh provider with
+   * a cold cache — at ~10× the per-turn cost. See `buildSystemPrompt` for
+   * the upstream invariant.
+   *
+   * Optional for backward-compat: legacy conversations created before this
+   * field existed backfill on first rehydration.
+   */
+  systemPrompt?: string;
 }
 
 interface Persisted {
@@ -70,6 +89,7 @@ export function addConversation(entry: {
   sessionFile: string;
   scope: ConversationScope;
   title?: string;
+  systemPrompt?: string;
 }): Conversation {
   const now = Date.now();
   const convo: Conversation = {
@@ -79,6 +99,7 @@ export function addConversation(entry: {
     title: entry.title ?? DEFAULT_TITLE,
     createdAt: now,
     updatedAt: now,
+    systemPrompt: entry.systemPrompt,
   };
   load().conversations.push(convo);
   persist();
@@ -115,6 +136,14 @@ export function setScope(id: string, scope: ConversationScope): void {
   if (!c) return;
   c.scope = scope;
   c.updatedAt = Date.now();
+  persist();
+}
+
+export function setSystemPrompt(id: string, systemPrompt: string): void {
+  const c = getConversation(id);
+  if (!c) return;
+  c.systemPrompt = systemPrompt;
+  // Don't bump updatedAt — this is bookkeeping, not a user-visible change.
   persist();
 }
 

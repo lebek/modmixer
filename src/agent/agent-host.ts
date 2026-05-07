@@ -88,6 +88,7 @@ import {
   removeConversation,
   setActiveForMod,
   setScope,
+  setSystemPrompt,
   setTitle,
   touch,
   type Conversation,
@@ -597,9 +598,18 @@ export class AgentHost {
       this.cwd,
     );
 
-    const resourceLoader = new ScopedResourceLoader(
-      buildSystemPrompt(convo.scope),
-    );
+    // The system prompt is snapshotted at conversation creation and reused
+    // forever (see Conversation.systemPrompt for why — short version: keeps
+    // OpenRouter's conversation hash stable so sticky provider routing
+    // doesn't reset and lose the upstream prompt cache between turns).
+    // Legacy conversations created before that field existed backfill on
+    // first rehydration so they get the same stickiness from then on.
+    let systemPrompt = convo.systemPrompt;
+    if (systemPrompt === undefined) {
+      systemPrompt = buildSystemPrompt(convo.scope);
+      setSystemPrompt(convo.id, systemPrompt);
+    }
+    const resourceLoader = new ScopedResourceLoader(systemPrompt);
 
     const { thinkingLevel } = loadSettings();
     const { session } = await createAgentSession({
@@ -694,6 +704,11 @@ export class AgentHost {
           modFolder: folder,
         };
         setScope(conversationId, nextScope);
+        // Refresh the snapshot so subsequent rehydrations match the prompt
+        // the freshly-reconstructed session is actually running with. This
+        // upgrade is a deliberate, one-time hash change per conversation —
+        // sticky routing re-picks here and then holds.
+        setSystemPrompt(conversationId, buildSystemPrompt(nextScope));
         setActiveForMod(folder, conversationId);
         this.pendingScopeReload = nextScope;
         // Tell the renderer to re-hydrate the active conversation since the
@@ -775,7 +790,15 @@ export class AgentHost {
     };
     fs.mkdirSync(path.dirname(sessionFile), { recursive: true });
     fs.writeFileSync(sessionFile, `${JSON.stringify(header)}\n`);
-    return addConversation({ id, sessionFile, scope, title });
+    // Snapshot the system prompt up front so it's frozen for this
+    // conversation's lifetime — see Conversation.systemPrompt.
+    return addConversation({
+      id,
+      sessionFile,
+      scope,
+      title,
+      systemPrompt: buildSystemPrompt(scope),
+    });
   }
 
   async deleteConversation(id: string): Promise<void> {

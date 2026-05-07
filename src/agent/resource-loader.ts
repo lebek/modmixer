@@ -18,6 +18,14 @@ import {
  * (e.g. a "new mod" conversation upgrading to a "mod" scope after
  * scaffold_mod completes) are handled by reconstructing the AgentSession
  * with a fresh loader, not by mutating an existing one.
+ *
+ * Stability matters beyond a single in-memory loader: the same byte string
+ * must resurface on every rehydration of a conversation (across app
+ * restarts, scope upgrades, etc.), because OpenRouter's sticky provider
+ * routing keys off the hash of the first system message. The persisted
+ * snapshot lives on the `Conversation` record — see
+ * `Conversation.systemPrompt` and `buildSystemPrompt` for the broader
+ * invariant.
  */
 export class ScopedResourceLoader implements ResourceLoader {
   private readonly extensionsResult: LoadExtensionsResult = {

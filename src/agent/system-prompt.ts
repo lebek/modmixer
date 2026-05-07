@@ -220,6 +220,26 @@ export function buildLogErrorTriageRubric(modFolder: string | null): string {
   - Do NOT auto-resume watch_player_log; testing is blocked until the fix lands.`;
 }
 
+/**
+ * Compose the agent's system prompt for a given conversation scope.
+ *
+ * INVARIANT — the output is treated as a stable conversation identifier.
+ * It is called exactly twice over a conversation's lifetime: once at
+ * creation, and once on `new` → `mod` scope upgrade after `scaffold_mod`.
+ * The result is persisted on the `Conversation` record and reused on every
+ * subsequent turn and rehydration. DO NOT call this on a per-turn basis.
+ *
+ * Why: OpenRouter's sticky provider routing keys off the hash of the first
+ * system message. If this output drifts byte-for-byte between turns
+ * (because lore counts shifted, RimWorld first-launched and `(not found)`
+ * paths now resolve, the user changed their `defaultAuthor`, etc.), the
+ * hash changes, the upstream prompt cache resets, and the next turn pays
+ * full uncached input rates — roughly 10× per-turn cost on long contexts.
+ *
+ * If you need to surface fresh disk/settings state to the agent
+ * mid-conversation, do it via a tool (`read_lore`, `list_installed_mods`,
+ * etc.) or a synthetic non-system message — NOT by re-calling this.
+ */
 export function buildSystemPrompt(scope: ConversationScope): string {
   const ctx = gatherContext();
   const head = `You are an expert RimWorld modding assistant, operating inside Modmixer, an application that helps people build and diagnose RimWorld mods.
