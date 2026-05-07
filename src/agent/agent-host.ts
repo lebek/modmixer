@@ -10,6 +10,7 @@ import {
   SettingsManager,
   createAgentSession,
   type AgentSessionEvent,
+  type ContextUsage,
   type SessionHeader,
   type ToolDefinition,
 } from '@mariozechner/pi-coding-agent';
@@ -75,6 +76,16 @@ import { watchPlayerLogTool } from './tools/watch-player-log.js';
 import { notifyTestStatusTool } from './tools/notify-test-status.js';
 import { sendToast } from './notifications.js';
 import { loadSettings, saveSettings } from './settings.js';
+import {
+  fetchOpenRouterPricing,
+  getCachedOpenRouterPricing,
+  isOpenRouterPricingStale,
+  type OpenRouterCost,
+} from './openrouter-pricing.js';
+import {
+  fetchOpenRouterCredits,
+  type OpenRouterCredits,
+} from './openrouter-credits.js';
 import { getWorkspacePaths } from './workspace.js';
 import { ScopedResourceLoader } from './resource-loader.js';
 import {
@@ -456,16 +467,36 @@ export class AgentHost {
     } catch (err) {
       console.error('AgentHost.primeAfterReady failed:', err);
     }
+    // Best-effort pricing prime: cached map is consulted by the
+    // registration above. If the cache is empty or stale, refresh in the
+    // background and re-register so subsequent turns pick up real rates.
+    if (!getCachedOpenRouterPricing() || isOpenRouterPricingStale()) {
+      void fetchOpenRouterPricing()
+        .then(() => {
+          try {
+            this.applyOpenRouterRegistration();
+          } catch (err) {
+            console.error(
+              'AgentHost: failed to re-register openrouter after pricing fetch:',
+              err,
+            );
+          }
+        })
+        .catch(() => {
+          // Pricing fetch is best-effort — failures just leave $0 rates in
+          // place until the next launch.
+        });
+    }
   }
 
   /**
    * Register the user's saved OpenRouter slugs as runtime models in pi's
    * registry. Pi's built-in openrouter catalog includes ~300 entries, but
    * the picker only surfaces what the user has explicitly saved here —
-   * registering replaces those built-ins with our short list, which is
-   * fine: anything in pi's static list will simply route through the
-   * stub we register (cost data shows as zero in the UI; OpenRouter
-   * itself enforces actual pricing).
+   * registering replaces those built-ins with our short list. Per-million
+   * token rates are pulled from the cached OpenRouter catalogue (see
+   * `openrouter-pricing.ts`); slugs missing from the cache fall back to
+   * zero, which renders as "$0" in the UI until the next refresh lands.
    */
   private applyOpenRouterRegistration(): void {
     const { openrouterModels } = loadSettings();
@@ -486,6 +517,14 @@ export class AgentHost {
       // picker; sending a turn surfaces the missing-key error.
       return;
     }
+    const pricing = getCachedOpenRouterPricing() ?? {};
+    const zero: OpenRouterCost = {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+    };
+    const pricingFor = (slug: string): OpenRouterCost => pricing[slug] ?? zero;
     this.modelRegistry.registerProvider(OPENROUTER_PROVIDER, {
       baseUrl: OPENROUTER_BASE_URL,
       api: 'openai-completions',
@@ -509,7 +548,7 @@ export class AgentHost {
         name: slug,
         reasoning: false,
         input: ['text'],
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        cost: pricingFor(slug),
         // 200k is a safe upper bound for "modern" OpenRouter models; the
         // actual limit is enforced server-side regardless of what we say.
         contextWindow: 200_000,
@@ -973,6 +1012,34 @@ export class AgentHost {
     this.applyOpenRouterRegistration();
     this.emitOAuth({ type: 'links-changed' });
     return this.getOpenRouterConfig();
+  }
+
+  /**
+   * Live context-window usage for the active session, if it matches the
+   * given conversation. Returns null when no active session, the active
+   * session is for a different conversation, or pi can't compute usage
+   * (no model bound yet, fresh-after-compaction, etc.). Pi's value comes
+   * from the most recent assistant `usage` plus an estimate of any newer
+   * messages, so it updates per-turn without us having to count tokens.
+   */
+  getContextUsage(conversationId: string): ContextUsage | null {
+    if (!this.active || this.active.conversationId !== conversationId) {
+      return null;
+    }
+    return this.active.session.getContextUsage() ?? null;
+  }
+
+  /**
+   * Fetch the user's live OpenRouter balance. Returns null when no API key
+   * is configured. Errors propagate so the renderer can decide whether to
+   * surface or swallow them.
+   */
+  async getOpenRouterCredits(): Promise<OpenRouterCredits | null> {
+    const cred = this.authStorage.get(OPENROUTER_PROVIDER);
+    const apiKey =
+      cred?.type === 'api_key' ? cred.key : process.env.OPENROUTER_API_KEY;
+    if (!apiKey) return null;
+    return fetchOpenRouterCredits(apiKey);
   }
 
   async removeOpenRouterModel(slug: string): Promise<OpenRouterConfig> {

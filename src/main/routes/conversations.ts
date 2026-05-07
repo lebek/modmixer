@@ -24,6 +24,11 @@ export function registerConversationRoutes(ctx: RouteContext): void {
     await host.interrupt();
   });
 
+  ipc.handle(
+    'modmixer:agent:get-context-usage',
+    (_evt, conversationId: string) => host.getContextUsage(conversationId),
+  );
+
   ipc.handle('modmixer:conversations:list', () => listConversations());
 
   ipc.handle(

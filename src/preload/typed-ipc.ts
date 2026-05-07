@@ -14,6 +14,7 @@ import type {
   OAuthLink,
   OpenRouterConfig,
 } from '../agent/agent-host';
+import type { OpenRouterCredits } from '../agent/openrouter-credits';
 import type { Conversation, ConversationScope } from '../agent/conversations';
 import type {
   AboutMetadata,
@@ -130,6 +131,9 @@ export interface Channels {
   // Agent
   'modmixer:agent:send': (text: string) => void;
   'modmixer:agent:interrupt': () => void;
+  'modmixer:agent:get-context-usage': (
+    conversationId: string,
+  ) => import('@mariozechner/pi-coding-agent').ContextUsage | null;
 
   // Settings
   'modmixer:settings:get': () => Settings;
@@ -241,6 +245,7 @@ export interface Channels {
   'modmixer:openrouter:set-api-key': (key: string | null) => OpenRouterConfig;
   'modmixer:openrouter:add-model': (slug: string) => OpenRouterConfig;
   'modmixer:openrouter:remove-model': (slug: string) => OpenRouterConfig;
+  'modmixer:openrouter:get-credits': () => OpenRouterCredits | null;
 
   // Shell
   'modmixer:shell:open-external': (url: string) => void;

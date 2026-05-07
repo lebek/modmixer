@@ -93,4 +93,6 @@ export function registerSettingsRoutes(ctx: RouteContext): void {
   ipc.handle('modmixer:openrouter:remove-model', async (_evt, slug: string) =>
     host.removeOpenRouterModel(slug),
   );
+
+  ipc.handle('modmixer:openrouter:get-credits', () => host.getOpenRouterCredits());
 }

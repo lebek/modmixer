@@ -12,6 +12,35 @@ import { ToolResultBubble } from './tool-result-renderer';
 
 type ToolStatus = 'running' | 'done' | 'error';
 
+/**
+ * pi-ai stamps every assistant message with a `provider`/`usage.cost.total`
+ * pair. We only surface the dollar figure for OpenRouter — Anthropic OAuth
+ * users would see a *list-price* number that doesn't match what they
+ * actually pay against Pro/Max credits, which would be misleading.
+ */
+function openrouterCost(message: AgentMessage): number | null {
+  if (message.role !== 'assistant') return null;
+  const m = message as { provider?: string; usage?: { cost?: { total?: number } } };
+  if (m.provider !== 'openrouter') return null;
+  const total = m.usage?.cost?.total;
+  return typeof total === 'number' && total > 0 ? total : null;
+}
+
+function formatCost(cost: number): string {
+  // Sub-cent costs need four decimals to be informative; once we cross a
+  // dollar, two decimals match the way users think about money.
+  if (cost >= 1) return `$${cost.toFixed(2)}`;
+  return `$${cost.toFixed(4)}`;
+}
+
+// Mirrors pi-coding-agent's footer formatting: 999, 9.9k, 99k, 9.9M.
+function formatTokens(n: number): string {
+  if (n < 1000) return `${n}`;
+  if (n < 10_000) return `${(n / 1000).toFixed(1)}k`;
+  if (n < 1_000_000) return `${Math.round(n / 1000)}k`;
+  return `${(n / 1_000_000).toFixed(1)}M`;
+}
+
 export function ChatPanel({
   conversation,
   activeMod,
@@ -160,6 +189,59 @@ export function ChatPanel({
     [messages, streaming],
   );
 
+  // Running OpenRouter session total. Only completed messages count — the
+  // streaming partial doesn't have final usage yet.
+  const sessionCost = useMemo(() => {
+    let sum = 0;
+    for (const m of messages) {
+      const c = openrouterCost(m);
+      if (c) sum += c;
+    }
+    return sum;
+  }, [messages]);
+
+  // Live OpenRouter balance. null = no API key configured (hide); a number =
+  // remaining USD. Refreshed on mount and after each completed turn.
+  const [balance, setBalance] = useState<number | null>(null);
+  // Live context-window usage from pi (`AgentSession.getContextUsage()`).
+  // Updates every turn as the assistant's `usage` lands.
+  const [contextUsage, setContextUsage] = useState<{
+    tokens: number | null;
+    contextWindow: number;
+  } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () => {
+      window.modmixer
+        .getOpenRouterCredits()
+        .then((c) => {
+          if (cancelled) return;
+          setBalance(c?.remaining ?? null);
+        })
+        .catch(() => {
+          // Network/auth errors are non-fatal — leave the prior value alone.
+        });
+      window.modmixer
+        .getContextUsage(conversation.id)
+        .then((u) => {
+          if (cancelled) return;
+          setContextUsage(
+            u ? { tokens: u.tokens, contextWindow: u.contextWindow } : null,
+          );
+        })
+        .catch(() => {});
+    };
+    refresh();
+    const off = window.modmixer.onEvent((env) => {
+      if (env.conversationId !== conversation.id) return;
+      if (env.event.type === 'agent_end') refresh();
+    });
+    return () => {
+      cancelled = true;
+      off();
+    };
+  }, [conversation.id]);
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="relative min-h-0 flex-1">
@@ -202,6 +284,20 @@ export function ChatPanel({
       )}
       </div>
       <div className="border-t border-line px-6 py-3">
+        {(sessionCost > 0 || balance !== null || contextUsage) && (
+          <div className="mb-2 flex flex-wrap justify-end gap-x-4 gap-y-1 font-mono text-[11px] text-subtle">
+            {contextUsage && contextUsage.tokens !== null && (
+              <span>
+                context = {formatTokens(contextUsage.tokens)}/
+                {formatTokens(contextUsage.contextWindow)}
+              </span>
+            )}
+            {sessionCost > 0 && (
+              <span>session cost = {formatCost(sessionCost)}</span>
+            )}
+            {balance !== null && <span>balance = {formatCost(balance)}</span>}
+          </div>
+        )}
         {hasAi ? (
           <div className="rounded-md border border-line bg-paper p-3 focus-within:border-ink/40">
             <textarea
@@ -385,10 +481,16 @@ function MessageBubble({
     // Slugs like "moonshotai/kimi-k2.6" or "accounts/fireworks/models/kimi-k2p6"
     // — only the tail is meaningful in the bubble header.
     const modelLabel = message.model.split('/').pop() || message.model;
+    const cost = !isStreaming ? openrouterCost(message) : null;
     return (
       <div className="rounded-md border border-line bg-paper/70 p-3">
-        <div className="mb-1 font-mono text-[10px] uppercase tracking-[0.18em] text-muted">
-          modmixer <span className="text-subtle">·</span> {modelLabel}
+        <div className="mb-1 flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.18em] text-muted">
+          <span>
+            modmixer <span className="text-subtle">·</span> {modelLabel}
+          </span>
+          {cost !== null && (
+            <span className="ml-auto text-subtle">{formatCost(cost)}</span>
+          )}
         </div>
         {text && <Markdown>{text}</Markdown>}
         {fallbackThinking && (

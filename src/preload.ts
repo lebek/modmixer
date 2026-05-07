@@ -42,6 +42,8 @@ const api = {
   // Agent
   send: (text: string) => invoke('modmixer:agent:send', text),
   interrupt: () => invoke('modmixer:agent:interrupt'),
+  getContextUsage: (conversationId: string) =>
+    invoke('modmixer:agent:get-context-usage', conversationId),
   onEvent: (handler: (env: import('./preload/typed-ipc').AgentEventEnvelope) => void) =>
     on('modmixer:agent:event', handler),
   onScopeUpgraded: (
@@ -166,6 +168,7 @@ const api = {
     invoke('modmixer:openrouter:add-model', slug),
   removeOpenRouterModel: (slug: string) =>
     invoke('modmixer:openrouter:remove-model', slug),
+  getOpenRouterCredits: () => invoke('modmixer:openrouter:get-credits'),
 
   // Shell
   openExternal: (url: string) => invoke('modmixer:shell:open-external', url),
