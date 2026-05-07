@@ -519,7 +519,16 @@ export class AgentHost {
         // into tool-call args.
         ...(slug.startsWith('moonshotai/kimi-k2')
           ? { compat: { openRouterRouting: { only: ['moonshotai'] } } }
-          : {}),
+          : slug.startsWith('deepseek/deepseek-v4')
+            ? {
+                compat: {
+                  openRouterRouting: {
+                    order: ['atlascloud'],
+                    allow_fallbacks: true,
+                  },
+                },
+              }
+            : {}),
       })),
     });
   }
