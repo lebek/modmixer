@@ -2,14 +2,31 @@ import path from 'node:path';
 import fsp from 'node:fs/promises';
 import fs from 'node:fs';
 import { spawn, exec } from 'node:child_process';
-import { promisify } from 'node:util';
 import { platform } from 'node:os';
 import { detectRimWorldPaths } from './paths.js';
 import { getWorkspacePaths } from './workspace.js';
 import { getLogWatcher } from './log-watcher.js';
 import { getRegistry } from './registry/index.js';
 
-const execAsync = promisify(exec);
+/**
+ * Wrap `child_process.exec` with a hard timeout. Node kills the child on
+ * expiry, so even a wedged Windows service can't pin a tool call past
+ * `timeoutMs`. We hit this in the wild: `tasklist /FI` routes through WMI,
+ * and a stuck Winmgmt service left the call sitting at the 5-minute RPC
+ * default before erroring. Use this for every shell-out — fail fast over
+ * hang silently.
+ */
+function execWithTimeout(
+  command: string,
+  timeoutMs = 10_000,
+): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    exec(command, { timeout: timeoutMs }, (err, stdout, stderr) => {
+      if (err) reject(err);
+      else resolve({ stdout, stderr });
+    });
+  });
+}
 
 export async function isRimWorldRunning(): Promise<boolean> {
   const os = platform();
@@ -17,18 +34,21 @@ export async function isRimWorldRunning(): Promise<boolean> {
     if (os === 'darwin' || os === 'linux') {
       // -i match case-insensitive on the program name (NOT full args), so we
       // don't false-positive on paths that happen to contain "RimWorld".
-      const { stdout } = await execAsync('pgrep -i rimworld');
+      const { stdout } = await execWithTimeout('pgrep -i rimworld');
       return stdout.trim().length > 0;
     }
     if (os === 'win32') {
-      const { stdout } = await execAsync(
-        'tasklist /FI "IMAGENAME eq RimWorldWin64.exe" /NH',
-      );
-      return stdout.toLowerCase().includes('rimworldwin64');
+      // Plain `tasklist /NH /FO CSV` enumerates locally via Toolhelp — no
+      // WMI. The earlier `/FI "IMAGENAME eq …"` form went through Winmgmt
+      // and hung the whole agent for 5 minutes when that service was sick.
+      const { stdout } = await execWithTimeout('tasklist /NH /FO CSV');
+      return /^"RimWorldWin64\.exe"/im.test(stdout);
     }
   } catch {
-    // pgrep / tasklist exit non-zero when no match; that's "not running".
-    return false;
+    // pgrep exits non-zero when no match; tasklist may time out via
+    // execWithTimeout. Either way: assume not running. A false negative
+    // here is recoverable (launch_rimworld no-ops when the game is up);
+    // a hang is not.
   }
   return false;
 }
@@ -64,10 +84,10 @@ export async function quitRimWorld(
   let killed = false;
   try {
     if (os === 'darwin' || os === 'linux') {
-      await execAsync('pkill -i rimworld');
+      await execWithTimeout('pkill -i rimworld');
       killed = true;
     } else if (os === 'win32') {
-      await execAsync('taskkill /IM RimWorldWin64.exe /F');
+      await execWithTimeout('taskkill /IM RimWorldWin64.exe /F');
       killed = true;
     }
   } catch {
