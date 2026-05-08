@@ -134,7 +134,7 @@ function computeDefaults(): Settings {
     onboarding: null,
     rimworldInstallOverride: null,
     openrouterModels: [],
-    thinkingLevel: 'medium',
+    thinkingLevel: 'xhigh',
   };
 }
 

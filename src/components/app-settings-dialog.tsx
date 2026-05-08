@@ -472,16 +472,28 @@ function ProvidersSection() {
   };
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       <p className="text-xs text-muted">
-        Sign in with your existing AI subscription. modmixer never sees the
-        token — your provider charges you directly.
+        We recommend OpenRouter — pay-as-you-go, no subscription needed.
+        Already have a Claude or ChatGPT plan? Use that instead. Modmixer
+        never sees the token — your provider charges you directly.
       </p>
       {error && (
         <div className="rounded-md border border-failed/40 bg-failed/5 px-3 py-2 text-xs text-failed">
           {error}
         </div>
       )}
+
+      <OpenRouterSection />
+
+      <div className="flex items-center gap-3">
+        <span className="h-px flex-1 bg-line" />
+        <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted">
+          Or use an existing AI subscription
+        </span>
+        <span className="h-px flex-1 bg-line" />
+      </div>
+
       <div className="divide-y divide-line rounded-md border border-line">
         {links.map((link) => (
           <ProviderRow
@@ -501,8 +513,6 @@ function ProvidersSection() {
           </div>
         )}
       </div>
-
-      <OpenRouterSection />
     </div>
   );
 }
@@ -560,18 +570,22 @@ function OpenRouterSection() {
   if (!config) return null;
 
   return (
-    <div className="space-y-3 rounded-md border border-line">
+    <div className="space-y-3 rounded-md border-2 border-accent/60 bg-accent/5">
       <div className="border-b border-line px-3 py-2.5">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="text-sm font-medium text-ink">OpenRouter</div>
-            <div className="text-[11px] text-muted">
-              Paste an API key, then add the model slugs you use.
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-accent">
+              ★ Recommended
+            </div>
+            <div className="mt-1 text-sm font-medium text-ink">OpenRouter</div>
+            <div className="mt-0.5 text-[11px] text-muted">
+              Paste an API key — Moonshot Kimi K2.6 is preconfigured. Add more
+              slugs below if you want.
             </div>
           </div>
           <span
             className={
-              'font-mono text-[10px] uppercase tracking-[0.18em] ' +
+              'shrink-0 font-mono text-[10px] uppercase tracking-[0.18em] ' +
               (config.apiKeyConfigured ? 'text-ready' : 'text-muted')
             }
           >
@@ -657,20 +671,29 @@ function OpenRouterSection() {
           </p>
         ) : (
           <ul className="divide-y divide-line rounded-md border border-line">
-            {config.models.map((slug) => (
-              <li
-                key={slug}
-                className="flex items-center justify-between px-2.5 py-1.5"
-              >
-                <span className="font-mono text-xs text-ink">{slug}</span>
-                <button
-                  onClick={() => void removeSlug(slug)}
-                  className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted transition-colors hover:text-failed"
+            {config.models.map((slug) => {
+              const pinned = config.pinnedModels.includes(slug);
+              return (
+                <li
+                  key={slug}
+                  className="flex items-center justify-between px-2.5 py-1.5"
                 >
-                  Remove
-                </button>
-              </li>
-            ))}
+                  <span className="font-mono text-xs text-ink">{slug}</span>
+                  {pinned ? (
+                    <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-ready">
+                      ★ Recommended
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => void removeSlug(slug)}
+                      className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted transition-colors hover:text-failed"
+                    >
+                      Remove
+                    </button>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>

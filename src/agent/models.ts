@@ -14,4 +14,6 @@ export interface ModelOption {
    * pricing.
    */
   costTier?: '$' | '$$' | '$$$';
+  /** Surfaced as a "★ Recommended —" prefix in the picker; sorted first. */
+  recommended?: boolean;
 }

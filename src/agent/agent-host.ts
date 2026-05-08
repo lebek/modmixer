@@ -257,6 +257,19 @@ const OPENROUTER_PROVIDER = 'openrouter';
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
 
 /**
+ * OpenRouter slugs that are always present, regardless of what the user has
+ * saved. Pinned slugs are merged into the runtime model list (and shown in
+ * the settings UI as locked entries with a Recommended tag), but never
+ * persisted to settings.json — so updating this list rolls out to existing
+ * users automatically. `removeOpenRouterModel` rejects these slugs.
+ */
+const PINNED_OR_MODELS = ['moonshotai/kimi-k2.6'];
+
+function isPinnedOpenRouterSlug(slug: string): boolean {
+  return PINNED_OR_MODELS.includes(slug);
+}
+
+/**
  * Slugs we know support reasoning/thinking. Whitelisted by family prefix so
  * future minor releases (kimi-k2.7, deepseek-v4.1, etc.) inherit automatically.
  * Anything not on this list falls back to reasoning=false — pi clamps the
@@ -326,6 +339,7 @@ const DEFAULT_MODEL: Record<string, string> = {
   'github-copilot': 'claude-sonnet-4.6',
   'google-gemini-cli': 'gemini-2.5-pro',
   'google-antigravity': 'claude-sonnet-4-6',
+  openrouter: 'moonshotai/kimi-k2.6',
 };
 
 /**
@@ -357,8 +371,17 @@ const MODEL_COST_TIER: Record<string, '$' | '$$' | '$$$'> = {
 export interface OpenRouterConfig {
   /** True when an API key is persisted in encrypted AuthStorage. */
   apiKeyConfigured: boolean;
-  /** Slugs the user has saved (rendered as model picker entries). */
+  /**
+   * All slugs that should be rendered as picker entries — pinned (always-on)
+   * slugs first, then user-added slugs. Pinned slugs are not persisted, so
+   * adding a new pinned slug rolls out to existing users automatically.
+   */
   models: string[];
+  /**
+   * Subset of `models` that the user can't remove (shown in the settings UI
+   * with a Recommended tag and no Remove button).
+   */
+  pinnedModels: string[];
 }
 
 export interface OAuthLink {
@@ -566,8 +589,25 @@ export class AgentHost {
    * `openrouter-pricing.ts`); slugs missing from the cache fall back to
    * zero, which renders as "$0" in the UI until the next refresh lands.
    */
-  private applyOpenRouterRegistration(): void {
+  /**
+   * Effective slug list: pinned (always-on, never persisted) slugs first,
+   * then user-added slugs from settings. Deduped so a user who already had
+   * a pinned slug in their persisted list doesn't see it twice.
+   */
+  private getEffectiveOpenRouterModels(): string[] {
     const { openrouterModels } = loadSettings();
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const slug of [...PINNED_OR_MODELS, ...openrouterModels]) {
+      if (seen.has(slug)) continue;
+      seen.add(slug);
+      out.push(slug);
+    }
+    return out;
+  }
+
+  private applyOpenRouterRegistration(): void {
+    const openrouterModels = this.getEffectiveOpenRouterModels();
     if (openrouterModels.length === 0) {
       // No models saved → don't touch pi's built-in openrouter list.
       return;
@@ -1107,18 +1147,19 @@ export class AgentHost {
         });
       }
     }
-    // OpenRouter: surface every slug the user has explicitly saved. We
-    // deliberately don't gate on whether an API key is present — adding a
-    // slug is the explicit "I want this" signal, and if the key is missing
-    // OpenRouter will return a clear error at first prompt.
-    const { openrouterModels } = loadSettings();
-    for (const slug of openrouterModels) {
+    // OpenRouter: surface every slug the user has explicitly saved, plus
+    // the pinned recommended slugs. We deliberately don't gate on whether an
+    // API key is present — adding a slug is the explicit "I want this"
+    // signal, and if the key is missing OpenRouter will return a clear error
+    // at first prompt.
+    for (const slug of this.getEffectiveOpenRouterModels()) {
       out.push({
         key: `${OPENROUTER_PROVIDER}/${slug}`,
         provider: OPENROUTER_PROVIDER,
         providerLabel: providerLabel(OPENROUTER_PROVIDER),
         modelId: slug,
         label: slug,
+        recommended: isPinnedOpenRouterSlug(slug),
       });
     }
     return out;
@@ -1132,7 +1173,8 @@ export class AgentHost {
     return {
       apiKeyConfigured:
         this.authStorage.getAuthStatus(OPENROUTER_PROVIDER).source === 'stored',
-      models: loadSettings().openrouterModels,
+      models: this.getEffectiveOpenRouterModels(),
+      pinnedModels: [...PINNED_OR_MODELS],
     };
   }
 
@@ -1155,6 +1197,8 @@ export class AgentHost {
   async addOpenRouterModel(slug: string): Promise<OpenRouterConfig> {
     const cleaned = slug.trim();
     if (!cleaned) return this.getOpenRouterConfig();
+    // Pinned slugs are already in the effective list — no need to persist.
+    if (isPinnedOpenRouterSlug(cleaned)) return this.getOpenRouterConfig();
     const current = loadSettings().openrouterModels;
     if (current.includes(cleaned)) return this.getOpenRouterConfig();
     saveSettings({ openrouterModels: [...current, cleaned] });
@@ -1192,6 +1236,9 @@ export class AgentHost {
   }
 
   async removeOpenRouterModel(slug: string): Promise<OpenRouterConfig> {
+    // Pinned slugs are locked — the UI hides Remove for them, but guard the
+    // IPC entry point too in case it's called directly.
+    if (isPinnedOpenRouterSlug(slug)) return this.getOpenRouterConfig();
     const current = loadSettings().openrouterModels;
     const next = current.filter((s) => s !== slug);
     if (next.length === current.length) return this.getOpenRouterConfig();
