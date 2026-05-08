@@ -390,7 +390,7 @@ function SourceSelect({
       <option value="official">Official (Core/DLC)</option>
       <option value="local">Local</option>
       <option value="workshop">Workshop</option>
-      <option value="workspace">Workspace</option>
+      <option value="workspace">Modmixer</option>
     </select>
   );
 }
