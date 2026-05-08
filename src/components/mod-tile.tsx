@@ -9,6 +9,8 @@ export function ModTile({
   onClick: () => void;
 }) {
   const previewUrl = useModPreview(mod.folder);
+  const updated = formatRelative(mod.updatedAt);
+  const created = formatDate(mod.createdAt);
   return (
     <button
       onClick={onClick}
@@ -34,14 +36,39 @@ export function ModTile({
             {mod.schematic?.shortDescription || mod.about.description}
           </p>
         )}
-        <div className="mt-1 flex items-center gap-3 font-mono text-[10px] uppercase tracking-[0.18em] text-subtle">
-          {mod.hasCSharp && <span>C#</span>}
-          {mod.hasDlls && <span>has dll</span>}
-          {mod.about.supportedVersions.length > 0 && (
-            <span>v={mod.about.supportedVersions.join(',')}</span>
+        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-subtle">
+          {updated && <span>Updated {updated}</span>}
+          {created && <span>Created {created}</span>}
+          {mod.publishedFileId && (
+            <span className="text-accent">Published</span>
           )}
         </div>
       </div>
     </button>
   );
+}
+
+function formatRelative(ms: number): string {
+  if (!ms) return '';
+  const diff = Date.now() - ms;
+  if (diff < 0) return 'just now';
+  const min = Math.round(diff / 60_000);
+  if (min < 1) return 'just now';
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.round(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.round(hr / 24);
+  if (day < 7) return `${day}d ago`;
+  return formatDate(ms);
+}
+
+function formatDate(ms: number): string {
+  if (!ms) return '';
+  const d = new Date(ms);
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  return d.toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    ...(sameYear ? {} : { year: 'numeric' }),
+  });
 }

@@ -13,6 +13,7 @@ import {
   SKIP_DIRS,
   containsDll,
   isSymlinkedInto,
+  latestMtimeMs,
   readPublishedFileId,
 } from './fs-helpers.js';
 
@@ -58,6 +59,10 @@ export interface WorkspaceMod {
    * 64-bit and can exceed JS safe-int range.
    */
   publishedFileId: string | null;
+  /** Workspace folder birthtime, epoch ms. */
+  createdAt: number;
+  /** Most-recent mtime under the workspace folder, epoch ms. */
+  updatedAt: number;
 }
 
 export function getWorkspacePaths(): WorkspacePaths {
@@ -95,16 +100,27 @@ async function buildWorkspaceMod(
 ): Promise<WorkspaceMod> {
   const workspacePath = path.join(workspaceDir, folder);
   const aboutPath = path.join(workspacePath, 'About', 'About.xml');
-  const [aboutXml, hasCSharp, hasDlls, active, schematic, publishedFileId] =
-    await Promise.all([
-      fsp.readFile(aboutPath, 'utf8').catch(() => null),
-      containsCsproj(path.join(workspacePath, 'Source')),
-      containsDll(path.join(workspacePath, 'Assemblies')),
-      isSymlinkedInto(folder, workspacePath, rimworldModsDir),
-      readSchematic(folder),
-      readPublishedFileId(workspacePath),
-    ]);
+  const [
+    aboutXml,
+    hasCSharp,
+    hasDlls,
+    active,
+    schematic,
+    publishedFileId,
+    folderStat,
+    updatedAt,
+  ] = await Promise.all([
+    fsp.readFile(aboutPath, 'utf8').catch(() => null),
+    containsCsproj(path.join(workspacePath, 'Source')),
+    containsDll(path.join(workspacePath, 'Assemblies')),
+    isSymlinkedInto(folder, workspacePath, rimworldModsDir),
+    readSchematic(folder),
+    readPublishedFileId(workspacePath),
+    fsp.stat(workspacePath).catch(() => null),
+    latestMtimeMs(workspacePath),
+  ]);
   const about = aboutXml ? parseAbout(aboutXml) : emptyAbout(folder);
+  const createdAt = folderStat?.birthtimeMs ?? folderStat?.ctimeMs ?? 0;
   return {
     folder,
     workspacePath,
@@ -114,6 +130,8 @@ async function buildWorkspaceMod(
     hasCSharp,
     hasDlls,
     publishedFileId,
+    createdAt,
+    updatedAt,
   };
 }
 

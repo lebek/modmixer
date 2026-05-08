@@ -1,5 +1,6 @@
 import type { WorkspaceMod } from '../agent/workspace';
 import { ModTile } from './mod-tile';
+import { byUpdatedDesc } from '@/lib/sort-mods';
 
 export function BuildLanding({
   mods,
@@ -12,6 +13,7 @@ export function BuildLanding({
   onNewMod: () => void;
   onImportMod: () => void;
 }) {
+  const sorted = [...mods].sort(byUpdatedDesc);
   return (
     <div className="flex-1 overflow-auto px-8 py-8">
       <div className="mx-auto max-w-4xl">
@@ -26,7 +28,7 @@ export function BuildLanding({
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           <NewModTile onClick={onNewMod} />
           <ImportModTile onClick={onImportMod} />
-          {mods.map((m) => (
+          {sorted.map((m) => (
             <ModTile key={m.folder} mod={m} onClick={() => onOpen(m.folder)} />
           ))}
         </div>

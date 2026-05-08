@@ -1,5 +1,6 @@
 import type { WorkspaceMod } from '../agent/workspace';
 import { ModTile } from './mod-tile';
+import { byUpdatedDesc } from '@/lib/sort-mods';
 
 export function ModsView({
   mods,
@@ -10,6 +11,7 @@ export function ModsView({
   onOpen: (folder: string) => void;
   onNewMod: () => void;
 }) {
+  const sorted = [...mods].sort(byUpdatedDesc);
   return (
     <div className="flex-1 overflow-auto px-8 py-8">
       <div className="mx-auto max-w-5xl">
@@ -34,7 +36,7 @@ export function ModsView({
           <EmptyState onNewMod={onNewMod} />
         ) : (
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-            {mods.map((m) => (
+            {sorted.map((m) => (
               <ModTile
                 key={m.folder}
                 mod={m}

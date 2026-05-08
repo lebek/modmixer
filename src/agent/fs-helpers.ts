@@ -62,3 +62,46 @@ export async function readPublishedFileId(
     return null;
   }
 }
+
+/**
+ * Most-recent mtime of any file or directory under `dir`, recursively, in epoch
+ * ms. Skips SKIP_DIRS. Folder mtime alone misses in-place file edits, and file
+ * mtimes alone miss adds/renames/deletes — taking the max of both catches every
+ * meaningful change. Returns 0 on missing/unreadable input.
+ */
+export async function latestMtimeMs(dir: string): Promise<number> {
+  let latest = 0;
+  const stack: string[] = [dir];
+  while (stack.length) {
+    const cur = stack.pop()!;
+    let entries: fs.Dirent[];
+    try {
+      const st = await fsp.stat(cur);
+      if (st.mtimeMs > latest) latest = st.mtimeMs;
+      entries = await fsp.readdir(cur, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    const fileMtimes = await Promise.all(
+      entries
+        .filter((e) => !SKIP_DIRS.has(e.name))
+        .map(async (e) => {
+          const full = path.join(cur, e.name);
+          if (e.isDirectory()) {
+            stack.push(full);
+            return 0;
+          }
+          try {
+            const st = await fsp.stat(full);
+            return st.mtimeMs;
+          } catch {
+            return 0;
+          }
+        }),
+    );
+    for (const m of fileMtimes) {
+      if (m > latest) latest = m;
+    }
+  }
+  return latest;
+}
