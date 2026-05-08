@@ -3,7 +3,6 @@ import type { WorkspaceMod } from '../agent/workspace';
 import type { SchematicData } from '../agent/schematic';
 import type { DefEntry } from '../agent/defs-scan';
 import { Markdown } from './markdown';
-import { DefGraphView } from './def-graph';
 import { cn } from '@/lib/cn';
 
 export function ModSchematicPanel({ mod }: { mod: WorkspaceMod }) {
@@ -76,11 +75,6 @@ export function ModSchematicPanel({ mod }: { mod: WorkspaceMod }) {
                 remembering across conversations.
               </EmptyHint>
             )}
-          </section>
-
-          <section>
-            <SectionHeading>Relationships</SectionHeading>
-            <DefGraphView folder={mod.folder} />
           </section>
 
           <section>

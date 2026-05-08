@@ -98,7 +98,6 @@ const api = {
   readModAbout: (folder: string) => invoke('modmixer:mods:read-about', folder),
   readSchematic: (folder: string) => invoke('modmixer:mods:read-schematic', folder),
   scanModDefs: (folder: string) => invoke('modmixer:mods:scan-defs', folder),
-  getDefGraph: (folder: string) => invoke('modmixer:mods:def-graph', folder),
   writeModAbout: (
     folder: string,
     patch: Partial<import('./agent/workspace').AboutMetadata>,

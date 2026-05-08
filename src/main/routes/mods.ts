@@ -15,7 +15,6 @@ import {
 } from '../../agent/workspace.js';
 import { readSchematic } from '../../agent/schematic.js';
 import { scanDefs } from '../../agent/defs-scan.js';
-import { buildDefGraph } from '../../agent/def-graph.js';
 import { emitModChanged } from '../../agent/mod-events.js';
 import {
   disableModInGame,
@@ -34,9 +33,9 @@ import { deleteAllSaves } from '../../agent/snapshots.js';
 import type { RouteContext } from './context.js';
 
 /**
- * Workspace mod CRUD + reads (About, schematic, defs, def graph) +
- * RimWorld launch/quit/run-state. They all share the workspace dir state
- * machine, so they live together.
+ * Workspace mod CRUD + reads (About, schematic, defs) + RimWorld
+ * launch/quit/run-state. They all share the workspace dir state machine,
+ * so they live together.
  */
 export function registerModRoutes(ctx: RouteContext): void {
   const { ipc, host, getWindow, requireConsent } = ctx;
@@ -134,11 +133,6 @@ export function registerModRoutes(ctx: RouteContext): void {
   ipc.handle('modmixer:mods:scan-defs', (_evt, folder: string) =>
     scanDefs(folder),
   );
-
-  ipc.handle('modmixer:mods:def-graph', async (_evt, folder: string) => {
-    const defs = await scanDefs(folder);
-    return buildDefGraph(defs);
-  });
 
   ipc.handle(
     'modmixer:mods:write-about',

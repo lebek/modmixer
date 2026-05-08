@@ -24,7 +24,6 @@ import type {
 } from '../agent/workspace';
 import type { SchematicData } from '../agent/schematic';
 import type { DefEntry } from '../agent/defs-scan';
-import type { DefGraph } from '../agent/def-graph';
 import type { EnableResult, DisableResult } from '../agent/game';
 import type { AssetKind, AssetScan } from '../agent/assets/types';
 import type {
@@ -176,7 +175,6 @@ export interface Channels {
   'modmixer:mods:read-about': (folder: string) => AboutMetadata | null;
   'modmixer:mods:read-schematic': (folder: string) => SchematicData | null;
   'modmixer:mods:scan-defs': (folder: string) => DefEntry[];
-  'modmixer:mods:def-graph': (folder: string) => DefGraph;
   'modmixer:mods:write-about': (
     folder: string,
     patch: Partial<AboutMetadata>,
