@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -93,10 +94,14 @@ const components: Components = {
   ),
 };
 
-export function Markdown({ children }: { children: string }) {
+export const Markdown = memo(function Markdown({
+  children,
+}: {
+  children: string;
+}) {
   return (
     <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
       {children}
     </ReactMarkdown>
   );
-}
+});

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import type { AgentMessage } from '@mariozechner/pi-agent-core';
 import type { Conversation } from '../agent/conversations';
 import type { WorkspaceMod } from '../agent/workspace';
@@ -189,6 +189,21 @@ export function ChatPanel({
     [messages, streaming],
   );
 
+  // One pass over visible builds the toolCallId → args map so each toolResult
+  // bubble doesn't have to do an O(N) backward scan. Returning the same
+  // `arguments` object reference across renders also keeps memo'd
+  // MessageBubble props stable for completed tool results.
+  const toolCallArgsById = useMemo(() => {
+    const map = new Map<string, Record<string, unknown>>();
+    for (const m of visible) {
+      if (m.role !== 'assistant') continue;
+      for (const c of extractToolCalls(m.content)) {
+        if (!map.has(c.id)) map.set(c.id, c.arguments);
+      }
+    }
+    return map;
+  }, [visible]);
+
   // Running OpenRouter total for this chat. Only completed messages count —
   // the streaming partial doesn't have final usage yet.
   const chatCost = useMemo(() => {
@@ -266,7 +281,7 @@ export function ChatPanel({
             toolStates={toolStates}
             toolCallArgs={
               m.role === 'toolResult'
-                ? findToolCallArgs(visible, i, m.toolCallId)
+                ? toolCallArgsById.get(m.toolCallId)
                 : undefined
             }
             isStreaming={streaming != null && i === visible.length - 1}
@@ -440,32 +455,39 @@ function ScopeEmptyState({ scope }: { scope: 'mod' | 'new' }) {
   );
 }
 
-function findToolCallArgs(
-  msgs: AgentMessage[],
-  idx: number,
-  toolCallId: string,
-): Record<string, unknown> | undefined {
-  for (let j = idx - 1; j >= 0; j--) {
-    const m = msgs[j];
-    if (m.role !== 'assistant') continue;
-    const calls = extractToolCalls(m.content);
-    const hit = calls.find((c) => c.id === toolCallId);
-    if (hit) return hit.arguments;
-  }
-  return undefined;
-}
-
-function MessageBubble({
-  message,
-  toolStates,
-  toolCallArgs,
-  isStreaming,
-}: {
+type MessageBubbleProps = {
   message: AgentMessage;
   toolStates: Record<string, { name: string; status: ToolStatus }>;
   toolCallArgs?: Record<string, unknown>;
   isStreaming: boolean;
-}) {
+};
+
+const MessageBubble = memo(MessageBubbleImpl, (prev, next) => {
+  if (
+    prev.message !== next.message ||
+    prev.isStreaming !== next.isStreaming ||
+    prev.toolCallArgs !== next.toolCallArgs
+  ) {
+    return false;
+  }
+  // toolStates is rebuilt on every tool event. Only re-render this bubble
+  // if a status this message actually cares about changed.
+  if (prev.toolStates === next.toolStates) return true;
+  if (prev.message.role !== 'assistant') return true;
+  for (const c of extractToolCalls(prev.message.content)) {
+    if (prev.toolStates[c.id]?.status !== next.toolStates[c.id]?.status) {
+      return false;
+    }
+  }
+  return true;
+});
+
+function MessageBubbleImpl({
+  message,
+  toolStates,
+  toolCallArgs,
+  isStreaming,
+}: MessageBubbleProps) {
   if (message.role === 'user') {
     return (
       <div className="flex justify-end">
