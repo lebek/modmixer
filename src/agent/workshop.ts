@@ -1,4 +1,5 @@
 import path from 'node:path';
+import os from 'node:os';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import { EventEmitter } from 'node:events';
@@ -22,6 +23,21 @@ const VISIBILITY_PUBLIC = 0;
 // Tag every upload with "Mod" plus the supportedVersions from About.xml. RimWorld's
 // in-game uploader uses the same convention so Workshop's version filter works.
 const BASE_TAG = 'Mod';
+
+// Filenames matched anywhere under the mod folder that we strip before
+// uploading to Steam. .modmixer is the agent's sidecar (schematic etc.) and
+// must never ship; the rest is build cruft / editor noise that has no
+// business on the Workshop. Steamworks has no exclude API, so we stage a
+// filtered copy instead of pointing it at the workspace folder.
+const PUBLISH_EXCLUDES = new Set<string>([
+  '.modmixer',
+  '.git',
+  '.DS_Store',
+  '.vs',
+  'bin',
+  'obj',
+  'node_modules',
+]);
 
 export type PublishStatus =
   | 'preparing'
@@ -175,6 +191,36 @@ export async function linkWorkshopItem(
   await writePublishedFileId(folder, id);
 }
 
+/**
+ * Copy the mod folder into a fresh temp directory, omitting anything in
+ * PUBLISH_EXCLUDES at any depth. Returns the staged content path plus a
+ * cleanup hook the caller MUST run in a finally block — otherwise a failed
+ * upload leaves the staged copy behind in the OS temp dir.
+ */
+async function stageContentForPublish(srcFolder: string): Promise<{
+  contentPath: string;
+  cleanup: () => Promise<void>;
+}> {
+  const stageRoot = await fsp.mkdtemp(
+    path.join(os.tmpdir(), 'modmixer-publish-'),
+  );
+  const dest = path.join(stageRoot, path.basename(srcFolder));
+  await fsp.cp(srcFolder, dest, {
+    recursive: true,
+    filter: (source) => !PUBLISH_EXCLUDES.has(path.basename(source)),
+  });
+  return {
+    contentPath: dest,
+    cleanup: async () => {
+      try {
+        await fsp.rm(stageRoot, { recursive: true, force: true });
+      } catch (err) {
+        console.warn('[workshop] staged content cleanup failed:', err);
+      }
+    },
+  };
+}
+
 function previewPathFor(folder: string): string | undefined {
   const { workspaceDir } = getWorkspacePaths();
   const candidate = path.join(workspaceDir, folder, 'About', 'Preview.png');
@@ -221,7 +267,7 @@ export async function publishToWorkshop(folder: string): Promise<PublishResult> 
   }
 
   const { workspaceDir } = getWorkspacePaths();
-  const contentPath = path.join(workspaceDir, folder);
+  const modFolder = path.join(workspaceDir, folder);
   const previewPath = previewPathFor(folder);
 
   const tags = [BASE_TAG, ...about.supportedVersions];
@@ -254,32 +300,39 @@ export async function publishToWorkshop(folder: string): Promise<PublishResult> 
 
   emit({ status: 'uploading-content', itemId: itemId.toString() });
 
-  await new Promise<void>((resolve, reject) => {
-    ws.updateItemWithCallback(
-      itemId,
-      {
-        title: about.name,
-        description: about.description,
-        changeNote,
-        previewPath,
-        contentPath,
-        tags,
-        visibility: VISIBILITY_PUBLIC,
-      },
-      RIMWORLD_APP_ID,
-      () => resolve(),
-      (err: unknown) => reject(err instanceof Error ? err : new Error(String(err))),
-      (progress: { status: number; progress: bigint; total: bigint }) => {
-        emit({
-          status: statusFromUpdateStatus(progress.status),
-          uploaded: Number(progress.progress),
-          total: Number(progress.total),
-          itemId: itemId.toString(),
-        });
-      },
-      250,
-    );
-  });
+  // Stage *after* writePublishedFileId so the staged copy includes the
+  // freshly-minted About/PublishedFileId.txt for newly-created items.
+  const staged = await stageContentForPublish(modFolder);
+  try {
+    await new Promise<void>((resolve, reject) => {
+      ws.updateItemWithCallback(
+        itemId,
+        {
+          title: about.name,
+          description: about.description,
+          changeNote,
+          previewPath,
+          contentPath: staged.contentPath,
+          tags,
+          visibility: VISIBILITY_PUBLIC,
+        },
+        RIMWORLD_APP_ID,
+        () => resolve(),
+        (err: unknown) => reject(err instanceof Error ? err : new Error(String(err))),
+        (progress: { status: number; progress: bigint; total: bigint }) => {
+          emit({
+            status: statusFromUpdateStatus(progress.status),
+            uploaded: Number(progress.progress),
+            total: Number(progress.total),
+            itemId: itemId.toString(),
+          });
+        },
+        250,
+      );
+    });
+  } finally {
+    await staged.cleanup();
+  }
 
   const url = `https://steamcommunity.com/sharedfiles/filedetails/?id=${itemId.toString()}`;
   emit({
