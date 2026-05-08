@@ -8,6 +8,7 @@ import { ModSchematicPanel } from './mod-schematic-panel';
 import { ModPublishPanel } from './mod-publish-panel';
 import { ModDepsPanel } from './mod-deps-panel';
 import { ModBuildSidebar, type BuildPanel } from './mod-build-sidebar';
+import { SavesView } from './saves-view';
 import { BuildLanding } from './build-landing';
 
 export function BuildView({
@@ -90,6 +91,9 @@ export function BuildView({
         )}
         {!newModInProgress && panel === 'deps' && activeMod && (
           <ModDepsPanel mod={activeMod} />
+        )}
+        {!newModInProgress && panel === 'saves' && activeMod && (
+          <SavesView mod={activeMod} />
         )}
         {!newModInProgress && panel === 'publish' && activeMod && (
           <ModPublishPanel

@@ -4,8 +4,15 @@ import type { WorkspaceMod } from '../agent/workspace';
 import type { AssetCounts } from '../agent/assets/types';
 import { cn } from '@/lib/cn';
 import { appConfirm } from './app-dialog';
+import { useSnapshots } from './saves-view';
 
-export type BuildPanel = 'chat' | 'schematic' | 'assets' | 'deps' | 'publish';
+export type BuildPanel =
+  | 'chat'
+  | 'schematic'
+  | 'assets'
+  | 'deps'
+  | 'saves'
+  | 'publish';
 
 export function ModBuildSidebar({
   mod,
@@ -25,6 +32,7 @@ export function ModBuildSidebar({
   onNewChat?: () => void;
 }) {
   const [assetCounts, setAssetCounts] = useState<AssetCounts | null>(null);
+  const saves = useSnapshots(showAssets && mod ? mod.folder : null);
 
   useEffect(() => {
     if (!mod || !showAssets) {
@@ -116,6 +124,24 @@ export function ModBuildSidebar({
             icon={<DepsIcon />}
             active={panel === 'deps'}
             onClick={() => onSelectPanel('deps')}
+          />
+        )}
+        {showAssets && (
+          <SidebarRow
+            label="Saves"
+            subtitle="Roll back if something breaks"
+            icon={<SavesIcon />}
+            active={panel === 'saves'}
+            onClick={() => onSelectPanel('saves')}
+            badge={
+              saves.length > 0
+                ? {
+                    count: saves.length,
+                    tone: 'accent',
+                    title: `${saves.length} save${saves.length === 1 ? '' : 's'}`,
+                  }
+                : undefined
+            }
           />
         )}
         {showAssets && (
@@ -276,6 +302,24 @@ function DepsIcon() {
       <rect x="3" y="14" width="7" height="7" />
       <path d="M14 17.5h7" />
       <path d="M17.5 14v7" />
+    </svg>
+  );
+}
+
+function SavesIcon() {
+  return (
+    <svg
+      aria-hidden
+      className="h-4 w-4"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M3 12a9 9 0 1 0 3-6.7" />
+      <polyline points="3 4 3 10 9 10" />
     </svg>
   );
 }

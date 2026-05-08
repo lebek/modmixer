@@ -1,26 +1,20 @@
 import { useEffect, useRef, useState } from 'react';
 import type { SaveRecord } from '../agent/snapshots';
+import type { WorkspaceMod } from '../agent/workspace';
 import { cn } from '@/lib/cn';
 
 /**
- * Saves panel: a popover anchored above the chat input. Shows the save
- * history for the active mod with a "Save now" action, inline rename, and
- * per-row Restore (files + chat) plus a kebab for rename / delete / rewind
- * chat only.
- *
- * The "Save" action depends on the active session being this conversation
- * (since the host pulls scope + leaf id from `this.active`). The chat panel
- * only renders this for mod-scoped chats it's currently viewing, so that
- * invariant holds in practice.
+ * Subscribe to a mod's save list. Returns the live list — initial fetch
+ * plus any push updates from the main process. Used by both the sidebar
+ * (for the count badge) and the SavesView (for the full list).
  */
-export function ChatSavesButton({ folder }: { folder: string }) {
-  const [open, setOpen] = useState(false);
+export function useSnapshots(folder: string | null): SaveRecord[] {
   const [saves, setSaves] = useState<SaveRecord[]>([]);
-  const wrapperRef = useRef<HTMLDivElement | null>(null);
-
-  // Initial load + subscribe to push events. The push event is mod-scoped,
-  // so filter by folder before applying.
   useEffect(() => {
+    if (!folder) {
+      setSaves([]);
+      return;
+    }
     let cancelled = false;
     window.modmixer
       .listSnapshots(folder)
@@ -28,7 +22,7 @@ export function ChatSavesButton({ folder }: { folder: string }) {
         if (!cancelled) setSaves(list);
       })
       .catch(() => {
-        // Empty list is the right fallback — git missing or first-run race.
+        // First run / git missing — empty list is the right fallback.
       });
     const off = window.modmixer.onSnapshotsChanged((event) => {
       if (event.folder !== folder) return;
@@ -39,57 +33,25 @@ export function ChatSavesButton({ folder }: { folder: string }) {
       off();
     };
   }, [folder]);
-
-  // Click-outside closes the popover.
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      const target = e.target as Node | null;
-      if (target && wrapperRef.current?.contains(target)) return;
-      setOpen(false);
-    };
-    window.addEventListener('mousedown', onDown);
-    return () => window.removeEventListener('mousedown', onDown);
-  }, [open]);
-
-  return (
-    <div className="relative" ref={wrapperRef}>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="inline-flex items-center gap-1.5 rounded-md border border-line bg-paper px-3 py-2 font-mono text-[11px] uppercase tracking-[0.18em] text-muted shadow-sm transition-colors hover:bg-surface hover:text-ink"
-        title="Saves for this mod"
-      >
-        <SaveIcon />
-        Saves
-        {saves.length > 0 && (
-          <span className="ml-0.5 text-subtle">({saves.length})</span>
-        )}
-      </button>
-      {open && (
-        <SavesPopover
-          folder={folder}
-          saves={saves}
-          onClose={() => setOpen(false)}
-        />
-      )}
-    </div>
-  );
+  return saves;
 }
 
-function SavesPopover({
-  folder,
-  saves,
-  onClose,
-}: {
-  folder: string;
-  saves: SaveRecord[];
-  onClose: () => void;
-}) {
+/**
+ * Saves panel for the active mod. Lives in the build sidebar's panel slot
+ * (same level as Schematic / Assets / Deps / Publish). The "Save now"
+ * button calls host.commitManualSave, which anchors the save to the
+ * currently-active conversation's leaf entry id — so a later Restore can
+ * also rewind chat to this point. If the user is viewing a mod whose chat
+ * isn't the active conversation (rare in normal flows), the save still
+ * captures the file state but skips the chat-rewind on restore.
+ */
+export function SavesView({ mod }: { mod: WorkspaceMod }) {
+  const folder = mod.folder;
+  const saves = useSnapshots(folder);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [renamingSha, setRenamingSha] = useState<string | null>(null);
-  // null = not creating; '' = creating with empty draft
+  // null = not creating; '' = creating with empty draft.
   const [newLabel, setNewLabel] = useState<string | null>(null);
 
   const run = async (fn: () => Promise<unknown>) => {
@@ -105,48 +67,57 @@ function SavesPopover({
   };
 
   return (
-    <div
-      className="absolute bottom-full right-0 z-20 mb-2 w-[420px] max-w-[80vw] rounded-md border border-line bg-paper shadow-xl"
-      role="dialog"
-    >
-      <div className="flex items-center justify-between border-b border-line px-3 py-2">
-        <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted">
-          Saves
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex items-center justify-between border-b border-line px-6 py-3">
+        <div>
+          <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted">
+            Saves
+          </div>
+          <div className="text-sm text-ink">
+            Roll the mod back to an earlier state
+          </div>
         </div>
         {newLabel === null ? (
           <button
             type="button"
             disabled={busy}
             onClick={() => setNewLabel('')}
-            className="inline-flex items-center gap-1 rounded-md bg-accent px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-accent-foreground transition-opacity hover:bg-accent-soft disabled:opacity-50"
+            className="inline-flex items-center gap-1 rounded-md bg-accent px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.18em] text-accent-foreground transition-opacity hover:bg-accent-soft disabled:opacity-50"
           >
             + Save now
           </button>
         ) : (
-          <NameDraft
-            placeholder="Name this save…"
-            initial={newLabel}
-            onCancel={() => setNewLabel(null)}
-            onCommit={(label) =>
-              run(async () => {
-                await window.modmixer.saveSnapshot(label || null);
-                setNewLabel(null);
-              })
-            }
-            disabled={busy}
-          />
+          <div className="w-64">
+            <NameDraft
+              placeholder="Name this save…"
+              initial={newLabel}
+              onCancel={() => setNewLabel(null)}
+              onCommit={(label) =>
+                run(async () => {
+                  await window.modmixer.saveSnapshot(label || null);
+                  setNewLabel(null);
+                })
+              }
+              disabled={busy}
+            />
+          </div>
         )}
       </div>
       {error && (
-        <div className="border-b border-failed/40 bg-failed/5 px-3 py-1.5 text-[11px] text-failed">
+        <div className="border-b border-failed/40 bg-failed/5 px-6 py-2 text-[12px] text-failed">
           {error}
         </div>
       )}
-      <div className="max-h-[50vh] overflow-auto">
+      <div className="min-h-0 flex-1 overflow-auto">
         {saves.length === 0 ? (
-          <div className="px-3 py-6 text-center text-[12px] text-subtle">
-            No saves yet. Saves auto-create after the AI replies, or hit
-            “Save now” to make one yourself.
+          <div className="px-6 py-12 text-center text-sm text-subtle">
+            <div className="mx-auto max-w-sm">
+              No saves yet. The agent auto-saves after every reply, or hit{' '}
+              <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-muted">
+                + Save now
+              </span>{' '}
+              to mark a checkpoint you can restore later.
+            </div>
           </div>
         ) : (
           <ul className="divide-y divide-line">
@@ -170,21 +141,15 @@ function SavesPopover({
                   })
                 }
                 onRestore={() =>
-                  run(async () => {
-                    await window.modmixer.restoreSnapshot(folder, s.sha);
-                    onClose();
-                  })
+                  run(() => window.modmixer.restoreSnapshot(folder, s.sha))
                 }
                 onRewindChat={() =>
-                  run(async () => {
-                    await window.modmixer.rewindChatToSnapshot(folder, s.sha);
-                    onClose();
-                  })
+                  run(() =>
+                    window.modmixer.rewindChatToSnapshot(folder, s.sha),
+                  )
                 }
                 onDelete={() =>
-                  run(async () => {
-                    await window.modmixer.deleteSnapshot(folder, s.sha);
-                  })
+                  run(() => window.modmixer.deleteSnapshot(folder, s.sha))
                 }
               />
             ))}
@@ -231,10 +196,12 @@ function SaveRow({
     return () => window.removeEventListener('mousedown', onDown);
   }, [menuOpen]);
 
-  const displayLabel = save.label?.trim() || (save.kind === 'manual' ? 'manual save' : 'auto-save');
+  const displayLabel =
+    save.label?.trim() ||
+    (save.kind === 'manual' ? 'manual save' : 'auto-save');
 
   return (
-    <li className="group flex items-center gap-2 px-3 py-2">
+    <li className="flex items-center gap-3 px-6 py-3">
       <div className="min-w-0 flex-1">
         {renaming ? (
           <NameDraft
@@ -248,23 +215,26 @@ function SaveRow({
           <button
             type="button"
             onClick={onStartRename}
-            className="block w-full truncate text-left text-[13px] text-ink hover:underline"
+            className="block w-full truncate text-left text-sm text-ink hover:underline"
             title="Click to rename"
           >
-            <span className={cn(!save.label && 'text-muted italic')}>
+            <span className={cn(!save.label && 'italic text-muted')}>
               {displayLabel}
             </span>
           </button>
         )}
         <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-subtle">
           {formatRelativeTime(save.timestamp)}
+          {save.kind === 'manual' && save.label && (
+            <span className="ml-2 text-muted">manual</span>
+          )}
         </div>
       </div>
       <button
         type="button"
         onClick={onRestore}
         disabled={busy}
-        className="inline-flex items-center gap-1 rounded-md border border-line bg-paper px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-ink shadow-sm transition-colors hover:bg-surface disabled:opacity-50"
+        className="inline-flex items-center gap-1 rounded-md border border-line bg-paper px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-ink shadow-sm transition-colors hover:bg-surface disabled:opacity-50"
         title="Restore files and rewind chat to this save"
       >
         Restore
@@ -280,7 +250,7 @@ function SaveRow({
           <KebabIcon />
         </button>
         {menuOpen && (
-          <div className="absolute right-0 top-full z-30 mt-1 w-44 overflow-hidden rounded-md border border-line bg-paper shadow-xl">
+          <div className="absolute right-0 top-full z-30 mt-1 w-48 overflow-hidden rounded-md border border-line bg-paper shadow-xl">
             <MenuItem
               label="Rename"
               onClick={() => {
@@ -378,36 +348,11 @@ function NameDraft({
 function formatRelativeTime(ms: number): string {
   const diff = Date.now() - ms;
   if (diff < 60_000) return 'just now';
-  if (diff < 3_600_000) {
-    const m = Math.round(diff / 60_000);
-    return `${m}m ago`;
-  }
-  if (diff < 86_400_000) {
-    const h = Math.round(diff / 3_600_000);
-    return `${h}h ago`;
-  }
+  if (diff < 3_600_000) return `${Math.round(diff / 60_000)}m ago`;
+  if (diff < 86_400_000) return `${Math.round(diff / 3_600_000)}h ago`;
   const d = Math.round(diff / 86_400_000);
   if (d < 7) return `${d}d ago`;
   return new Date(ms).toLocaleDateString();
-}
-
-function SaveIcon() {
-  return (
-    <svg
-      aria-hidden
-      className="h-3.5 w-3.5"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
-      <polyline points="17 21 17 13 7 13 7 21" />
-      <polyline points="7 3 7 8 15 8" />
-    </svg>
-  );
 }
 
 function KebabIcon() {
