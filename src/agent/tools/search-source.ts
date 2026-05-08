@@ -1,6 +1,7 @@
 import { Type } from 'typebox';
 import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
 import path from 'node:path';
 import { getIndexPaths } from '../index/paths.js';
 import { getIndexStatus } from '../index/rebuild.js';
@@ -8,7 +9,7 @@ import { getIndexStatus } from '../index/rebuild.js';
 const Params = Type.Object({
   query: Type.String({
     description:
-      'Regex pattern (ripgrep syntax) to search for in the decompiled RimWorld source. Anchor with `\\b` for whole-word matches.',
+      'Regex pattern (ripgrep syntax) to search for in the decompiled RimWorld C# source AND the indexed Defs XML. Anchor with `\\b` for whole-word matches.',
   }),
   caseSensitive: Type.Optional(
     Type.Boolean({ description: 'Match case (default false).' }),
@@ -16,7 +17,7 @@ const Params = Type.Object({
   filePattern: Type.Optional(
     Type.String({
       description:
-        'Glob to restrict matches (e.g. "**/RimWorld/*.cs" or "**/Verse/AI/*.cs"). Default: every .cs file under the source corpus.',
+        'Glob to restrict matches (e.g. "**/Verse/AI/*.cs" for C# only, "**/*.xml" for Defs only, "**/Designations/*.xml" for a single Defs subdir). Default: every file under both the C# source corpus and the Defs XML corpus.',
     }),
   ),
   maxLines: Type.Optional(
@@ -62,7 +63,7 @@ export const searchSourceTool: AgentTool<typeof Params, { matchedLines: number; 
   name: 'search_source',
   label: 'Search RimWorld source',
   description:
-    'Ripgrep over the decompiled RimWorld C# source. Use for finding call sites ("StealAIUtility\\\\b"), patch targets, or any pattern that isn\'t a clean type/method name. For symbol-level lookup prefer read_csharp_symbol — search_source returns line hits across the whole corpus.',
+    'Ripgrep over the decompiled RimWorld C# source AND the indexed Defs XML. Use for finding call sites ("StealAIUtility\\\\b"), patch targets, def cross-references like `<li>Designator_AreaHomeExpand</li>`, attribute values, or any pattern that isn\'t a clean type/method name. For symbol-level C# lookup prefer read_csharp_symbol; for def-by-name lookup prefer search_defs.',
   parameters: Params,
   async execute(_id, params, signal): Promise<AgentToolResult<{ matchedLines: number; truncated: boolean }>> {
     const status = getIndexStatus();
@@ -72,7 +73,7 @@ export const searchSourceTool: AgentTool<typeof Params, { matchedLines: number; 
         details: { matchedLines: 0, truncated: false },
       };
     }
-    const { sourceRoot } = getIndexPaths();
+    const { sourceRoot, defsRoot } = getIndexPaths();
     const rg = resolveRipgrep();
     if (!rg) {
       return {
@@ -97,13 +98,15 @@ export const searchSourceTool: AgentTool<typeof Params, { matchedLines: number; 
       params.caseSensitive ? '-s' : '-i',
     ];
     if (params.filePattern) args.push('-g', params.filePattern);
-    // Pass `sourceRoot` as the search path (rather than '.' with cwd=sourceRoot)
+    // Pass each root as an absolute search path (rather than '.' with cwd=root)
     // so ripgrep's `--heading` output prints absolute file paths. The agent's
     // `read` tool can pass those straight through; relative paths would have
     // resolved against the agent cwd (the mod workspace) and 404'd, which used
     // to push the model into hallucinating a `.cache/rimworld-source/...`
-    // prefix.
+    // prefix. Both sourceRoot (decompiled C#) and defsRoot (indexed XML) are
+    // searched so a single tool call covers vanilla code and the def corpus.
     args.push('-e', params.query, sourceRoot);
+    if (fs.existsSync(defsRoot)) args.push(defsRoot);
 
     const result = await runRg(rg, args, sourceRoot, signal);
 
