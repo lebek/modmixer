@@ -181,6 +181,24 @@ async function workingTreeIsClean(folder: string): Promise<boolean> {
 }
 
 /**
+ * Is `candidate` an ancestor of `head` (or the same commit)? Used after a
+ * restore to decide which manifest entries are still on the active
+ * timeline. `git merge-base --is-ancestor` exits 0 for yes, 1 for no.
+ */
+async function isAncestor(
+  folder: string,
+  candidate: string,
+  head: string,
+): Promise<boolean> {
+  try {
+    await git(folder, ['merge-base', '--is-ancestor', candidate, head]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Lazy-init the bare repo + state/ worktree. If a v1-shaped snapshots dir
  * (no state/ subdir) is found, the whole thing is wiped — v1 saves can't be
  * read by this version and only existed for a few commits before this rewrite.
@@ -367,6 +385,13 @@ export interface CommitOpts {
 }
 
 /**
+ * Git's universally-known empty-tree object hash. Same in every repo.
+ * Used as the "from" ref for the first commit so its diff is everything-
+ * vs-empty (purely additions) rather than undefined.
+ */
+const EMPTY_TREE_SHA = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
+
+/**
  * Tally added/modified/deleted file counts inside the mod folder between
  * two shas. Renames are bucketed as "modified" — they're really one file
  * moving, not a delete + add. Returns null if git diff fails (e.g. shas
@@ -453,12 +478,12 @@ export async function commitTurn(
   const sha = await currentHeadSha(folder);
   if (!sha) return null;
   // Diff against the parent commit (headBefore) to surface "what changed
-  // in the mod folder since last save" in the UI. Skipped on the very
-  // first commit since there's no parent.
+  // in the mod folder since last save" in the UI. The first commit has no
+  // parent, so we diff against git's empty-tree hash — every file shows
+  // up as added, which is what the user expects from a fresh save.
+  const fromRef = headBefore ?? EMPTY_TREE_SHA;
   const changes =
-    headBefore !== null
-      ? (await computeChangeStats(folder, headBefore, sha)) ?? undefined
-      : undefined;
+    (await computeChangeStats(folder, fromRef, sha)) ?? undefined;
   const record: SaveRecord = {
     sha,
     timestamp: Date.now(),
@@ -500,12 +525,41 @@ export async function restoreSnapshot(
   // conversations.json was rewritten on disk via replaceModConversationsSlice;
   // drop the in-memory cache so the next read picks up the new state.
   reloadConversations();
+  // Prune manifest entries whose commits are no longer reachable from HEAD.
+  // After restoring to an earlier sha, any saves that came after live on
+  // an abandoned branch — keeping them in the list would be misleading
+  // (their git objects survive only until the next gc). Their entries get
+  // dropped here so the History panel reflects the live timeline.
+  await pruneUnreachableSaves(folder, sha);
   const slice = getModConversationsSlice(folder);
   const active =
     (slice.activeId &&
       slice.conversations.find((c) => c.id === slice.activeId)) ||
     null;
   return { activeConversation: active };
+}
+
+/**
+ * Drop manifest entries whose sha isn't an ancestor of (or equal to) the
+ * given head. Called from restoreSnapshot after the git reset. Emits a
+ * 'changed' event when anything was actually removed so the renderer's
+ * History panel updates without a refresh round-trip.
+ */
+async function pruneUnreachableSaves(
+  folder: string,
+  head: string,
+): Promise<void> {
+  const idx = await readIndex(folder);
+  const kept: SaveRecord[] = [];
+  for (const save of idx.saves) {
+    if (await isAncestor(folder, save.sha, head)) {
+      kept.push(save);
+    }
+  }
+  if (kept.length === idx.saves.length) return;
+  idx.saves = kept;
+  await writeIndex(folder, idx);
+  events.emit('changed', { folder, saves: idx.saves });
 }
 
 export async function listSaves(folder: string): Promise<SaveRecord[]> {

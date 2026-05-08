@@ -3,6 +3,7 @@ import type { ChangeStats, SaveRecord } from '../agent/snapshots';
 import type { WorkspaceMod } from '../agent/workspace';
 import type { HydratedConversation } from '../preload';
 import { cn } from '@/lib/cn';
+import { appConfirm } from './app-dialog';
 
 export interface RestoreResult {
   mods: WorkspaceMod[];
@@ -86,7 +87,7 @@ export function SavesView({
       <div className="flex items-center justify-between border-b border-line px-6 py-3">
         <div>
           <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted">
-            Saves
+            History
           </div>
           <div className="text-sm text-ink">
             Roll the mod back to an earlier state
@@ -157,6 +158,27 @@ export function SavesView({
                 }
                 onRestore={() =>
                   run(async () => {
+                    // Manifest is newest-first; saves above this row are
+                    // the ones that would be discarded when we restore.
+                    const idx = saves.findIndex((x) => x.sha === s.sha);
+                    const discardCount = idx < 0 ? 0 : idx;
+                    if (discardCount > 0) {
+                      const label =
+                        s.label?.trim() ||
+                        s.preview?.trim() ||
+                        (s.kind === 'manual' ? 'manual save' : 'auto-save');
+                      const ok = await appConfirm(
+                        `This will discard ${discardCount} save${
+                          discardCount === 1 ? '' : 's'
+                        } made after this point. Your mod files and chats will be reset. This can't be undone.`,
+                        {
+                          title: `Restore "${label}"?`,
+                          okLabel: 'Restore',
+                          tone: 'danger',
+                        },
+                      );
+                      if (!ok) return;
+                    }
                     const result = await window.modmixer.restoreSnapshot(
                       folder,
                       s.sha,

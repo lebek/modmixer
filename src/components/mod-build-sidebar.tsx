@@ -128,8 +128,17 @@ export function ModBuildSidebar({
         )}
         {showAssets && (
           <SidebarRow
-            label="Saves"
-            subtitle="Roll back if something breaks"
+            label="Publish"
+            subtitle="Send to Steam Workshop"
+            icon={<PublishIcon />}
+            active={panel === 'publish'}
+            onClick={() => onSelectPanel('publish')}
+          />
+        )}
+        {showAssets && (
+          <SidebarRow
+            label="History"
+            subtitle="Rollback your mod"
             icon={<SavesIcon />}
             active={panel === 'saves'}
             onClick={() => onSelectPanel('saves')}
@@ -142,15 +151,6 @@ export function ModBuildSidebar({
                   }
                 : undefined
             }
-          />
-        )}
-        {showAssets && (
-          <SidebarRow
-            label="Publish"
-            subtitle="Send to Steam Workshop"
-            icon={<PublishIcon />}
-            active={panel === 'publish'}
-            onClick={() => onSelectPanel('publish')}
           />
         )}
       </nav>
