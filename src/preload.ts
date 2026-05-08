@@ -225,6 +225,23 @@ const api = {
     handler: (env: import('./preload/typed-ipc').RegistryEnvelope) => void,
   ) => on('modmixer:registry:changed', handler),
 
+  // Saves (snapshots) — rollback for the active mod's history.
+  listSnapshots: (folder: string) =>
+    invoke('modmixer:snapshots:list', folder),
+  saveSnapshot: (label: string | null) =>
+    invoke('modmixer:snapshots:save', label),
+  renameSnapshot: (folder: string, sha: string, label: string | null) =>
+    invoke('modmixer:snapshots:rename', folder, sha, label),
+  deleteSnapshot: (folder: string, sha: string) =>
+    invoke('modmixer:snapshots:delete', folder, sha),
+  restoreSnapshot: (folder: string, sha: string) =>
+    invoke('modmixer:snapshots:restore', folder, sha),
+  rewindChatToSnapshot: (folder: string, sha: string) =>
+    invoke('modmixer:snapshots:rewind-chat', folder, sha),
+  onSnapshotsChanged: (
+    handler: (event: import('./agent/snapshots').SnapshotsChangedEvent) => void,
+  ) => on('modmixer:snapshots:changed', handler),
+
   // Sessions — snapshot-restore for test mode and fix mode.
   getActiveSession: () => invoke('modmixer:session:get-active'),
   startTestSession: (args: { folder: string; packageId: string }) =>

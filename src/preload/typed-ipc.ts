@@ -36,6 +36,7 @@ import type {
   PublishProgressEvent,
   PublishResult,
 } from '../agent/workshop';
+import type { SaveRecord, SnapshotsChangedEvent } from '../agent/snapshots';
 import type { ConfirmationRequest } from '../agent/security/confirmation-gate';
 import type { IndexSnapshot } from '../agent/index/main-bridge';
 import type { UpdaterState } from '../agent/updater';
@@ -285,6 +286,18 @@ export interface Channels {
   'modmixer:registry:community-rules': () => CommunityRulesInfo;
   'modmixer:registry:refresh-community-rules': () => CommunityRulesInfo;
 
+  // Saves (snapshots)
+  'modmixer:snapshots:list': (folder: string) => SaveRecord[];
+  'modmixer:snapshots:save': (label: string | null) => SaveRecord | null;
+  'modmixer:snapshots:rename': (
+    folder: string,
+    sha: string,
+    label: string | null,
+  ) => SaveRecord | null;
+  'modmixer:snapshots:delete': (folder: string, sha: string) => void;
+  'modmixer:snapshots:restore': (folder: string, sha: string) => void;
+  'modmixer:snapshots:rewind-chat': (folder: string, sha: string) => void;
+
   // Sessions
   'modmixer:session:get-active': () => ActiveSession | null;
   'modmixer:session:start-test': (args: {
@@ -318,6 +331,7 @@ export interface Events {
   'modmixer:monitor:state': MonitorConnectionState;
   'modmixer:monitor:message': BridgeMessage;
   'modmixer:workshop:progress': PublishProgressEvent;
+  'modmixer:snapshots:changed': SnapshotsChangedEvent;
   'modmixer:oauth:event': OAuthEvent;
   'modmixer:confirm:request': ConfirmationRequest;
   'modmixer:index:progress': IndexProgressEvent;

@@ -94,6 +94,8 @@ import {
 import { getWorkspacePaths } from './workspace.js';
 import { ScopedResourceLoader } from './resource-loader.js';
 import { buildStripThinkingExtension } from './strip-thinking-extension.js';
+import { buildSnapshotExtension } from './snapshot-extension.js';
+import { commitTurn, restoreSnapshot, type SaveRecord } from './snapshots.js';
 import { buildSystemPrompt } from './system-prompt.js';
 import type { Extension } from '@mariozechner/pi-coding-agent';
 import {
@@ -423,6 +425,12 @@ interface ActiveSession {
   conversationId: string;
   scope: ConversationScope;
   session: AgentSession;
+  /**
+   * Same SessionManager handed to createAgentSession. Kept here so non-pi
+   * code (manual-save IPC, restore IPC) can grab the current leaf entry id
+   * without reaching back through AgentSession internals.
+   */
+  sessionManager: SessionManager;
   unsubscribe: () => void;
 }
 
@@ -715,9 +723,19 @@ export class AgentHost {
       // Stateless transform — one instance services every session.
       this.stripThinkingExtension = buildStripThinkingExtension();
     }
-    const resourceLoader = new ScopedResourceLoader(systemPrompt, [
-      this.stripThinkingExtension,
-    ]);
+    // Per-session: the snapshot extension's agent_end handler closes over the
+    // mod folder + conversation id, so it has to be rebuilt whenever those
+    // change (chat switch, scope upgrade after scaffold_mod). Returns null
+    // for "new"-scope chats with no folder yet.
+    const snapshotFolder =
+      convo.scope.type === 'mod' ? convo.scope.modFolder : null;
+    const snapshotExtension = buildSnapshotExtension({
+      folder: snapshotFolder,
+      conversationId: convo.id,
+    });
+    const extensions: Extension[] = [this.stripThinkingExtension];
+    if (snapshotExtension) extensions.push(snapshotExtension);
+    const resourceLoader = new ScopedResourceLoader(systemPrompt, extensions);
 
     const { thinkingLevel } = loadSettings();
     const { session } = await createAgentSession({
@@ -742,6 +760,7 @@ export class AgentHost {
       conversationId: convo.id,
       scope: convo.scope,
       session,
+      sessionManager,
       unsubscribe,
     };
   }
@@ -949,6 +968,78 @@ export class AgentHost {
   async interrupt(): Promise<void> {
     if (!this.active) return;
     await this.active.session.abort();
+  }
+
+  // =========================================================================
+  // Saves (snapshots)
+  // =========================================================================
+
+  /**
+   * User-pressed "Save". Writes a manual snapshot of the active mod folder
+   * and tags it with the active conversation's leaf entry id so a later
+   * Restore can rewind chat back to this moment too. Returns null when
+   * there's no active mod-scoped chat to anchor the save to.
+   */
+  async commitManualSave(label: string | null): Promise<SaveRecord | null> {
+    const a = this.active;
+    if (!a || a.scope.type !== 'mod') return null;
+    const leaf = a.sessionManager.getLeafEntry();
+    return commitTurn(a.scope.modFolder, {
+      kind: 'manual',
+      label: label ?? undefined,
+      conversationId: a.conversationId,
+      entryId: leaf?.id ?? null,
+    });
+  }
+
+  /**
+   * Restore a save: optionally `git reset --hard` the mod folder back to the
+   * sha, and optionally rewind the originating chat to the entry id captured
+   * when the save was made. Either or both can be skipped — the renderer's
+   * "Restore" button does both, while "Rewind chat only" passes
+   * restoreFiles=false.
+   *
+   * Chat rewind uses pi's `branchWithSummary`, which writes a
+   * BranchSummaryEntry rooted at the captured entry id. On reload, the
+   * session leaf points at that summary entry — subsequent prompts continue
+   * from the saved point as a sibling branch, and the abandoned tail stays
+   * in the file (recoverable via /tree, not exposed in v1 UI).
+   */
+  async restoreSave(args: {
+    folder: string;
+    save: SaveRecord;
+    restoreFiles: boolean;
+  }): Promise<void> {
+    if (args.restoreFiles) {
+      await restoreSnapshot(args.folder, args.save.sha);
+    }
+
+    const { conversationId, entryId } = args.save;
+    if (!conversationId || !entryId) return;
+    const convo = getConversation(conversationId);
+    if (!convo) return; // chat was deleted; file restore stands on its own
+
+    const summary = args.save.label
+      ? `Restored save '${args.save.label}'`
+      : 'Restored to an earlier auto-save';
+
+    const wasActive = this.active?.conversationId === convo.id;
+    if (wasActive) {
+      await this.disposeActive();
+    }
+    try {
+      const sm = SessionManager.open(
+        convo.sessionFile,
+        this.sessionDir,
+        this.cwd,
+      );
+      sm.branchWithSummary(entryId, summary, undefined, true);
+    } catch (err) {
+      console.warn('[snapshots] chat rewind failed:', err);
+    }
+    if (wasActive) {
+      this.active = await this.constructSession(convo);
+    }
   }
 
   async setModel(selection: ModelSelection): Promise<void> {

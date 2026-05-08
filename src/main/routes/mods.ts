@@ -30,6 +30,7 @@ import {
   type ModDependency,
 } from '../../agent/registry/index.js';
 import { listConversationsForMod } from '../../agent/conversations.js';
+import { deleteAllSaves } from '../../agent/snapshots.js';
 import type { RouteContext } from './context.js';
 
 /**
@@ -70,6 +71,13 @@ export function registerModRoutes(ctx: RouteContext): void {
     }
     stopWatching(folder);
     await deleteWorkspaceMod(folder);
+    // The mod's save history goes with it — saves are useless without the
+    // mod folder to restore into.
+    try {
+      await deleteAllSaves(folder);
+    } catch (err) {
+      console.warn('[delete-mod] deleteAllSaves failed (continuing):', err);
+    }
     // Drop any chats scoped to this mod and their session files.
     for (const convo of listConversationsForMod(folder)) {
       try {

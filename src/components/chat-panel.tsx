@@ -8,6 +8,7 @@ import { extractText, extractThinking, extractToolCalls } from '@/lib/agent-util
 import { useAsyncAction } from '@/lib/use-async-action';
 import { useScrollPin } from '@/lib/use-scroll-pin';
 import { Markdown } from './markdown';
+import { ChatSavesButton } from './chat-saves';
 import { ToolResultBubble } from './tool-result-renderer';
 
 type ToolStatus = 'running' | 'done' | 'error';
@@ -333,6 +334,9 @@ export function ChatPanel({
               className="block h-20 w-full resize-none bg-transparent text-sm text-ink placeholder:text-subtle focus:outline-none"
             />
             <div className="mt-2 flex items-center justify-end gap-2">
+              {conversation.scope.type === 'mod' && (
+                <ChatSavesButton folder={conversation.scope.modFolder} />
+              )}
               {busy && (
                 <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-subtle">
                   esc to stop

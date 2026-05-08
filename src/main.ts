@@ -60,6 +60,7 @@ import { registerConversationRoutes } from './main/routes/conversations.js';
 import { registerModRoutes } from './main/routes/mods.js';
 import { registerRegistryRoutes } from './main/routes/registry-routes.js';
 import { registerAssetsRoutes } from './main/routes/assets.js';
+import { registerSnapshotsRoutes } from './main/routes/snapshots.js';
 import { registerSystemRoutes } from './main/routes/system.js';
 
 if (started) {
@@ -195,6 +196,7 @@ registerConversationRoutes(routeContext);
 registerModRoutes(routeContext);
 registerRegistryRoutes(routeContext);
 registerAssetsRoutes(routeContext);
+registerSnapshotsRoutes(routeContext);
 registerSystemRoutes(routeContext);
 
 // Renderer-side broadcasts for events whose handlers can't easily live in
