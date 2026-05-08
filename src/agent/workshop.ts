@@ -5,6 +5,7 @@ import fsp from 'node:fs/promises';
 import { EventEmitter } from 'node:events';
 import { app } from 'electron';
 import { getWorkspacePaths, readModAbout } from './workspace.js';
+import { commitTurn } from './snapshots.js';
 import { track } from './telemetry.js';
 
 // steamworks.js's `init()` strips `init`, `runCallbacks`, and `restartAppIfNecessary`
@@ -343,6 +344,20 @@ export async function publishToWorkshop(folder: string): Promise<PublishResult> 
   });
 
   track({ name: 'mod_published' });
+
+  // Mark the publish in History so the user can roll back to "the version
+  // I shipped" without having to remember which auto-save it was. force:
+  // true gives the publish its own row even when no files changed since
+  // the last save (common: agent finishes work → auto-save → publish).
+  try {
+    await commitTurn(folder, {
+      kind: 'manual',
+      label: 'Steam Publish',
+      force: true,
+    });
+  } catch (err) {
+    console.warn('[workshop] post-publish snapshot failed:', err);
+  }
 
   return {
     itemId: itemId.toString(),

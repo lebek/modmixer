@@ -382,6 +382,13 @@ export interface CommitOpts {
    * capping; we just store it.
    */
   preview?: string;
+  /**
+   * Force a new commit + manifest entry even when the working tree is
+   * clean. Used to mark meaningful events (e.g. a successful Steam
+   * publish) so they appear as their own row in History rather than
+   * silently relabeling the previous save's row.
+   */
+  force?: boolean;
 }
 
 /**
@@ -448,7 +455,7 @@ export async function commitTurn(
   const headBefore = await currentHeadSha(folder);
   const clean = headBefore !== null && (await workingTreeIsClean(folder));
 
-  if (clean) {
+  if (clean && !opts.force) {
     if (opts.kind !== 'manual') return null;
     const idx = await readIndex(folder);
     const existing = idx.saves.find((s) => s.sha === headBefore);
