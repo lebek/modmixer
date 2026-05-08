@@ -177,6 +177,72 @@ export function listConversationsForMod(folder: string): Conversation[] {
   );
 }
 
+export interface ModConversationsSlice {
+  /** Mod-scoped conversations as of this slice. */
+  conversations: Conversation[];
+  /** activeByMod[folder] at slice time, or null if unset. */
+  activeId: string | null;
+}
+
+/**
+ * Read the per-mod subset of the global index. Used by the snapshot system
+ * so the chat list and which-chat-is-active are part of every save.
+ */
+export function getModConversationsSlice(folder: string): ModConversationsSlice {
+  const data = load();
+  return {
+    // Defensive copy — snapshots shouldn't share refs with live state.
+    conversations: data.conversations
+      .filter((c) => c.scope.type === 'mod' && c.scope.modFolder === folder)
+      .map((c) => ({ ...c })),
+    activeId: data.activeByMod[folder] ?? null,
+  };
+}
+
+/**
+ * Replace the mod-scoped subset of the global index with a snapshot slice.
+ * Mod-scoped conversations not in the slice are dropped (the caller is
+ * responsible for unlinking their session files); slice conversations not
+ * currently in the index are added back. activeByMod[folder] is set to
+ * slice.activeId, or cleared if the snapshot had nothing active.
+ *
+ * Conversations belonging to other mods (or 'new' scope) are left alone.
+ */
+export function replaceModConversationsSlice(
+  folder: string,
+  slice: ModConversationsSlice,
+): void {
+  const data = load();
+  const others = data.conversations.filter(
+    (c) => !(c.scope.type === 'mod' && c.scope.modFolder === folder),
+  );
+  data.conversations = [
+    ...others,
+    ...slice.conversations.map((c) => ({ ...c })),
+  ];
+  if (slice.activeId) {
+    data.activeByMod[folder] = slice.activeId;
+  } else {
+    delete data.activeByMod[folder];
+  }
+  // Belt-and-braces: if activeId points to a chat that isn't in the slice,
+  // clear it rather than leave a dangling pointer.
+  const ids = new Set(slice.conversations.map((c) => c.id));
+  if (data.activeByMod[folder] && !ids.has(data.activeByMod[folder])) {
+    delete data.activeByMod[folder];
+  }
+  persist();
+}
+
+/**
+ * Drop the in-memory cache so the next read re-loads from disk. Call after
+ * something rewrites conversations.json behind our back (e.g. snapshot
+ * restore patching the file directly).
+ */
+export function reloadConversations(): void {
+  cached = null;
+}
+
 export function isDefaultTitle(title: string): boolean {
   return title === DEFAULT_TITLE;
 }

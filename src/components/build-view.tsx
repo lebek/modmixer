@@ -8,7 +8,7 @@ import { ModSchematicPanel } from './mod-schematic-panel';
 import { ModPublishPanel } from './mod-publish-panel';
 import { ModDepsPanel } from './mod-deps-panel';
 import { ModBuildSidebar, type BuildPanel } from './mod-build-sidebar';
-import { SavesView } from './saves-view';
+import { SavesView, type RestoreResult } from './saves-view';
 import { BuildLanding } from './build-landing';
 
 export function BuildView({
@@ -25,6 +25,7 @@ export function BuildView({
   onTest,
   onGeneratePreview,
   onNewChat,
+  onSavesRestored,
   onModDeleted,
   busy,
   hasAi,
@@ -43,6 +44,7 @@ export function BuildView({
   onTest: () => void;
   onGeneratePreview: () => void;
   onNewChat: () => void;
+  onSavesRestored: (result: RestoreResult) => void;
   onModDeleted?: (folder: string) => void;
   busy: boolean;
   hasAi: boolean;
@@ -93,7 +95,7 @@ export function BuildView({
           <ModDepsPanel mod={activeMod} />
         )}
         {!newModInProgress && panel === 'saves' && activeMod && (
-          <SavesView mod={activeMod} />
+          <SavesView mod={activeMod} onRestored={onSavesRestored} />
         )}
         {!newModInProgress && panel === 'publish' && activeMod && (
           <ModPublishPanel

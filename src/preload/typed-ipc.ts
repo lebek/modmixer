@@ -295,8 +295,10 @@ export interface Channels {
     label: string | null,
   ) => SaveRecord | null;
   'modmixer:snapshots:delete': (folder: string, sha: string) => void;
-  'modmixer:snapshots:restore': (folder: string, sha: string) => void;
-  'modmixer:snapshots:rewind-chat': (folder: string, sha: string) => void;
+  'modmixer:snapshots:restore': (folder: string, sha: string) => {
+    mods: WorkspaceMod[];
+    hydrated: HydratedConversation | null;
+  };
 
   // Sessions
   'modmixer:session:get-active': () => ActiveSession | null;

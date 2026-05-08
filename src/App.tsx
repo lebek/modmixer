@@ -15,6 +15,7 @@ import { TabNav, type Tab } from './components/tab-nav';
 import { BuildView } from './components/build-view';
 import { ModsView } from './components/mods-view';
 import { LibraryView } from './components/library-view';
+import type { RestoreResult } from './components/saves-view';
 import { SessionRecoveryDialog } from './components/session-recovery-dialog';
 import { appAlert } from './components/app-dialog';
 
@@ -205,6 +206,20 @@ export function App() {
     setActiveMessages(hydrated.messages);
     setBuildPanel('chat');
   }, [activeModFolder]);
+
+  // Restore from a save replaces the mod's whole world: files, chat list,
+  // and which chat is active. Apply all of it in one render so the UI
+  // doesn't flash through a half-restored state.
+  const onSavesRestored = useCallback((result: RestoreResult) => {
+    setMods(result.mods);
+    if (result.hydrated) {
+      setActiveConvo(result.hydrated.conversation);
+      setActiveMessages(result.hydrated.messages);
+    } else {
+      setActiveConvo(null);
+      setActiveMessages([]);
+    }
+  }, []);
 
   // "Enable" for a workspace mod has to be atomic: create the symlink AND
   // add the packageId to <activeMods>. If we did only one, RimWorld either
@@ -469,6 +484,7 @@ export function App() {
           onTest={test}
           onGeneratePreview={generatePreview}
           onNewChat={startFreshChat}
+          onSavesRestored={onSavesRestored}
           onModDeleted={async () => {
             exitMod();
             await refreshMods();

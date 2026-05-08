@@ -4,6 +4,7 @@ import {
   onSnapshotsChanged,
   renameSave,
 } from '../../agent/snapshots.js';
+import { listWorkspaceMods } from '../../agent/workspace.js';
 import type { RouteContext } from './context.js';
 
 /**
@@ -40,20 +41,12 @@ export function registerSnapshotsRoutes(ctx: RouteContext): void {
   ipc.handle(
     'modmixer:snapshots:restore',
     async (_evt, folder: string, sha: string) => {
-      const saves = await listSaves(folder);
-      const save = saves.find((s) => s.sha === sha);
-      if (!save) throw new Error(`Save not found: ${sha}`);
-      await host.restoreSave({ folder, save, restoreFiles: true });
-    },
-  );
-
-  ipc.handle(
-    'modmixer:snapshots:rewind-chat',
-    async (_evt, folder: string, sha: string) => {
-      const saves = await listSaves(folder);
-      const save = saves.find((s) => s.sha === sha);
-      if (!save) throw new Error(`Save not found: ${sha}`);
-      await host.restoreSave({ folder, save, restoreFiles: false });
+      const hydrated = await host.restoreSave({ folder, sha });
+      // Mod folder contents may have changed entirely (file additions /
+      // deletions, About.xml swaps, etc.). Hand back a fresh mods list so
+      // the renderer doesn't have to chase a separate refresh.
+      const mods = await listWorkspaceMods();
+      return { mods, hydrated };
     },
   );
 

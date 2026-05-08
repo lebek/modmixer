@@ -236,8 +236,6 @@ const api = {
     invoke('modmixer:snapshots:delete', folder, sha),
   restoreSnapshot: (folder: string, sha: string) =>
     invoke('modmixer:snapshots:restore', folder, sha),
-  rewindChatToSnapshot: (folder: string, sha: string) =>
-    invoke('modmixer:snapshots:rewind-chat', folder, sha),
   onSnapshotsChanged: (
     handler: (event: import('./agent/snapshots').SnapshotsChangedEvent) => void,
   ) => on('modmixer:snapshots:changed', handler),

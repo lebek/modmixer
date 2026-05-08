@@ -1,7 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import type { SaveRecord } from '../agent/snapshots';
 import type { WorkspaceMod } from '../agent/workspace';
+import type { HydratedConversation } from '../preload';
 import { cn } from '@/lib/cn';
+
+export interface RestoreResult {
+  mods: WorkspaceMod[];
+  hydrated: HydratedConversation | null;
+}
 
 /**
  * Subscribe to a mod's save list. Returns the live list — initial fetch
@@ -38,14 +44,23 @@ export function useSnapshots(folder: string | null): SaveRecord[] {
 
 /**
  * Saves panel for the active mod. Lives in the build sidebar's panel slot
- * (same level as Schematic / Assets / Deps / Publish). The "Save now"
- * button calls host.commitManualSave, which anchors the save to the
- * currently-active conversation's leaf entry id — so a later Restore can
- * also rewind chat to this point. If the user is viewing a mod whose chat
- * isn't the active conversation (rare in normal flows), the save still
- * captures the file state but skips the chat-rewind on restore.
+ * (same level as Schematic / Assets / Deps / Publish). Each save captures
+ * the full state of the mod — files AND every chat scoped to it AND which
+ * chat was active. Restore winds the entire world back, so chats that
+ * didn't exist at save time disappear and the active chat reverts to
+ * whatever was active then.
+ *
+ * `onRestored` lets the parent (App) replace its mods + active-conversation
+ * state in one shot when a restore lands, avoiding a separate refresh
+ * round-trip and a flash of stale UI.
  */
-export function SavesView({ mod }: { mod: WorkspaceMod }) {
+export function SavesView({
+  mod,
+  onRestored,
+}: {
+  mod: WorkspaceMod;
+  onRestored: (result: RestoreResult) => void;
+}) {
   const folder = mod.folder;
   const saves = useSnapshots(folder);
   const [busy, setBusy] = useState(false);
@@ -141,12 +156,13 @@ export function SavesView({ mod }: { mod: WorkspaceMod }) {
                   })
                 }
                 onRestore={() =>
-                  run(() => window.modmixer.restoreSnapshot(folder, s.sha))
-                }
-                onRewindChat={() =>
-                  run(() =>
-                    window.modmixer.rewindChatToSnapshot(folder, s.sha),
-                  )
+                  run(async () => {
+                    const result = await window.modmixer.restoreSnapshot(
+                      folder,
+                      s.sha,
+                    );
+                    onRestored(result);
+                  })
                 }
                 onDelete={() =>
                   run(() => window.modmixer.deleteSnapshot(folder, s.sha))
@@ -168,7 +184,6 @@ function SaveRow({
   onCancelRename,
   onCommitRename,
   onRestore,
-  onRewindChat,
   onDelete,
 }: {
   save: SaveRecord;
@@ -179,7 +194,6 @@ function SaveRow({
   onCancelRename: () => void;
   onCommitRename: (label: string) => void;
   onRestore: () => void;
-  onRewindChat: () => void;
   onDelete: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -250,19 +264,12 @@ function SaveRow({
           <KebabIcon />
         </button>
         {menuOpen && (
-          <div className="absolute right-0 top-full z-30 mt-1 w-48 overflow-hidden rounded-md border border-line bg-paper shadow-xl">
+          <div className="absolute right-0 top-full z-30 mt-1 w-44 overflow-hidden rounded-md border border-line bg-paper shadow-xl">
             <MenuItem
               label="Rename"
               onClick={() => {
                 setMenuOpen(false);
                 onStartRename();
-              }}
-            />
-            <MenuItem
-              label="Rewind chat only"
-              onClick={() => {
-                setMenuOpen(false);
-                onRewindChat();
               }}
             />
             <MenuItem
