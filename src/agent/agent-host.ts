@@ -76,6 +76,7 @@ import {
 import { quitRimWorldTool } from './tools/quit-rimworld.js';
 import { prepareDebugSessionTool } from './tools/prepare-debug-session.js';
 import { isRimWorldRunningTool } from './tools/is-rimworld-running.js';
+import { runTestCycleTool } from './tools/run-test-cycle.js';
 import { watchPlayerLogTool } from './tools/watch-player-log.js';
 import { notifyTestStatusTool } from './tools/notify-test-status.js';
 import { sendToast } from './notifications.js';
@@ -92,7 +93,9 @@ import {
 } from './openrouter-credits.js';
 import { getWorkspacePaths } from './workspace.js';
 import { ScopedResourceLoader } from './resource-loader.js';
+import { buildStripThinkingExtension } from './strip-thinking-extension.js';
 import { buildSystemPrompt } from './system-prompt.js';
+import type { Extension } from '@mariozechner/pi-coding-agent';
 import {
   addConversation,
   getConversation,
@@ -141,6 +144,7 @@ function buildCustomTools(
       summary: 'Send a quit signal to RimWorld. Unsaved game progress will be lost.',
     }),
     isRimWorldRunningTool,
+    runTestCycleTool,
     watchPlayerLogTool,
     notifyTestStatusTool,
     tailPlayerLogTool,
@@ -212,6 +216,23 @@ function buildCustomTools(
 
 const BUILTIN_TOOL_NAMES = ['read', 'bash', 'edit', 'write', 'grep', 'find', 'ls'];
 
+/**
+ * Tools that stay registered (so run_test_cycle can drive them internally
+ * via .execute()) but are hidden from the agent's visible tool set. The
+ * macro `run_test_cycle` covers every parameter and call site for these
+ * during the normal test flow; exposing them too just adds tool-pollution
+ * for the model to wade through. Bring entries back into the visible set
+ * if/when the modlist-fix feature is wired up — that flow needs
+ * watch_player_log, quit_rimworld, and is_rimworld_running standalone.
+ */
+const HIDDEN_FROM_AGENT = new Set<string>([
+  'is_rimworld_running',
+  'quit_rimworld',
+  'prepare_debug_session',
+  'ship_and_launch',
+  'watch_player_log',
+]);
+
 /** Friendly provider labels surfaced in the UI. Falls back to the raw id. */
 const PROVIDER_LABELS: Record<string, string> = {
   anthropic: 'Claude',
@@ -224,6 +245,33 @@ const PROVIDER_LABELS: Record<string, string> = {
 
 const OPENROUTER_PROVIDER = 'openrouter';
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
+
+/**
+ * Slugs we know support reasoning/thinking. Whitelisted by family prefix so
+ * future minor releases (kimi-k2.7, deepseek-v4.1, etc.) inherit automatically.
+ * Anything not on this list falls back to reasoning=false — pi clamps the
+ * thinking-level dropdown to "off" for those, which matches their actual
+ * behavior on OpenRouter.
+ */
+const REASONING_PREFIXES = [
+  'moonshotai/kimi-k2',
+  'deepseek/deepseek-v4',
+  'deepseek/deepseek-v3.2',
+  'qwen/qwen3',
+  'anthropic/claude',
+  'openai/o1',
+  'openai/o3',
+  'openai/o4',
+  'openai/gpt-5',
+  'google/gemini-2.5',
+  'google/gemini-3',
+  'x-ai/grok-4',
+  'z-ai/glm-4.6',
+];
+
+function slugSupportsReasoning(slug: string): boolean {
+  return REASONING_PREFIXES.some((prefix) => slug.startsWith(prefix));
+}
 
 function providerLabel(provider: string): string {
   return PROVIDER_LABELS[provider] ?? provider;
@@ -391,6 +439,12 @@ export class AgentHost {
 
   private active: ActiveSession | null = null;
   /**
+   * Built lazily once on first session construction and reused thereafter.
+   * The strip-thinking transform is stateless; one extension instance is
+   * fine across every session in the app's lifetime.
+   */
+  private stripThinkingExtension: Extension | null = null;
+  /**
    * Set when an in-flight tool call (currently only scaffold_mod) updates the
    * conversation scope. The next send() reconstructs the AgentSession against
    * the new scope before prompting, so the user's next message hits a fresh
@@ -441,13 +495,16 @@ export class AgentHost {
     );
     this.settingsManager = SettingsManager.create(this.cwd, this.agentDir);
     const customAgentTools = buildCustomTools(this.cwd, () => this.active?.scope ?? null);
+    const visibleAgentTools = customAgentTools.filter(
+      (t) => !HIDDEN_FROM_AGENT.has(t.name),
+    );
     this.allowedToolNames = [
       ...BUILTIN_TOOL_NAMES,
-      ...customAgentTools
+      ...visibleAgentTools
         .map((t) => t.name)
         .filter((n) => !BUILTIN_TOOL_NAMES.includes(n)),
     ];
-    this.customTools = customAgentTools.map((tool) =>
+    this.customTools = visibleAgentTools.map((tool) =>
       toolDefinitionFromAgentTool(tool),
     );
   }
@@ -547,7 +604,12 @@ export class AgentHost {
       models: openrouterModels.map((slug) => ({
         id: slug,
         name: slug,
-        reasoning: false,
+        // pi-coding-agent gates the thinking-level dropdown off `reasoning`:
+        // when false, getAvailableThinkingLevels() returns ["off"] and any
+        // user-selected level (high, xhigh, …) silently clamps to "off". For
+        // known reasoning families we flip this on so the saved preference
+        // actually flows through.
+        reasoning: slugSupportsReasoning(slug),
         input: ['text'],
         cost: pricingFor(slug),
         // 200k is a safe upper bound for "modern" OpenRouter models; the
@@ -649,7 +711,13 @@ export class AgentHost {
       systemPrompt = buildSystemPrompt(convo.scope);
       setSystemPrompt(convo.id, systemPrompt);
     }
-    const resourceLoader = new ScopedResourceLoader(systemPrompt);
+    if (!this.stripThinkingExtension) {
+      // Stateless transform — one instance services every session.
+      this.stripThinkingExtension = buildStripThinkingExtension();
+    }
+    const resourceLoader = new ScopedResourceLoader(systemPrompt, [
+      this.stripThinkingExtension,
+    ]);
 
     const { thinkingLevel } = loadSettings();
     const { session } = await createAgentSession({

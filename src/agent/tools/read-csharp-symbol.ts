@@ -9,7 +9,7 @@ import { getIndexPaths } from '../index/paths.js';
 const Params = Type.Object({
   name: Type.String({
     description:
-      'Symbol to read. Pass the short name ("StealAIUtility") to get all matches, or the FQN ("RimWorld.StealAIUtility.TryFindBestItemToSteal") to pinpoint one. Works for class/struct/interface/enum/record/method/constructor/property/field/event symbols.',
+      'Symbol to read. Pass the short name ("StealAIUtility") to get all matches, the full FQN ("RimWorld.StealAIUtility.TryFindBestItemToSteal"), or a partial FQN ("LetterMaker.MakeLetter" — matches by suffix). All overloads of a method are returned — pick the one that matches your stack frame by signature.',
   }),
   kind: Type.Optional(
     Type.String({
@@ -59,29 +59,50 @@ export const readCsharpSymbolTool: AgentTool<typeof Params, { hits: SymbolHit[] 
     const db = openIndexDb();
     const cap = Math.min(Math.max(params.maxBytes ?? 4096, 256), 32768);
 
-    // Decide whether `name` is an FQN (contains dots) or a short name.
-    const isFqn = params.name.includes('.');
-    const where: string[] = [];
-    const args: Record<string, unknown> = {};
-    if (isFqn) {
-      where.push('fqn = @name');
-      args.name = params.name;
-    } else {
-      where.push('shortName = @name');
-      args.name = params.name;
-    }
-    if (params.kind) {
-      where.push('kind = @kind');
-      args.kind = params.kind;
-    }
-    const sql = `
+    // Resolve `name` against the index in three increasingly fuzzy passes:
+    //   1. exact fqn match — for callers that already know the namespace
+    //      ("Verse.LetterMaker.MakeLetter")
+    //   2. fqn suffix match — for partial FQNs the agent typed off a stack
+    //      frame ("LetterMaker.MakeLetter" → "Verse.LetterMaker.MakeLetter")
+    //   3. shortName match — for bare member names ("MakeLetter")
+    // Each pass returns ALL matches, so method overloads (same fqn, different
+    // startLine — see csharp-indexer.ts) are surfaced together. We stop at the
+    // first pass that yields any rows so a precise FQN doesn't get drowned in
+    // unrelated short-name hits.
+    const kindArgs: Record<string, unknown> = params.kind
+      ? { kind: params.kind }
+      : {};
+    const kindClause = params.kind ? ' AND kind = @kind' : '';
+    const select = `
       SELECT fqn, shortName, kind, parentFqn, filePath, startLine, endLine, signature
       FROM symbol
-      WHERE ${where.join(' AND ')}
-      ORDER BY length(fqn), fqn
+    `;
+    const orderLimit = `
+      ORDER BY length(fqn), fqn, startLine
       LIMIT 25
     `;
-    const rows = db.prepare(sql).all(args) as Omit<SymbolHit, 'body' | 'truncated'>[];
+    type Row = Omit<SymbolHit, 'body' | 'truncated'>;
+    let rows: Row[] = [];
+    if (params.name.includes('.')) {
+      rows = db
+        .prepare(
+          `${select} WHERE fqn = @name${kindClause} ${orderLimit}`,
+        )
+        .all({ name: params.name, ...kindArgs }) as Row[];
+      if (rows.length === 0) {
+        rows = db
+          .prepare(
+            `${select} WHERE fqn LIKE @suffix${kindClause} ${orderLimit}`,
+          )
+          .all({ suffix: `%.${params.name}`, ...kindArgs }) as Row[];
+      }
+    } else {
+      rows = db
+        .prepare(
+          `${select} WHERE shortName = @name${kindClause} ${orderLimit}`,
+        )
+        .all({ name: params.name, ...kindArgs }) as Row[];
+    }
 
     if (rows.length === 0) {
       return {
@@ -119,12 +140,37 @@ export const readCsharpSymbolTool: AgentTool<typeof Params, { hits: SymbolHit[] 
       hits.push({ ...r, filePath: abs, body, truncated });
     }
 
-    const text = hits
+    // When the query landed on multiple rows with the same FQN — i.e. method
+    // overloads — prefix the response with a one-line index so the caller can
+    // distinguish them by signature without a follow-up call. Plain
+    // single-symbol hits (most reads) get no preamble.
+    const fqnGroups = new Map<string, SymbolHit[]>();
+    for (const h of hits) {
+      const list = fqnGroups.get(h.fqn) ?? [];
+      list.push(h);
+      fqnGroups.set(h.fqn, list);
+    }
+    const overloadIndex: string[] = [];
+    for (const [fqn, group] of fqnGroups) {
+      if (group.length < 2) continue;
+      overloadIndex.push(
+        `# ${group.length} overloads of ${fqn}:`,
+        ...group.map(
+          (h, i) =>
+            `#   [${i + 1}] ${h.signature ?? '(no signature)'}  — ${h.filePath}:${h.startLine}`,
+        ),
+      );
+    }
+    const body = hits
       .map(
         (h) =>
           `=== ${h.kind} ${h.fqn} (${h.filePath}:${h.startLine}-${h.endLine}) ===\n${h.body}`,
       )
       .join('\n\n');
+    const text =
+      overloadIndex.length > 0
+        ? `${overloadIndex.join('\n')}\n\n${body}`
+        : body;
     return {
       content: [{ type: 'text', text }],
       details: { hits },

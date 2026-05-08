@@ -1,12 +1,14 @@
 import {
   createExtensionRuntime,
+  type Extension,
   type LoadExtensionsResult,
   type ResourceLoader,
 } from '@mariozechner/pi-coding-agent';
 
 /**
  * Minimal ResourceLoader that returns a single, externally-supplied system
- * prompt and no skills/extensions/themes/agents files.
+ * prompt and no skills/themes/agents files. May host a small set of
+ * pre-built in-process extensions (see buildStripThinkingExtension).
  *
  * pi-coding-agent's DefaultResourceLoader scans .pi/ folders for skills,
  * prompts, themes, extensions, and AGENTS.md/CLAUDE.md ancestor files. We
@@ -28,13 +30,18 @@ import {
  * invariant.
  */
 export class ScopedResourceLoader implements ResourceLoader {
-  private readonly extensionsResult: LoadExtensionsResult = {
-    extensions: [],
-    errors: [],
-    runtime: createExtensionRuntime(),
-  };
+  private readonly extensionsResult: LoadExtensionsResult;
 
-  constructor(private readonly systemPrompt: string) {}
+  constructor(
+    private readonly systemPrompt: string,
+    extensions: Extension[] = [],
+  ) {
+    this.extensionsResult = {
+      extensions,
+      errors: [],
+      runtime: createExtensionRuntime(),
+    };
+  }
 
   getExtensions(): LoadExtensionsResult {
     return this.extensionsResult;

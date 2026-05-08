@@ -23,7 +23,9 @@ export function LibraryView({
   onAutosort,
   onSetActive,
   onEnableWithDeps,
-  onStartFix,
+  // onStartFix is kept on the prop signature so callers don't have to be
+  // touched, but the button that invoked it is hidden for now — so we
+  // intentionally don't destructure it.
   onApplySession,
   onRevertSession,
 }: {
@@ -262,15 +264,10 @@ export function LibraryView({
           >
             Autosort
           </button>
-          {!session && (
-            <button
-              disabled={!canMutate}
-              onClick={() => guarded(onStartFix)}
-              className="h-7 rounded-md border border-line px-3 text-[11px] uppercase tracking-wide text-muted hover:border-ink/40 disabled:opacity-50"
-            >
-              Start fix session
-            </button>
-          )}
+          {/* "Start fix session" button hidden until the modlist-fix flow
+              is fully wired up (matching the agent-side hidden tools and
+              system-prompt block). Re-enable this when bringing the feature
+              back. */}
           <button
             disabled={!canMutate}
             onClick={() => guarded(onRefresh)}

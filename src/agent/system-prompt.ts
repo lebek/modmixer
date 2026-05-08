@@ -42,16 +42,6 @@ function gatherContext(): PromptContext {
   };
 }
 
-const FIX_MODLIST_BLOCK = `Fix-my-modlist flow when the user reports a broken/crashing/erroring mod list (NOT for "this mod I'm building has a bug" — use the test flow above):
-1. Survey: call list_installed_mods activeOnly=true — review the order and any issue flags. Tail Player.log (tail_player_log) and bucket errors by mod (use the registry stack-trace mapping).
-2. Hypothesize: pick the most likely root cause (missing dep, incompat pair both active, mis-ordered load, version mismatch). Tell the user in one short paragraph what you saw and what you suspect.
-3. Ask permission to enter a fix session, then call start_fix_session. Inside the session you can mutate the active list freely with set_active_mods / autosort_mods — neither prompts the user. The session snapshot is your safety net.
-4. Iterate: change the list, ask the user to launch RimWorld, watch_player_log, read errors, change again. Keep iteration tight — don't shuffle 30 mods at once when the symptom points to one.
-5. When the symptom is gone (or you've exhausted the obvious suspects), STOP. Show the user a diff (added / removed / reordered) and a short narrative ("removed X because its DLL referenced a missing type from Y; reordered Z to load after W per community rules"). Ask them to apply_session or revert_session. NEVER call apply_session without an explicit user yes — even if the fix looks obviously right.
-6. If the user says revert, call revert_session. If they say apply, call apply_session. Either way the session snapshot is cleaned up.
-
-`;
-
 const SHARED_RULES = `Workspace lifecycle:
 - Mods live in the workspace dir. They are NOT loaded by the game until synced (a symlink into RimWorld's Mods/). Most flows go through ship_and_launch, which bundles sync + enable + dep-walk + autosort + launch.
 - Never tell the user to enable the mod manually in RimWorld's in-game mod list or to restart the game; the tools handle that end-to-end.
@@ -158,13 +148,10 @@ Slot guidance:
 When the user asks for a workshop image, scan the mod's Textures/ first — pick the largest, most representative sprite for spritePath. If there are no sprites (XML-only mod), omit spritePath and the template will render title-only on the gradient.
 
 Test-in-game flow when the user wants to run their mod:
-1. is_rimworld_running. If running, ASK whether to quit_rimworld (they may have unsaved progress). Wait for confirmation. quit_rimworld blocks until exit, so the next call runs immediately — do NOT sleep between calls.
-2. prepare_debug_session. ALWAYS call this, even with no entries to pin (dev mode is the goal). Pin a palette entry when there's a one-click trigger; otherwise pass autoOpenPalette=false.
-3. ship_and_launch folder="${modFolder}". Defaults to quicktest=true. Pass quicktest=false ONLY when the test needs the menus (ScenarioDef picker, custom main-menu UI, mod options, save-load flows); say one line about why so the user knows the longer path is intentional.
-4. In one short paragraph, tell the user EXACTLY what to do in-game. The user is about to alt-tab — be specific.
-5. Call watch_player_log. Returns immediately — your turn ends here.
-6. If errors arrive, you'll be auto-prompted via a "[automated …]" user message — see the error-triage protocol below.
-7. If no auto-prompt arrives, the user will message you when they're done.
+1. Call run_test_cycle folder="${modFolder}". This single tool runs the entire chain: dev-mode prefs + palette pin + ship + launch + log watcher. Pin a palette entry when there's a one-click trigger (e.g. "Actions\\Do incident\\YourIncidentDef"); otherwise pass autoOpenPalette=false. Default isolated=true and quicktest=true; override only when the test needs the user's full mod list or the menus, and say one line about why.
+2. If the macro returns needsQuitConfirmation=true, RimWorld is running — ASK the user before re-calling with quitIfRunning=true (they may have unsaved progress).
+3. Once launched, in one short paragraph tell the user EXACTLY what to do in-game. They're about to alt-tab — be specific.
+4. Your turn ends after run_test_cycle returns. If errors arrive you'll be auto-prompted via a "[automated …]" user message — see the error-triage protocol below. Otherwise the user will message you when they're done. Do NOT re-call watch_player_log to "resume monitoring" — the watcher self-rearms.
 
 Error-triage protocol (when an "[automated …]" user message lands):
 The auto-prompt is a deduped summary, NOT raw blocks. Each line is one error class — a ×count, a [Ref XXXXXXXX] tag (or [no-ref]), and the message header. Stack traces are NOT inlined.
@@ -251,5 +238,5 @@ ${scopeBlock}
 
 ${loreBlock(modFolder)}
 
-${FIX_MODLIST_BLOCK}${SHARED_RULES}`;
+${SHARED_RULES}`;
 }

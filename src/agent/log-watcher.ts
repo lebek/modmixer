@@ -43,7 +43,10 @@ const REF_RE = /\[Ref ([0-9A-F]{8})\]/;
 const STACK_FRAME_RE = /^\s+at \S+\s*\(/;
 /**
  * Headers for error blocks that emit no `[Ref]` and no stack trace —
- * primarily def-loader and XML-parse paths. Anchored to start-of-line.
+ * primarily def-loader and XML-parse paths plus a small set of RimWorld
+ * runtime warnings that bypass Verse.Log.Error (and so don't get a [Ref]
+ * tag) but still indicate a real bug. Anchored to start-of-line unless the
+ * pattern needs to match a wrapper-with-prefix.
  */
 const NO_REF_HEADERS = [
   /^Config error in /,
@@ -52,6 +55,11 @@ const NO_REF_HEADERS = [
   /^Could not resolve cross-reference/,
   /^Could not find a type named/,
   /^Could not load reference to/,
+  // Object-pool exhaustion. RimWorld emits this via Unity's pool
+  // diagnostics when a pooled type (PawnPaths, GraphicData, etc.) is
+  // created faster than it's disposed — strong signal of a perf bug in
+  // the caller. No [Ref], no stack trace.
+  /^Leak suspected in /,
 ];
 const NOISE_PATTERNS = [
   /^Fallback handler could not load library/,
@@ -308,29 +316,49 @@ export function parseErrorBlocks(text: string): LogErrorGroup[] {
   /** Index in `out` of the most recent emission, for late hasStackTrace updates. */
   let lastIdx = -1;
 
-  const flushNoRefHeader = () => {
-    if (buffer.length === 0) return;
-    // Walk the buffer line-by-line — each NO_REF_HEADERS-matching line is
-    // its own event (e.g. two consecutive `Config error in X` /
-    // `Config error in Y` lines should yield two groups, not one).
-    // Non-matching lines (info logs that landed between errors) are
-    // silently dropped here.
+  const emitNoRefLine = (line: string): void => {
+    if (NOISE_PATTERNS.some((p) => p.test(line))) return;
+    if (!NO_REF_HEADERS.some((p) => p.test(line))) return;
+    const message = displayMessage(line);
+    out.push({
+      key: `msg:${normalizeMessage(message)}`,
+      refLabel: '[no-ref]',
+      drillPattern: drillPattern(message),
+      message,
+      count: 1,
+      firstAt: now,
+      lastAt: now,
+      hasStackTrace: false,
+    });
+    lastIdx = out.length - 1;
+  };
+
+  /**
+   * Walk the buffer, emit each NO_REF_HEADERS-matching line as its own
+   * group, and return the lines that DIDN'T match. Used by both the
+   * blank-line flush (which discards the leftover) and the [Ref]/stack-frame
+   * consumers (which take the leftover as message context). Without this
+   * draining step a no-ref warning that lands immediately before an
+   * unrelated [Ref] block disappears entirely.
+   */
+  const drainNoRefLines = (): string[] => {
+    if (buffer.length === 0) return [];
+    const remaining: string[] = [];
     for (const line of buffer) {
-      if (NOISE_PATTERNS.some((p) => p.test(line))) continue;
-      if (!NO_REF_HEADERS.some((p) => p.test(line))) continue;
-      const message = displayMessage(line);
-      out.push({
-        key: `msg:${normalizeMessage(message)}`,
-        refLabel: '[no-ref]',
-        drillPattern: drillPattern(message),
-        message,
-        count: 1,
-        firstAt: now,
-        lastAt: now,
-        hasStackTrace: false,
-      });
-      lastIdx = out.length - 1;
+      if (
+        !NOISE_PATTERNS.some((p) => p.test(line)) &&
+        NO_REF_HEADERS.some((p) => p.test(line))
+      ) {
+        emitNoRefLine(line);
+      } else {
+        remaining.push(line);
+      }
     }
+    return remaining;
+  };
+
+  const flushNoRefHeader = () => {
+    drainNoRefLines();
     buffer = [];
   };
 
@@ -368,21 +396,28 @@ export function parseErrorBlocks(text: string): LogErrorGroup[] {
     if (STACK_FRAME_RE.test(line)) {
       if (mode === 'collecting' && buffer.length > 0) {
         // Frame after a header that hadn't seen [Ref] yet — Unity exception
-        // path that bypasses Verse.Log's [Ref] tagging. Emit as no-ref.
-        const block = buffer.join('\n');
-        if (!NOISE_PATTERNS.some((p) => p.test(block))) {
-          const message = displayMessage(buffer[0]);
-          out.push({
-            key: `msg:${normalizeMessage(message)}`,
-            refLabel: '[no-ref]',
-            drillPattern: drillPattern(message),
-            message,
-            count: 1,
-            firstAt: now,
-            lastAt: now,
-            hasStackTrace: true,
-          });
-          lastIdx = out.length - 1;
+        // path that bypasses Verse.Log's [Ref] tagging. Drain any
+        // recognized no-ref headers from the buffer first (e.g. a "Leak
+        // suspected" warning that landed immediately before this block),
+        // then treat the leftover's first line as the no-ref exception's
+        // header.
+        const remaining = drainNoRefLines();
+        if (remaining.length > 0) {
+          const block = remaining.join('\n');
+          if (!NOISE_PATTERNS.some((p) => p.test(block))) {
+            const message = displayMessage(remaining[0]);
+            out.push({
+              key: `msg:${normalizeMessage(message)}`,
+              refLabel: '[no-ref]',
+              drillPattern: drillPattern(message),
+              message,
+              count: 1,
+              firstAt: now,
+              lastAt: now,
+              hasStackTrace: true,
+            });
+            lastIdx = out.length - 1;
+          }
         }
         buffer = [];
       } else if (mode === 'in_trace' && lastIdx >= 0) {
@@ -395,6 +430,10 @@ export function parseErrorBlocks(text: string): LogErrorGroup[] {
     const refMatch = REF_RE.exec(line);
     if (refMatch) {
       const ref = refMatch[1];
+      // Drain any no-ref warnings the [Ref] block was directly preceded by
+      // BEFORE consuming the buffer for the [Ref]'s own message — otherwise
+      // they get silently absorbed into the [Ref] group and lost.
+      buffer = drainNoRefLines();
       const message = messageFromBuffer() || displayMessage(line);
       out.push({
         key: `ref:${ref}`,

@@ -150,6 +150,31 @@ describe('parseErrorBlocks', () => {
     assert.equal(groups[0].hasStackTrace, true);
   });
 
+  it('emits a no-ref warning that lands immediately before an unrelated [Ref] block', () => {
+    // Real shape from a zombie-horde test session: a "Leak suspected"
+    // pool warning preceded the Zombie/[Ref] exception block by a single
+    // newline (no blank line between). The buffer-walking state machine
+    // used to absorb the warning into the [Ref]'s message and lose it.
+    // The fix drains recognized no-ref headers from the buffer before the
+    // [Ref] consumes it — both events should now show up.
+    const log = [
+      'Leak suspected in object pool for PawnPaths, created: 28, expected less than 27.',
+      'Zombie14661 has no available melee attack',
+      'Zombie14661 threw exception while determining job (main) curDriver=JobDriver_AttackMelee',
+      'System.NullReferenceException: Object reference not set to an instance of an object',
+      '[Ref 6C5A20DE]',
+      '  at Verse.AI.Pawn_Thinker.get_MainThinkNodeRoot () [0x0] in <hash>:0 ',
+    ].join('\n');
+    const groups = mergeGroups(parseErrorBlocks(log));
+    assert.equal(groups.length, 2);
+    const leak = groups.find((g) => /Leak suspected/.test(g.message));
+    assert.ok(leak, 'expected a Leak-suspected no-ref group');
+    assert.equal(leak.refLabel, '[no-ref]');
+    const ref = groups.find((g) => g.key === 'ref:6C5A20DE');
+    assert.ok(ref, 'expected the [Ref 6C5A20DE] group');
+    assert.match(ref.message, /threw exception while determining job/);
+  });
+
   it('handles the full cascade shape from the zombie horde session', () => {
     // Truncated reproduction of the actual prev-log content. Should resolve
     // to: 1× config error, 1× config error, 1× exception with [Ref], 1×

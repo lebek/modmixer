@@ -4,7 +4,7 @@ import { detectRimWorldPaths } from '../paths.js';
 import { getIndexPaths } from './paths.js';
 
 /** Bump when the schema or tool contract changes so existing indexes get nuked. */
-export const INDEX_SCHEMA_VERSION = 1;
+export const INDEX_SCHEMA_VERSION = 2;
 
 export interface IndexMeta {
   schemaVersion: number;

@@ -110,7 +110,10 @@ function ensureSchema(db: Database.Database): void {
       startLine    INTEGER NOT NULL,
       endLine      INTEGER NOT NULL,
       signature    TEXT,
-      PRIMARY KEY (fqn, filePath)
+      -- startLine in the PK so method overloads (same fqn, same file,
+      -- different lines) don't get clobbered by INSERT OR REPLACE during
+      -- indexing.
+      PRIMARY KEY (fqn, filePath, startLine)
     );
     CREATE INDEX IF NOT EXISTS idx_symbol_short ON symbol(shortName);
     CREATE INDEX IF NOT EXISTS idx_symbol_parent ON symbol(parentFqn);
