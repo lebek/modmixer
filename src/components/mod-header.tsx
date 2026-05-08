@@ -48,7 +48,6 @@ export function ModHeader({
         )}
       </div>
       <div className="ml-4 flex items-center gap-2">
-        <StatusPill active={mod.active} />
         {running ? (
           <button
             onClick={onClose}
@@ -130,23 +129,3 @@ function CloseIcon() {
   );
 }
 
-function StatusPill({ active }: { active: boolean }) {
-  return (
-    <span
-      className={cn(
-        'inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.18em]',
-        active
-          ? 'border-ready/40 bg-ready/10 text-ready'
-          : 'border-line bg-surface text-muted',
-      )}
-    >
-      <span
-        className={cn(
-          'h-1.5 w-1.5 rounded-full',
-          active ? 'bg-ready' : 'bg-pending',
-        )}
-      />
-      {active ? 'enabled' : 'disabled'}
-    </span>
-  );
-}

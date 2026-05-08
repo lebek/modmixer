@@ -430,11 +430,8 @@ export function App() {
       {tab === 'mods' && (
         <ModsView
           mods={mods}
-          activeOrder={registryEnvelope?.snapshot.activeOrder ?? []}
           onOpen={openMod}
           onNewMod={newMod}
-          onSync={sync}
-          onUnsync={unsync}
         />
       )}
       {tab === 'library' && (
