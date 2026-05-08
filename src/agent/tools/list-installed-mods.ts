@@ -214,6 +214,7 @@ function formatSummary(
     const id = m.packageId ? ` ${m.packageId}` : '';
     const flag = m.issues.length > 0 ? ` ⚠${m.issues.length}` : '';
     lines.push(`${tag} ${active} ${dll} ${lo} ${m.name}${id}${versions}${flag}`);
+    lines.push(`              · path: ${m.path}`);
     if (m.issues.length > 0) {
       for (const issue of m.issues) {
         lines.push(`              · ${issue.kind}: ${issue.message}`);

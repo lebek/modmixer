@@ -4,6 +4,7 @@ import { detectRimWorldPaths, detectGameVersionMajorMinorSync } from './paths.js
 import { getWorkspacePaths, parseAbout } from './workspace.js';
 import { loadSettings } from './settings.js';
 import { buildIndexSync, LORE_TOPICS } from './lore.js';
+import { readSchematicSync } from './schematic.js';
 import type { ConversationScope } from './conversations.js';
 
 interface PromptContext {
@@ -105,6 +106,30 @@ function isUntitledPlaceholder(modFolder: string, ctx: PromptContext): boolean {
   }
 }
 
+// Schematic snapshot at compose time. Stays frozen for the conversation —
+// the agent sees later edits via update_schematic tool results, and the
+// on-disk file is the source of truth for the read-only Schematic panel.
+// This must be byte-stable for the lifetime of the conversation; see the
+// invariant on buildSystemPrompt.
+function schematicSnapshotBlock(modFolder: string): string {
+  const schematic = readSchematicSync(modFolder);
+  if (!schematic) return '';
+  const { shortDescription, body } = schematic;
+  if (!shortDescription.trim() && !body.trim()) return '';
+  const lines = [
+    '',
+    'Schematic snapshot (agent-owned running spec for this mod, captured when this conversation began — your update_schematic calls in this chat will appear as tool results, and the on-disk sidecar at .modmixer/schematic.json is the source of truth):',
+  ];
+  if (shortDescription.trim()) {
+    lines.push(`shortDescription: ${shortDescription.trim()}`);
+  }
+  if (body.trim()) {
+    lines.push('body:');
+    lines.push(body.trim());
+  }
+  return lines.join('\n') + '\n';
+}
+
 function modScopeBlock(modFolder: string, ctx: PromptContext): string {
   const untitledIntro = isUntitledPlaceholder(modFolder, ctx)
     ? `This mod was just created via "New Mod" and has placeholder metadata (empty packageId, "Untitled Mod" as the display name in About.xml). The user is about to describe what they want to build — the mod folder, About.xml, and standard subdirs already exist on disk.
@@ -117,7 +142,7 @@ The on-disk folder name is an opaque random id — never user-facing and intenti
     : '';
   return `${untitledIntro}Active scope: working on the mod with folder id "${modFolder}".
 Mod path: ${ctx.workspaceDir}/${modFolder}
-
+${schematicSnapshotBlock(modFolder)}
 The folder name is an opaque internal id — the user-facing name and packageId live in About.xml. Stay inside this mod's folder unless asked to inspect another mod.
 
 To rename or reword the mod's identity, call set_mod_metadata folder="${modFolder}". About.xml's <description> is the user's marketing copy — only rewrite it when they ask. Use update_schematic for the agent's running spec.

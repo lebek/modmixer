@@ -126,6 +126,13 @@ import type { ModelSelection } from './settings.js';
 const RIMWORLD_POLL_INTERVAL_MS = 10_000;
 const HEARTBEAT_INTERVAL_MS = 60_000;
 
+// Stable substring used to detect a previously-injected recovery prompt when
+// walking back through history (so we never recover the same user turn
+// twice). Keep this prefix verbatim if you reword the user-visible message.
+const TRUNCATION_RECOVERY_SENTINEL_TAG = '[automated — truncation recovery]';
+const TRUNCATION_RECOVERY_PROMPT =
+  `${TRUNCATION_RECOVERY_SENTINEL_TAG} Your previous turn produced reasoning but no visible reply or tool call (the response was likely truncated mid-thought by the output-token budget). Continue from where you left off and produce a concise final answer or call a tool — don't restart your reasoning from scratch.`;
+
 /**
  * Mod-mixer-specific tools, plus a path-policy-guarded `bash` that overrides
  * pi's built-in (custom tools win by name in `_refreshToolRegistry`). The
@@ -665,7 +672,15 @@ export class AgentHost {
         // 200k is a safe upper bound for "modern" OpenRouter models; the
         // actual limit is enforced server-side regardless of what we say.
         contextWindow: 200_000,
-        maxTokens: 8192,
+        // 32k output cap. Reasoning models (Kimi K2.6 xhigh, DeepSeek R1, etc.)
+        // emit reasoning_content into the same output budget as the visible
+        // reply, and at xhigh the trace alone can run 8–20k tokens. With the
+        // old 8192 cap, long traces exhausted the budget mid-thought and the
+        // turn ended with reasoning-only content (Moonshot reports that as
+        // finish_reason=stop, not length, so the agent loop terminates as if
+        // the model said "ok" — user sees a blank reply). 32k leaves headroom
+        // for the reasoning trace plus a real answer.
+        maxTokens: 32_768,
         // Kimi K2 emits tool calls in its native `<|tool_call_begin|>` format
         // that requires the `kimi_k2` parser; not every OpenRouter sub-provider
         // ships it, so pin to Moonshot's own infra to avoid raw tokens leaking
@@ -826,6 +841,57 @@ export class AgentHost {
     }
   }
 
+  /**
+   * Detect "the model produced reasoning but no visible reply" and inject a
+   * synthetic follow-up nudging it to actually answer.
+   *
+   * Why: reasoning models (Kimi K2.6 xhigh, etc.) emit reasoning_content into
+   * the same output budget as the visible reply. When the reasoning trace
+   * fills the budget, the response ends with thinking-only content. Moonshot
+   * via OpenRouter reports finish_reason=stop in this case (not length), so
+   * the agent loop terminates as if the model said "ok" and the user sees a
+   * blank bubble. With maxTokens raised this should be rare, but it can also
+   * happen when the model genuinely exits inside a reasoning loop without
+   * converging on an answer.
+   *
+   * Loop guard: walk back to the most recent user message before this turn.
+   * If that message is one of our sentinels, we already injected a recovery
+   * for this user prompt — give up rather than spinning.
+   */
+  private maybeRecoverFromTruncatedReply(
+    conversationId: string,
+    message: AgentMessage,
+  ): void {
+    if (this.active?.conversationId !== conversationId) return;
+    if (message.role !== 'assistant') return;
+    if (message.stopReason !== 'stop' && message.stopReason !== 'length') {
+      return;
+    }
+    if (!Array.isArray(message.content)) return;
+
+    let hasThinking = false;
+    for (const block of message.content) {
+      if (block.type === 'text' && block.text.trim().length > 0) return;
+      if (block.type === 'toolCall') return;
+      if (block.type === 'thinking') hasThinking = true;
+    }
+    if (!hasThinking) return;
+
+    const messages = this.active.session.agent.state.messages;
+    for (let i = messages.length - 2; i >= 0; i--) {
+      const m = messages[i];
+      if (m.role !== 'user') continue;
+      if (messageText(m).includes(TRUNCATION_RECOVERY_SENTINEL_TAG)) return;
+      break;
+    }
+
+    void this.active.session
+      .prompt(TRUNCATION_RECOVERY_PROMPT, { streamingBehavior: 'steer' })
+      .catch((err) => {
+        console.error('Failed to inject truncation recovery prompt:', err);
+      });
+  }
+
   private onSessionEvent(
     conversationId: string,
     event: AgentSessionEvent,
@@ -848,6 +914,10 @@ export class AgentHost {
 
     if (event.type === 'message_end' || event.type === 'agent_end') {
       touch(conversationId);
+    }
+
+    if (event.type === 'turn_end') {
+      this.maybeRecoverFromTruncatedReply(conversationId, event.message);
     }
 
     // When scaffold_mod succeeds inside a "new" scope, upgrade the

@@ -36,6 +36,21 @@ function emptySchematic(): SchematicData {
   return { shortDescription: '', body: '' };
 }
 
+function parseSchematic(raw: string): SchematicData {
+  try {
+    const parsed = JSON.parse(raw) as Partial<SchematicData>;
+    return {
+      shortDescription:
+        typeof parsed.shortDescription === 'string'
+          ? parsed.shortDescription
+          : '',
+      body: typeof parsed.body === 'string' ? parsed.body : '',
+    };
+  } catch {
+    return emptySchematic();
+  }
+}
+
 /**
  * Read the schematic for a workspace mod. Returns null only if the mod
  * folder itself doesn't exist; if the folder exists but the sidecar doesn't,
@@ -47,19 +62,27 @@ export async function readSchematic(folder: string): Promise<SchematicData | nul
   if (!fs.existsSync(modDir)) return null;
   const file = sidecarPath(folder);
   if (!fs.existsSync(file)) return emptySchematic();
+  // Corrupt/unreadable sidecar — treat as empty rather than blowing up the
+  // mod browser. The next agent write will overwrite cleanly.
   try {
-    const raw = await fsp.readFile(file, 'utf8');
-    const parsed = JSON.parse(raw) as Partial<SchematicData>;
-    return {
-      shortDescription:
-        typeof parsed.shortDescription === 'string'
-          ? parsed.shortDescription
-          : '',
-      body: typeof parsed.body === 'string' ? parsed.body : '',
-    };
+    return parseSchematic(await fsp.readFile(file, 'utf8'));
   } catch {
-    // Corrupt/unreadable sidecar — treat as empty rather than blowing up the
-    // mod browser. The next agent write will overwrite cleanly.
+    return emptySchematic();
+  }
+}
+
+// Sync variant for callers that have to remain synchronous (currently
+// `buildSystemPrompt`, which is treated as a stable conversation identifier
+// and intentionally avoids async fan-out).
+export function readSchematicSync(folder: string): SchematicData | null {
+  const { workspaceDir } = getWorkspacePaths();
+  const modDir = path.join(workspaceDir, folder);
+  if (!fs.existsSync(modDir)) return null;
+  const file = sidecarPath(folder);
+  if (!fs.existsSync(file)) return emptySchematic();
+  try {
+    return parseSchematic(fs.readFileSync(file, 'utf8'));
+  } catch {
     return emptySchematic();
   }
 }
