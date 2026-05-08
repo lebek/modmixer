@@ -189,9 +189,9 @@ export function ChatPanel({
     [messages, streaming],
   );
 
-  // Running OpenRouter session total. Only completed messages count — the
-  // streaming partial doesn't have final usage yet.
-  const sessionCost = useMemo(() => {
+  // Running OpenRouter total for this chat. Only completed messages count —
+  // the streaming partial doesn't have final usage yet.
+  const chatCost = useMemo(() => {
     let sum = 0;
     for (const m of messages) {
       const c = openrouterCost(m);
@@ -294,7 +294,7 @@ export function ChatPanel({
       )}
       </div>
       <div className="border-t border-line px-6 py-3">
-        {(sessionCost > 0 || balance !== null || contextUsage) && (
+        {(chatCost > 0 || balance !== null || contextUsage) && (
           <div className="mb-2 flex flex-wrap justify-end gap-x-4 gap-y-1 font-mono text-[11px] text-subtle">
             {contextUsage && contextUsage.tokens !== null && (
               <span>
@@ -302,8 +302,8 @@ export function ChatPanel({
                 {formatTokens(contextUsage.contextWindow)}
               </span>
             )}
-            {sessionCost > 0 && (
-              <span>session cost = {formatCost(sessionCost)}</span>
+            {chatCost > 0 && (
+              <span>chat cost = {formatCost(chatCost)}</span>
             )}
             {balance !== null && <span>balance = {formatCost(balance)}</span>}
           </div>
