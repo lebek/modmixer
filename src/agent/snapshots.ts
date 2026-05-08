@@ -2,9 +2,20 @@ import { app } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { EventEmitter } from 'node:events';
+import {
+  add as gitAdd,
+  checkout as gitCheckout,
+  commit as gitCommit,
+  init as gitInit,
+  isDescendent as gitIsDescendent,
+  remove as gitRemove,
+  resolveRef as gitResolveRef,
+  statusMatrix as gitStatusMatrix,
+  walk as gitWalk,
+  TREE,
+  type WalkerEntry,
+} from 'isomorphic-git';
 import {
   getModConversationsSlice,
   reloadConversations,
@@ -12,8 +23,6 @@ import {
   type Conversation,
   type ModConversationsSlice,
 } from './conversations.js';
-
-const execFileP = promisify(execFile);
 
 export type SaveKind = 'auto' | 'manual';
 
@@ -128,6 +137,9 @@ function modWorkspacePath(folder: string): string {
  * this list — the schematic sidecar is part of "the world" the user
  * expects to roll back. The Steam-publish exclude list (in workshop.ts) is
  * a separate concern.
+ *
+ * Filtering happens during syncModIntoState (we just don't copy these into
+ * state/), so isomorphic-git never sees them — no .gitignore needed.
  */
 const EXCLUDE_BASENAMES = new Set<string>([
   '.git',
@@ -138,70 +150,78 @@ const EXCLUDE_BASENAMES = new Set<string>([
   'node_modules',
 ]);
 
-// Mirror of EXCLUDE_BASENAMES for git's info/exclude file. Trailing-slash
-// patterns match dirs at any depth.
-const EXCLUDE_PATTERNS = [
-  '.git/',
-  '.DS_Store',
-  '.vs/',
-  'bin/',
-  'obj/',
-  'node_modules/',
-];
-
 // =========================================================================
-// Git
+// Git (pure-JS via isomorphic-git)
 // =========================================================================
 
-async function git(
-  folder: string,
-  args: string[],
-): Promise<{ stdout: string; stderr: string }> {
-  const dir = bareRepoPath(folder);
-  const tree = statePath(folder);
-  return execFileP('git', ['--git-dir', dir, '--work-tree', tree, ...args]);
+const AUTHOR = { name: 'Modmixer', email: 'modmixer@local' };
+
+function repoArgs(folder: string) {
+  return { fs, dir: statePath(folder), gitdir: bareRepoPath(folder) };
 }
 
 async function currentHeadSha(folder: string): Promise<string | null> {
   try {
-    const { stdout } = await git(folder, ['rev-parse', 'HEAD']);
-    return stdout.trim() || null;
+    const sha = await gitResolveRef({
+      fs,
+      gitdir: bareRepoPath(folder),
+      ref: 'HEAD',
+    });
+    return sha || null;
   } catch {
+    // Fresh repo with no commits yet — HEAD points at an unborn branch.
     return null;
   }
 }
 
+/**
+ * `git status --porcelain` equivalent: are there any changes between the
+ * HEAD tree, the index, and the worktree? statusMatrix returns
+ * [filepath, head, workdir, stage] with 1 meaning "matches HEAD" / present.
+ * Anything not all-1s means dirty.
+ */
 async function workingTreeIsClean(folder: string): Promise<boolean> {
   try {
-    const { stdout } = await git(folder, ['status', '--porcelain']);
-    return stdout.trim().length === 0;
+    const matrix = await gitStatusMatrix(repoArgs(folder));
+    for (const [, head, workdir, stage] of matrix) {
+      if (head !== 1 || workdir !== 1 || stage !== 1) return false;
+    }
+    return true;
   } catch {
     return true;
   }
 }
 
 /**
- * Is `candidate` an ancestor of `head` (or the same commit)? Used after a
- * restore to decide which manifest entries are still on the active
- * timeline. `git merge-base --is-ancestor` exits 0 for yes, 1 for no.
+ * Is `candidate` reachable from `head` (or the same commit)?
+ * isomorphic-git's isDescendent is strict — same-sha returns false — so
+ * handle equality up front.
  */
 async function isAncestor(
   folder: string,
   candidate: string,
   head: string,
 ): Promise<boolean> {
+  if (candidate === head) return true;
   try {
-    await git(folder, ['merge-base', '--is-ancestor', candidate, head]);
-    return true;
+    return await gitIsDescendent({
+      fs,
+      gitdir: bareRepoPath(folder),
+      oid: head,
+      ancestor: candidate,
+    });
   } catch {
     return false;
   }
 }
 
 /**
- * Lazy-init the bare repo + state/ worktree. If a v1-shaped snapshots dir
- * (no state/ subdir) is found, the whole thing is wiped — v1 saves can't be
- * read by this version and only existed for a few commits before this rewrite.
+ * Lazy-init the repo + state/ worktree. The repo lives at repo.git/ and
+ * the worktree at state/ — same split as the original `git --git-dir / --work-tree`
+ * setup, just expressed via isomorphic-git's `dir` + `gitdir` args on every
+ * call. If a v1-shaped snapshots dir (no state/ subdir) is found, the whole
+ * thing is wiped — v1 saves can't be read by this version and only existed
+ * for a few commits before this rewrite.
  */
 async function ensureRepo(folder: string): Promise<void> {
   const dir = modSnapshotDir(folder);
@@ -216,17 +236,7 @@ async function ensureRepo(folder: string): Promise<void> {
   if (!fs.existsSync(repo)) {
     await fsp.mkdir(dir, { recursive: true });
     await fsp.mkdir(state, { recursive: true });
-    await execFileP('git', ['init', '--bare', repo]);
-    const excludeFile = path.join(repo, 'info', 'exclude');
-    await fsp.mkdir(path.dirname(excludeFile), { recursive: true });
-    await fsp.writeFile(
-      excludeFile,
-      EXCLUDE_PATTERNS.join('\n') + '\n',
-      'utf8',
-    );
-    // Pin author so commits don't depend on a global git user.email.
-    await git(folder, ['config', 'user.email', 'modmixer@local']);
-    await git(folder, ['config', 'user.name', 'Modmixer']);
+    await gitInit({ fs, dir: state, gitdir: repo, defaultBranch: 'main' });
   } else if (!stateExists) {
     await fsp.mkdir(state, { recursive: true });
   }
@@ -301,6 +311,26 @@ async function syncChatsIntoState(folder: string): Promise<void> {
     JSON.stringify(slice, null, 2),
     'utf8',
   );
+}
+
+/**
+ * Stage every change in state/ into the index: add new/modified files,
+ * remove deleted ones. isomorphic-git has no `add -A`, so we drive it off
+ * statusMatrix. Rows where workdir!=0 → file is present, add it; rows
+ * where workdir==0 → file gone, remove it.
+ */
+async function stageAllChanges(folder: string): Promise<void> {
+  const args = repoArgs(folder);
+  const matrix = await gitStatusMatrix(args);
+  for (const [filepath, , workdir, stage] of matrix) {
+    if (workdir === 0) {
+      if (stage !== 0) {
+        await gitRemove({ ...args, filepath });
+      }
+    } else {
+      await gitAdd({ ...args, filepath });
+    }
+  }
 }
 
 // =========================================================================
@@ -392,41 +422,63 @@ export interface CommitOpts {
 }
 
 /**
- * Git's universally-known empty-tree object hash. Same in every repo.
- * Used as the "from" ref for the first commit so its diff is everything-
- * vs-empty (purely additions) rather than undefined.
- */
-const EMPTY_TREE_SHA = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
-
-/**
  * Tally added/modified/deleted file counts inside the mod folder between
  * two shas. Renames are bucketed as "modified" — they're really one file
- * moving, not a delete + add. Returns null if git diff fails (e.g. shas
+ * moving, not a delete + add. Returns null if the walk fails (e.g. shas
  * are bogus); the caller treats that as "no stats available."
+ *
+ * `fromSha` of null means "first commit, diff against the empty tree" —
+ * everything in `toSha` is added. We special-case that path because
+ * isomorphic-git's TREE walker can't bind to git's empty-tree sentinel.
  */
 async function computeChangeStats(
   folder: string,
-  fromSha: string,
+  fromSha: string | null,
   toSha: string,
 ): Promise<ChangeStats | null> {
   try {
-    const { stdout } = await git(folder, [
-      'diff',
-      '--name-status',
-      `${fromSha}..${toSha}`,
-      '--',
-      'mod/',
-    ]);
+    const args = { fs, gitdir: bareRepoPath(folder) };
+    const trees = fromSha
+      ? [TREE({ ref: fromSha }), TREE({ ref: toSha })]
+      : [TREE({ ref: toSha })];
+
     let added = 0;
     let modified = 0;
     let deleted = 0;
-    for (const line of stdout.split(/\r?\n/)) {
-      if (!line) continue;
-      const status = line[0];
-      if (status === 'A') added++;
-      else if (status === 'D') deleted++;
-      else modified++;
-    }
+
+    await gitWalk({
+      ...args,
+      trees,
+      map: async (filepath, entries): Promise<undefined> => {
+        if (filepath === '.') return;
+        // Restrict to mod/ subtree (skip chats/, conversations.json, etc.).
+        if (!filepath.startsWith('mod/') && filepath !== 'mod') return;
+        if (filepath === 'mod') return;
+
+        const list = (entries ?? []) as (WalkerEntry | null)[];
+
+        if (fromSha) {
+          const [a, b] = list;
+          const aType = a ? await a.type() : null;
+          const bType = b ? await b.type() : null;
+          // Skip directory entries; we count blobs only.
+          if (aType === 'tree' || bType === 'tree') return;
+          if (!a && b) added++;
+          else if (a && !b) deleted++;
+          else if (a && b) {
+            const aOid = await a.oid();
+            const bOid = await b.oid();
+            if (aOid !== bOid) modified++;
+          }
+        } else {
+          const [b] = list;
+          if (!b) return;
+          const bType = await b.type();
+          if (bType === 'tree') return;
+          added++;
+        }
+      },
+    });
     return { added, modified, deleted };
   } catch {
     return null;
@@ -450,7 +502,7 @@ export async function commitTurn(
   await ensureRepo(folder);
   await syncModIntoState(folder);
   await syncChatsIntoState(folder);
-  await git(folder, ['add', '-A']);
+  await stageAllChanges(folder);
 
   const headBefore = await currentHeadSha(folder);
   const clean = headBefore !== null && (await workingTreeIsClean(folder));
@@ -481,16 +533,17 @@ export async function commitTurn(
 
   const message =
     opts.label?.trim() || (opts.kind === 'manual' ? 'manual save' : 'auto save');
-  await git(folder, ['commit', '--allow-empty', '-m', message]);
-  const sha = await currentHeadSha(folder);
+  const sha = await gitCommit({
+    ...repoArgs(folder),
+    message,
+    author: AUTHOR,
+  });
   if (!sha) return null;
   // Diff against the parent commit (headBefore) to surface "what changed
   // in the mod folder since last save" in the UI. The first commit has no
-  // parent, so we diff against git's empty-tree hash — every file shows
-  // up as added, which is what the user expects from a fresh save.
-  const fromRef = headBefore ?? EMPTY_TREE_SHA;
+  // parent, so we pass null and the walk reports every blob as added.
   const changes =
-    (await computeChangeStats(folder, fromRef, sha)) ?? undefined;
+    (await computeChangeStats(folder, headBefore, sha)) ?? undefined;
   const record: SaveRecord = {
     sha,
     timestamp: Date.now(),
@@ -525,8 +578,21 @@ export async function restoreSnapshot(
   sha: string,
 ): Promise<RestoreResult> {
   await ensureRepo(folder);
-  await git(folder, ['reset', '--hard', sha]);
-  // After reset, state/ matches the snapshot. Sync canonical locations.
+  // Wipe the worktree before checkout. isomorphic-git's checkout overwrites
+  // tracked files but doesn't always remove untracked ones, and it can
+  // refuse to overwrite paths whose type changed (e.g. file → directory).
+  // Starting from an empty worktree sidesteps both — the bare repo objects
+  // contain everything we need, and the next commit will repopulate state/
+  // wholesale anyway.
+  const state = statePath(folder);
+  await fsp.rm(state, { recursive: true, force: true });
+  await fsp.mkdir(state, { recursive: true });
+  await gitCheckout({
+    ...repoArgs(folder),
+    ref: sha,
+    force: true,
+  });
+  // Sync canonical locations from the freshly-checked-out state/.
   await restoreModFromState(folder);
   await restoreChatsFromState(folder);
   // conversations.json was rewritten on disk via replaceModConversationsSlice;
@@ -548,7 +614,7 @@ export async function restoreSnapshot(
 
 /**
  * Drop manifest entries whose sha isn't an ancestor of (or equal to) the
- * given head. Called from restoreSnapshot after the git reset. Emits a
+ * given head. Called from restoreSnapshot after the checkout. Emits a
  * 'changed' event when anything was actually removed so the renderer's
  * History panel updates without a refresh round-trip.
  */
@@ -597,8 +663,8 @@ export async function deleteSave(folder: string, sha: string): Promise<void> {
   if (idx.saves.length === before) return;
   await writeIndex(folder, idx);
   events.emit('changed', { folder, saves: idx.saves });
-  // Git object stays in the bare repo until `git gc` runs. Cheap; not
-  // worth pruning eagerly.
+  // Git object stays in the bare repo until a future gc. Cheap; not worth
+  // pruning eagerly.
 }
 
 /** Nuke the entire snapshots directory for a mod. Called from delete-mod. */

@@ -69,6 +69,7 @@
     "clsx": "^2.1.1",
     "electron-squirrel-startup": "^1.0.1",
     "fast-xml-parser": "^5.7.2",
+    "isomorphic-git": "^1.37.6",
     "posthog-node": "^5.30.8",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
