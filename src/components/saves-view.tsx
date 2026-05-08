@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { SaveRecord } from '../agent/snapshots';
+import type { ChangeStats, SaveRecord } from '../agent/snapshots';
 import type { WorkspaceMod } from '../agent/workspace';
 import type { HydratedConversation } from '../preload';
 import { cn } from '@/lib/cn';
@@ -210,9 +210,15 @@ function SaveRow({
     return () => window.removeEventListener('mousedown', onDown);
   }, [menuOpen]);
 
-  const displayLabel =
+  // Primary text precedence: explicit label → preview from the agent's
+  // last reply → generic fallback. The latter only kicks in for manual
+  // saves with no label and tool-only auto-saves with no text.
+  const primary =
     save.label?.trim() ||
+    save.preview?.trim() ||
     (save.kind === 'manual' ? 'manual save' : 'auto-save');
+  const primaryIsFallback = !save.label && !save.preview;
+  const changeSummary = save.changes ? formatChanges(save.changes) : '';
 
   return (
     <li className="flex items-center gap-3 px-6 py-3">
@@ -229,18 +235,28 @@ function SaveRow({
           <button
             type="button"
             onClick={onStartRename}
-            className="block w-full truncate text-left text-sm text-ink hover:underline"
+            className="block w-full text-left text-sm text-ink hover:underline"
             title="Click to rename"
           >
-            <span className={cn(!save.label && 'italic text-muted')}>
-              {displayLabel}
+            <span
+              className={cn(
+                'line-clamp-2',
+                primaryIsFallback && 'italic text-muted',
+              )}
+            >
+              {primary}
             </span>
           </button>
         )}
-        <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-subtle">
-          {formatRelativeTime(save.timestamp)}
+        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 font-mono text-[10px] uppercase tracking-[0.18em] text-subtle">
+          <span>{formatRelativeTime(save.timestamp)}</span>
+          {changeSummary && (
+            <span className="text-muted normal-case tracking-normal">
+              {changeSummary}
+            </span>
+          )}
           {save.kind === 'manual' && save.label && (
-            <span className="ml-2 text-muted">manual</span>
+            <span className="text-muted">manual</span>
           )}
         </div>
       </div>
@@ -350,6 +366,14 @@ function NameDraft({
       className="w-full rounded-sm border border-line bg-surface px-2 py-1 text-[13px] text-ink focus:border-accent focus:outline-none"
     />
   );
+}
+
+function formatChanges(c: ChangeStats): string {
+  const parts: string[] = [];
+  if (c.added) parts.push(`${c.added} added`);
+  if (c.modified) parts.push(`${c.modified} edited`);
+  if (c.deleted) parts.push(`${c.deleted} removed`);
+  return parts.join(' · ');
 }
 
 function formatRelativeTime(ms: number): string {

@@ -24,6 +24,12 @@ export type SaveKind = 'auto' | 'manual';
  * complete world: files, chat list, and the active chat. Saves are not
  * anchored to a single conversation; they are the entire mod state.
  */
+export interface ChangeStats {
+  added: number;
+  modified: number;
+  deleted: number;
+}
+
 export interface SaveRecord {
   sha: string;
   /** ms-since-epoch when the save was committed. */
@@ -31,6 +37,19 @@ export interface SaveRecord {
   /** User-supplied label; null for unnamed auto-saves. */
   label: string | null;
   kind: SaveKind;
+  /**
+   * Snippet of the assistant's last text reply for this turn. Lets the
+   * saves list show what an unnamed auto-save was *about* without making
+   * the user click in. Empty for tool-only turns and for manual saves
+   * (which already have a user-supplied label).
+   */
+  preview?: string;
+  /**
+   * File-level changes inside the mod folder since the previous save.
+   * Undefined for the first save (no parent) and for relabel-only manual
+   * saves where no new commit was made.
+   */
+  changes?: ChangeStats;
 }
 
 interface IndexFile {
@@ -339,6 +358,47 @@ export interface CommitOpts {
   /** Manual saves get this; auto-saves leave it null. */
   label?: string;
   kind?: SaveKind;
+  /**
+   * Optional snippet of the agent's last reply, surfaced in the saves list
+   * for unnamed auto-saves. Caller is responsible for trimming + length-
+   * capping; we just store it.
+   */
+  preview?: string;
+}
+
+/**
+ * Tally added/modified/deleted file counts inside the mod folder between
+ * two shas. Renames are bucketed as "modified" — they're really one file
+ * moving, not a delete + add. Returns null if git diff fails (e.g. shas
+ * are bogus); the caller treats that as "no stats available."
+ */
+async function computeChangeStats(
+  folder: string,
+  fromSha: string,
+  toSha: string,
+): Promise<ChangeStats | null> {
+  try {
+    const { stdout } = await git(folder, [
+      'diff',
+      '--name-status',
+      `${fromSha}..${toSha}`,
+      '--',
+      'mod/',
+    ]);
+    let added = 0;
+    let modified = 0;
+    let deleted = 0;
+    for (const line of stdout.split(/\r?\n/)) {
+      if (!line) continue;
+      const status = line[0];
+      if (status === 'A') added++;
+      else if (status === 'D') deleted++;
+      else modified++;
+    }
+    return { added, modified, deleted };
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -392,11 +452,20 @@ export async function commitTurn(
   await git(folder, ['commit', '--allow-empty', '-m', message]);
   const sha = await currentHeadSha(folder);
   if (!sha) return null;
+  // Diff against the parent commit (headBefore) to surface "what changed
+  // in the mod folder since last save" in the UI. Skipped on the very
+  // first commit since there's no parent.
+  const changes =
+    headBefore !== null
+      ? (await computeChangeStats(folder, headBefore, sha)) ?? undefined
+      : undefined;
   const record: SaveRecord = {
     sha,
     timestamp: Date.now(),
     label: opts.label?.trim() || null,
     kind: opts.kind ?? 'auto',
+    preview: opts.preview?.trim() || undefined,
+    changes,
   };
   const idx = await readIndex(folder);
   idx.saves.unshift(record);

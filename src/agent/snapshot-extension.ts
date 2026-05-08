@@ -4,7 +4,28 @@ import {
   type Extension,
   type ExtensionContext,
 } from '@mariozechner/pi-coding-agent';
+import { messageText } from '../lib/agent-utils.js';
 import { commitTurn } from './snapshots.js';
+
+const PREVIEW_MAX_CHARS = 140;
+
+/**
+ * Walk the turn's messages from the tail to find the last assistant
+ * message that produced visible text. Tool-only turns (no text) return
+ * null, and the saves UI falls back to the file-change summary.
+ */
+function extractPreview(messages: AgentEndEvent['messages']): string | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role !== 'assistant') continue;
+    const text = messageText(m).trim();
+    if (!text) return null;
+    const collapsed = text.replace(/\s+/g, ' ');
+    if (collapsed.length <= PREVIEW_MAX_CHARS) return collapsed;
+    return collapsed.slice(0, PREVIEW_MAX_CHARS - 1).trimEnd() + '…';
+  }
+  return null;
+}
 
 /**
  * Pi extension that auto-saves the mod's full state once each agent loop
@@ -29,11 +50,12 @@ export function buildSnapshotExtension(args: {
 
   const path = '<modmixer:snapshot>';
   const handler = async (
-    _event: AgentEndEvent,
+    event: AgentEndEvent,
     _ctx: ExtensionContext,
   ): Promise<void> => {
+    const preview = extractPreview(event.messages) ?? undefined;
     try {
-      await commitTurn(folder, { kind: 'auto' });
+      await commitTurn(folder, { kind: 'auto', preview });
     } catch (err) {
       // Snapshots are an aside to the chat — don't let a git failure
       // surface as a turn error.
