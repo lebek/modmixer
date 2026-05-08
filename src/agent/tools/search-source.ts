@@ -128,9 +128,31 @@ export const searchSourceTool: AgentTool<typeof Params, { matchedLines: number; 
     }
 
     if (matchedLines === 0) {
+      const flags = params.caseSensitive ? '' : 'i';
+      const filterNote = params.filePattern ? ` (filePattern: ${params.filePattern})` : '';
+      const hasMeta = /[.[\](){}*+?|^$\\]/.test(params.query);
+      const tips: string[] = [];
+      if (params.filePattern) {
+        tips.push(
+          'drop or widen filePattern (e.g. omit it to search every .cs and .xml file)',
+        );
+      }
+      if (hasMeta) {
+        tips.push(
+          'escape regex metacharacters or simplify to a literal substring — search_source uses ripgrep regex syntax',
+        );
+      }
+      tips.push(
+        'for def-by-name lookup use search_defs, for a known C# symbol use read_csharp_symbol or resolve_symbol',
+      );
+      const tipsLine = `Tips: ${tips.join('; ')}.`;
       return {
         content: [
-          { type: 'text', text: `No matches for /${params.query}/${params.caseSensitive ? '' : 'i'}.` },
+          {
+            type: 'text',
+            text:
+              `No matches for /${params.query}/${flags}${filterNote} across the RimWorld C# source and Defs XML index.\n${tipsLine}`,
+          },
         ],
         details: { matchedLines: 0, truncated: false },
       };

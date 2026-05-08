@@ -15,6 +15,7 @@ import path from 'node:path';
 import { homedir } from 'node:os';
 import { assertPathAllowed } from '../security/path-policy.js';
 import { getPathPolicyRoots } from '../security/policy-roots.js';
+import { getIndexPaths } from '../index/paths.js';
 
 /**
  * Built-in pi tools (`read`, `write`, `edit`, `grep`, `find`, `ls`) accept
@@ -87,10 +88,58 @@ function wrapPathTool(
   };
 }
 
+/**
+ * True iff `absPath` is inside the indexed RimWorld C# source corpus
+ * (`$MM/index/Source/...`) and is a .cs file. Used to nudge the agent toward
+ * `read_csharp_symbol`, which returns a class/method body without juggling
+ * line offsets and reuses the symbol index instead of re-reading the same
+ * file at adjacent ranges. Failures (e.g. no index built yet) → false.
+ */
+function isIndexedCsharpSource(absPath: string): boolean {
+  if (!absPath.toLowerCase().endsWith('.cs')) return false;
+  let sourceRoot: string;
+  try {
+    sourceRoot = getIndexPaths().sourceRoot;
+  } catch {
+    return false;
+  }
+  const rel = path.relative(sourceRoot, absPath);
+  return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+}
+
+const READ_CSHARP_SYMBOL_HINT =
+  '[hint] This file is in the RimWorld C# index. For class/method-level reads, `read_csharp_symbol "<SymbolName>"` returns the symbol body in one call without juggling offsets — use it when you know which symbol you need; this `read` is fine when you genuinely need surrounding lines.';
+
 export function createGuardedReadTool(cwd: string): AgentTool<any> {
   // pi's read tool's renderer accepts both `file_path` and `path` for legacy
   // compatibility with Anthropic-style tool calls — guard both.
-  return wrapPathTool(createReadTool(cwd), cwd, ['path', 'file_path']);
+  const guarded = wrapPathTool(createReadTool(cwd), cwd, ['path', 'file_path']);
+  return {
+    ...guarded,
+    async execute(
+      toolCallId: string,
+      params: unknown,
+      signal?: AbortSignal,
+      onUpdate?: AgentToolUpdateCallback<unknown>,
+    ): Promise<AgentToolResult<unknown>> {
+      const result = await guarded.execute(toolCallId, params, signal, onUpdate);
+      const raw =
+        getStringField(params, 'path') ?? getStringField(params, 'file_path');
+      if (!raw) return result;
+      const expanded = expandHome(raw);
+      const abs = path.isAbsolute(expanded) ? expanded : path.resolve(cwd, expanded);
+      if (!isIndexedCsharpSource(abs)) return result;
+      // Append the hint as a separate text item so we don't disturb the
+      // file body the read tool returned.
+      return {
+        ...result,
+        content: [
+          ...result.content,
+          { type: 'text' as const, text: READ_CSHARP_SYMBOL_HINT },
+        ],
+      };
+    },
+  };
 }
 
 export function createGuardedWriteTool(cwd: string): AgentTool<any> {
