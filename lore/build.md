@@ -46,4 +46,4 @@ When you call `Widgets.ButtonText` (or anything taking a `TextAnchor?` overload)
 
 The in-app `decompile_dll` tool runs ilspycmd through a path-policy guard. Bash-invoking `ilspycmd` triggers a permission prompt AND current upstream packages have a broken `DotnetToolSettings.xml` that fails `dotnet tool install`.
 
-*Why it's tricky:* if `decompile_dll -t TypeName` returns "Could not find type definition", grep the dump for the namespace first — `WeatherOverlay_Rain` lives in `RimWorld`, not `Verse`, etc.
+*Why it's tricky:* if `decompile_dll type=TypeName` returns "Could not find type definition", call `decompile_dll listTypes=true` to dump every class/struct/enum in the assembly (~5KB even for big mods) — type names rarely match what you'd guess. Patches are typically named like `MyMod.MainTabWindowWork_DoWindowContents_Patch` with idiosyncratic underscoring, and `WeatherOverlay_Rain` lives in `RimWorld` not `Verse`. Calling `decompile_dll` with neither `type` nor `listTypes` on a large assembly auto-falls-back to the type list rather than dumping 100KB of unrelated code.

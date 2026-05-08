@@ -36,6 +36,12 @@ const Params = Type.Object({
         'If true, attach derived issue flags (missing-dependency, incompatible-mod-active, load-order-violation, version-incompat) to each mod entry. Default true.',
     }),
   ),
+  query: Type.Optional(
+    Type.String({
+      description:
+        'Case-insensitive substring filter — only return mods whose name, packageId, or folder contains every whitespace-separated token in this string. Use this when you just want to locate a specific mod; a full list is ~50 KB and almost never the right tool for that. Multi-word queries AND-match per token so "Priority Master" finds "PriorityMaster" and "vanilla expanded fishing" finds "VanillaFishingExpanded". Combines with scope/activeOnly.',
+    }),
+  ),
 });
 
 interface InstalledMod {
@@ -85,7 +91,7 @@ export const listInstalledModsTool: AgentTool<
   name: 'list_installed_mods',
   label: 'List installed mods',
   description:
-    "Survey every RimWorld mod on the machine — official Core/DLCs, local mods, Steam Workshop subscriptions, and modmixer workspace mods — cross-referenced with ModsConfig.xml to mark active state, load order, and the registry's derived issue flags (missing dependency, incompatible mod active, load-order violation, version-incompat). Pass activeOnly=true to limit to the running modlist in load order — that's the right view for diagnosing the running game. The mod registry is the single source of truth; this tool reads its current snapshot.",
+    "Survey every RimWorld mod on the machine — official Core/DLCs, local mods, Steam Workshop subscriptions, and modmixer workspace mods — cross-referenced with ModsConfig.xml to mark active state, load order, and the registry's derived issue flags (missing dependency, incompatible mod active, load-order violation, version-incompat). Pass activeOnly=true to limit to the running modlist in load order — that's the right view for diagnosing the running game. To locate one specific mod, pass `query` (substring match against name/packageId/folder) — the unfiltered list is ~50 KB. The mod registry is the single source of truth; this tool reads its current snapshot.",
   parameters: Params,
   async execute(_id, params): Promise<AgentToolResult<ListInstalledModsDetails>> {
     const scope = params.scope ?? 'all';
@@ -104,9 +110,22 @@ export const listInstalledModsTool: AgentTool<
       buildEntry(m, orderByPackageId, analysis),
     );
 
+    // AND-match across whitespace-separated tokens so "Priority Master"
+    // matches "PriorityMaster" — the user's natural phrasing usually has
+    // spaces that the actual packageId/name doesn't.
+    const queryTokens = params.query
+      ?.toLowerCase()
+      .split(/\s+/)
+      .filter((t) => t.length > 0);
     const filtered = allMods.filter((m) => {
       if (scope !== 'all' && m.source !== scope) return false;
       if (params.activeOnly && !m.active) return false;
+      if (queryTokens && queryTokens.length > 0) {
+        const haystack = `${m.name}\n${m.packageId}\n${m.folder}`.toLowerCase();
+        for (const tok of queryTokens) {
+          if (!haystack.includes(tok)) return false;
+        }
+      }
       return true;
     });
 
@@ -177,13 +196,14 @@ function buildEntry(
 
 function formatSummary(
   d: ListInstalledModsDetails,
-  params: { scope?: string; activeOnly?: boolean },
+  params: { scope?: string; activeOnly?: boolean; query?: string },
 ): string {
   const lines: string[] = [];
   const scopeLabel = params.scope ?? 'all';
   const filterLabel = params.activeOnly ? 'active only' : 'all';
+  const queryLabel = params.query ? `, query=${JSON.stringify(params.query)}` : '';
   lines.push(
-    `# ${d.total} mod${d.total === 1 ? '' : 's'} (${d.official} official, ${d.local} local, ${d.workshop} workshop, ${d.workspace} workspace) — scope=${scopeLabel}, filter=${filterLabel}`,
+    `# ${d.total} mod${d.total === 1 ? '' : 's'} (${d.official} official, ${d.local} local, ${d.workshop} workshop, ${d.workspace} workspace) — scope=${scopeLabel}, filter=${filterLabel}${queryLabel}`,
   );
   if (d.modsConfig) {
     lines.push(
