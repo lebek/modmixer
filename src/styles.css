@@ -126,3 +126,135 @@ body {
     opacity: 0.55;
   }
 }
+
+/* ── juicy chat ──────────────────────────────────────────────────────────
+   Animations are gated to *meaningful* state changes: a new message
+   arriving, a tool transitioning running→done/error, a number whose
+   value just ticked. They are deliberately short so the chat doesn't
+   feel busy when nothing is happening. */
+
+@property --juicy-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+@keyframes juicy-roll {
+  0% { transform: translateY(-90%); opacity: 0; }
+  60% { transform: translateY(8%); opacity: 1; }
+  100% { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes juicy-bubble-in {
+  0% { opacity: 0; transform: translateY(8px) scale(0.96); }
+  55% { opacity: 1; transform: translateY(-2px) scale(1.015); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes juicy-shimmer {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(220%); }
+}
+
+@keyframes juicy-trace-spin {
+  to { --juicy-angle: 360deg; }
+}
+
+@keyframes juicy-bounce-dot {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.45; }
+  30% { transform: translateY(-3px); opacity: 1; }
+}
+
+@keyframes juicy-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-3px); }
+  40% { transform: translateX(3px); }
+  60% { transform: translateX(-2px); }
+  80% { transform: translateX(2px); }
+}
+
+@keyframes juicy-flash-success {
+  0%, 100% { background-color: transparent; box-shadow: 0 0 0 0 transparent; }
+  30% {
+    background-color: color-mix(in oklab, var(--ready) 22%, transparent);
+    box-shadow: 0 0 0 2px color-mix(in oklab, var(--ready) 35%, transparent);
+  }
+}
+
+@keyframes juicy-flash-error {
+  0%, 100% { background-color: transparent; box-shadow: 0 0 0 0 transparent; }
+  30% {
+    background-color: color-mix(in oklab, var(--failed) 28%, transparent);
+    box-shadow: 0 0 0 2px color-mix(in oklab, var(--failed) 45%, transparent);
+  }
+}
+
+.juicy-roll { animation: juicy-roll 360ms cubic-bezier(0.34, 1.56, 0.64, 1); display: inline-block; }
+.juicy-bubble-in { animation: juicy-bubble-in 360ms cubic-bezier(0.34, 1.56, 0.64, 1); }
+.juicy-shake { animation: juicy-shake 420ms ease-in-out; }
+.juicy-flash-success { animation: juicy-flash-success 700ms ease-out; }
+.juicy-flash-error { animation: juicy-flash-error 700ms ease-out; }
+.juicy-bounce-dot { animation: juicy-bounce-dot 1s ease-in-out infinite; }
+
+/* sliding highlight to communicate "work in progress" on a chip-sized
+   element. Use on a parent with overflow:hidden + position:relative. */
+.juicy-shimmer-bar { position: relative; overflow: hidden; isolation: isolate; }
+.juicy-shimmer-bar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    transparent 30%,
+    color-mix(in oklab, var(--accent) 30%, transparent) 50%,
+    transparent 70%
+  );
+  animation: juicy-shimmer 1.6s ease-in-out infinite;
+  pointer-events: none;
+  z-index: 0;
+}
+.juicy-shimmer-bar > * { position: relative; z-index: 1; }
+
+/* rotating accent arc that "traces" the outline of a bubble. Used while
+   the assistant message is still streaming so the user can see at a
+   glance which bubble is the live one. */
+.juicy-trace { position: relative; }
+.juicy-trace::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  pointer-events: none;
+  padding: 1.5px;
+  background: conic-gradient(
+    from var(--juicy-angle),
+    transparent 0deg,
+    transparent 230deg,
+    var(--accent) 320deg,
+    var(--accent) 340deg,
+    transparent 360deg
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  animation: juicy-trace-spin 1.8s linear infinite;
+  z-index: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .juicy-roll,
+  .juicy-bubble-in,
+  .juicy-shake,
+  .juicy-flash-success,
+  .juicy-flash-error,
+  .juicy-bounce-dot {
+    animation: none;
+  }
+  .juicy-shimmer-bar::after,
+  .juicy-trace::before {
+    animation: none;
+    display: none;
+  }
+}

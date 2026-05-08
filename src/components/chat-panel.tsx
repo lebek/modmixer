@@ -13,6 +13,39 @@ import { ToolResultBubble } from './tool-result-renderer';
 type ToolStatus = 'running' | 'done' | 'error';
 
 /**
+ * Reconstruct tool-call status from a message list. Without this, tool
+ * calls in a re-opened chat display as "running" indefinitely because
+ * `tool_execution_*` events only fire live — they aren't replayed when
+ * the conversation is hydrated from disk.
+ *
+ * A toolResult message in the transcript is the authoritative finished
+ * state (its `isError` flag tells us done vs failed). Tool calls
+ * without a matching result are left as "running"; that case really
+ * only happens when a turn was interrupted mid-tool, and the running
+ * label is a reasonable "this never finished" signal until the agent
+ * resumes (which would then send live events).
+ */
+function deriveToolStates(
+  msgs: AgentMessage[],
+): Record<string, { name: string; status: ToolStatus }> {
+  const out: Record<string, { name: string; status: ToolStatus }> = {};
+  for (const m of msgs) {
+    if (m.role === 'assistant') {
+      for (const c of extractToolCalls(m.content)) {
+        if (!out[c.id]) out[c.id] = { name: c.name, status: 'running' };
+      }
+    } else if (m.role === 'toolResult') {
+      const prev = out[m.toolCallId];
+      out[m.toolCallId] = {
+        name: prev?.name ?? m.toolName ?? m.toolCallId,
+        status: m.isError ? 'error' : 'done',
+      };
+    }
+  }
+  return out;
+}
+
+/**
  * pi-ai stamps every assistant message with a `provider`/`usage.cost.total`
  * pair. We only surface the dollar figure for OpenRouter — Anthropic OAuth
  * users would see a *list-price* number that doesn't match what they
@@ -39,6 +72,42 @@ function formatTokens(n: number): string {
   if (n < 10_000) return `${(n / 1000).toFixed(1)}k`;
   if (n < 1_000_000) return `${Math.round(n / 1000)}k`;
   return `${(n / 1_000_000).toFixed(1)}M`;
+}
+
+/**
+ * Per-character digit roll. Each glyph is rendered with a key derived
+ * from its position + value, so digits that *didn't* change keep their
+ * DOM node (no animation) while digits that flipped get re-mounted and
+ * animate in. Skipping the first render avoids a noisy roll on initial
+ * paint when the number was already there.
+ */
+function OdometerNumber({
+  value,
+  format,
+  className,
+}: {
+  value: number;
+  format: (n: number) => string;
+  className?: string;
+}) {
+  const text = format(value);
+  const mountedRef = useRef(false);
+  useEffect(() => {
+    mountedRef.current = true;
+  }, []);
+  return (
+    <span className={cn('inline-flex tabular-nums', className)}>
+      {Array.from(text).map((ch, i) => (
+        <span
+          // eslint-disable-next-line react/no-array-index-key
+          key={`${i}-${ch}`}
+          className={cn('inline-block', mountedRef.current && 'juicy-roll')}
+        >
+          {ch === ' ' ? ' ' : ch}
+        </span>
+      ))}
+    </span>
+  );
 }
 
 export function ChatPanel({
@@ -69,7 +138,7 @@ export function ChatPanel({
   const [streaming, setStreaming] = useState<AgentMessage | null>(null);
   const [toolStates, setToolStates] = useState<
     Record<string, { name: string; status: ToolStatus }>
-  >({});
+  >(() => deriveToolStates(initialMessages));
   const [busy, setBusy] = useState(false);
   const [compacting, setCompacting] = useState(false);
   const send = useAsyncAction((text: string) => window.modmixer.send(text));
@@ -88,7 +157,7 @@ export function ChatPanel({
   useEffect(() => {
     setMessages(initialMessages);
     setStreaming(null);
-    setToolStates({});
+    setToolStates(deriveToolStates(initialMessages));
     setBusy(false);
     setCompacting(false);
     send.reset();
@@ -288,7 +357,7 @@ export function ChatPanel({
           />
         ))}
         {compacting && (
-          <div className="rounded-md border border-line bg-paper/70 px-3 py-2 font-mono text-[10px] uppercase tracking-[0.18em] text-muted">
+          <div className="juicy-shimmer-bar rounded-md border border-line bg-paper/70 px-3 py-2 font-mono text-[10px] uppercase tracking-[0.18em] text-muted">
             compacting context…
           </div>
         )}
@@ -301,8 +370,9 @@ export function ChatPanel({
       {!pinned && hasNewBelow && (
         <button
           onClick={jumpToBottom}
-          className="absolute left-1/2 bottom-3 z-10 inline-flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-line bg-paper px-3 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-muted shadow-md transition-colors hover:bg-surface hover:text-ink"
+          className="juicy-bubble-in absolute left-1/2 bottom-3 z-10 inline-flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-accent/60 bg-paper px-3 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-accent shadow-md transition-colors hover:bg-surface hover:text-ink"
         >
+          <span className="juicy-bounce-dot inline-block h-1.5 w-1.5 rounded-full bg-accent" />
           <span>New messages</span>
           <DownArrowIcon />
         </button>
@@ -311,16 +381,40 @@ export function ChatPanel({
       <div className="border-t border-line px-6 py-3">
         {(chatCost > 0 || balance !== null || contextUsage) && (
           <div className="mb-2 flex flex-wrap justify-end gap-x-4 gap-y-1 font-mono text-[11px] text-subtle">
-            {contextUsage && contextUsage.tokens !== null && (
-              <span>
-                context = {formatTokens(contextUsage.tokens)}/
-                {formatTokens(contextUsage.contextWindow)}
+            {contextUsage && contextUsage.tokens !== null && (() => {
+              // Color escalates as the context window fills up — at >95%
+              // the next turn is about to compact, so we want the user
+              // to *notice*.
+              const ratio = contextUsage.tokens / contextUsage.contextWindow;
+              const cls =
+                ratio >= 0.95
+                  ? 'text-failed'
+                  : ratio >= 0.8
+                    ? 'text-accent'
+                    : '';
+              return (
+                <span className={cn('inline-flex items-center gap-1', cls)}>
+                  context ={' '}
+                  <OdometerNumber
+                    value={contextUsage.tokens}
+                    format={formatTokens}
+                  />
+                  /{formatTokens(contextUsage.contextWindow)}
+                </span>
+              );
+            })()}
+            {chatCost > 0 && (
+              <span className="inline-flex items-center gap-1">
+                chat cost ={' '}
+                <OdometerNumber value={chatCost} format={formatCost} />
               </span>
             )}
-            {chatCost > 0 && (
-              <span>chat cost = {formatCost(chatCost)}</span>
+            {balance !== null && (
+              <span className="inline-flex items-center gap-1">
+                balance ={' '}
+                <OdometerNumber value={balance} format={formatCost} />
+              </span>
             )}
-            {balance !== null && <span>balance = {formatCost(balance)}</span>}
           </div>
         )}
         {hasAi ? (
@@ -345,7 +439,10 @@ export function ChatPanel({
                 }
               }}
               placeholder={placeholderForScope(effectiveScope)}
-              className="block h-20 w-full resize-none bg-transparent text-sm text-ink placeholder:text-subtle focus:outline-none"
+              // Auto-grow with content (Chromium 123+); bounded so a long
+              // message doesn't push the chat scroll out of view.
+              className="block min-h-[1.75rem] max-h-40 w-full resize-none bg-transparent text-sm text-ink placeholder:text-subtle focus:outline-none [field-sizing:content]"
+              rows={1}
             />
             <div className="mt-2 flex items-center justify-end gap-2">
               {busy && (
@@ -362,10 +459,17 @@ export function ChatPanel({
                   <StopIcon />
                 </button>
               ) : (
+                // Always rendered (just invisible when empty) so the
+                // textarea container doesn't grow the moment the user
+                // types the first character.
                 <button
                   onClick={() => void submit()}
-                  disabled={!input.trim()}
-                  className="group inline-flex items-center gap-2 rounded-md bg-accent px-4 py-2 font-mono text-[11px] uppercase tracking-[0.18em] text-accent-foreground shadow-sm transition-all hover:bg-accent-soft hover:shadow-md active:translate-y-px disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
+                  aria-hidden={!input.trim() || undefined}
+                  tabIndex={input.trim() ? 0 : -1}
+                  className={cn(
+                    'group inline-flex items-center gap-2 rounded-md bg-accent px-4 py-2 font-mono text-[11px] uppercase tracking-[0.18em] text-accent-foreground shadow-sm transition-all hover:bg-accent-soft hover:shadow-md active:translate-y-px',
+                    !input.trim() && 'invisible',
+                  )}
                 >
                   Send
                   <SendIcon />
@@ -515,7 +619,14 @@ function MessageBubbleImpl({
     const modelLabel = message.model.split('/').pop() || message.model;
     const cost = !isStreaming ? openrouterCost(message) : null;
     return (
-      <div className="rounded-md border border-line bg-paper/70 p-3">
+      <div
+        className={cn(
+          'rounded-md border border-line bg-paper/70 p-3',
+          // The streaming bubble draws a rotating accent arc around its
+          // border so the user can spot the live one at a glance.
+          isStreaming && 'juicy-trace',
+        )}
+      >
         <div className="mb-1 flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.18em] text-muted">
           <span>
             modmixer <span className="text-subtle">·</span> {modelLabel}
@@ -556,8 +667,16 @@ function MessageBubbleImpl({
 
 function ThinkingIndicator() {
   return (
-    <div className="flex items-center gap-1.5 py-0.5 font-mono text-[11px] text-subtle">
-      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-pending" />
+    <div className="flex items-center gap-2 py-0.5 font-mono text-[11px] text-subtle">
+      <span className="inline-flex items-end gap-0.5">
+        {[0, 140, 280].map((delay) => (
+          <span
+            key={delay}
+            className="juicy-bounce-dot inline-block h-1 w-1 rounded-full bg-pending"
+            style={{ animationDelay: `${delay}ms` }}
+          />
+        ))}
+      </span>
       <span>thinking…</span>
     </div>
   );
@@ -584,6 +703,28 @@ function ToolBadge({
   args: Record<string, unknown>;
   status: ToolStatus;
 }) {
+  // Watch running→done / running→error transitions so we can flash the
+  // badge once on completion. Mounting in a finished state (e.g. when
+  // restoring a chat) must not trigger the flash, hence the prevStatus
+  // ref starts at the initial status.
+  const prevStatus = useRef<ToolStatus>(status);
+  const [transition, setTransition] = useState<'success' | 'error' | null>(
+    null,
+  );
+  useEffect(() => {
+    if (prevStatus.current === 'running' && status === 'done') {
+      setTransition('success');
+    } else if (prevStatus.current === 'running' && status === 'error') {
+      setTransition('error');
+    }
+    prevStatus.current = status;
+  }, [status]);
+  useEffect(() => {
+    if (!transition) return;
+    const t = setTimeout(() => setTransition(null), 800);
+    return () => clearTimeout(t);
+  }, [transition]);
+
   const label =
     status === 'running' ? 'running' : status === 'error' ? 'failed' : 'done';
   const dot =
@@ -593,7 +734,16 @@ function ToolBadge({
         ? 'bg-failed'
         : 'bg-ready';
   return (
-    <div className="mt-2 flex items-center gap-2 rounded border border-line bg-surface/60 px-2 py-1.5 font-mono text-[11px] text-muted">
+    <div
+      className={cn(
+        'mt-2 flex items-center gap-2 rounded border border-line bg-surface/60 px-2 py-1.5 font-mono text-[11px] text-muted',
+        // Sliding shimmer says "this is actively running". It clears as
+        // soon as the status flips to done/error.
+        status === 'running' && 'juicy-shimmer-bar',
+        transition === 'success' && 'juicy-flash-success',
+        transition === 'error' && 'juicy-flash-error juicy-shake',
+      )}
+    >
       <span className={cn('h-1.5 w-1.5 rounded-full', dot)} />
       <span className="text-ink">{name}</span>
       <span className="truncate text-subtle">{previewArgs(args)}</span>
