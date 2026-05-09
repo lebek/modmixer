@@ -755,10 +755,16 @@ function ToolBadge({
 }
 
 function previewArgs(args: Record<string, unknown>): string {
-  const entries = Object.entries(args);
-  if (entries.length === 0) return '';
-  const [k, v] = entries[0];
-  const value = typeof v === 'string' ? v : JSON.stringify(v);
-  const more = entries.length > 1 ? ` +${entries.length - 1}` : '';
-  return `${k}=${value}${more}`;
+  // Show every arg as `key=value`, capping each value so one large field
+  // (a file body, a long description) can't crowd out the others. The row's
+  // CSS `truncate` then ellipsizes whatever still doesn't fit.
+  const VALUE_CAP = 40;
+  return Object.entries(args)
+    .map(([k, v]) => {
+      const raw = typeof v === 'string' ? v : JSON.stringify(v);
+      const value =
+        raw.length > VALUE_CAP ? `${raw.slice(0, VALUE_CAP)}…` : raw;
+      return `${k}=${value}`;
+    })
+    .join(' ');
 }
