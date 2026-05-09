@@ -115,12 +115,14 @@ export function ChatPanel({
   activeMod,
   initialMessages,
   hasAi,
+  activeProvider,
   onConnect,
 }: {
   conversation: Conversation;
   activeMod: WorkspaceMod | null;
   initialMessages: AgentMessage[];
   hasAi: boolean;
+  activeProvider: string | null;
   onConnect: () => void;
 }) {
   // A mod-scoped chat with an empty packageId is the renderer-created
@@ -284,9 +286,11 @@ export function ChatPanel({
     return sum;
   }, [messages]);
 
-  // Live OpenRouter balance. null = no API key configured (hide); a number =
-  // remaining USD. Refreshed on mount and after each completed turn.
+  // Live OpenRouter balance. null = no API key configured, or active model
+  // isn't routed through OpenRouter (hide); a number = remaining USD.
+  // Refreshed on mount and after each completed turn.
   const [balance, setBalance] = useState<number | null>(null);
+  const isOpenRouter = activeProvider === 'openrouter';
   // Live context-window usage from pi (`AgentSession.getContextUsage()`).
   // Updates every turn as the assistant's `usage` lands.
   const [contextUsage, setContextUsage] = useState<{
@@ -296,6 +300,10 @@ export function ChatPanel({
   useEffect(() => {
     let cancelled = false;
     const refreshBalance = () => {
+      if (!isOpenRouter) {
+        setBalance(null);
+        return;
+      }
       window.modmixer
         .getOpenRouterCredits()
         .then((c) => {
@@ -334,7 +342,7 @@ export function ChatPanel({
       cancelled = true;
       off();
     };
-  }, [conversation.id]);
+  }, [conversation.id, isOpenRouter]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">

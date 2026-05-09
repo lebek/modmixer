@@ -493,6 +493,7 @@ export function App() {
           }}
           busy={busy}
           hasAi={hasAi}
+          currentModel={currentModel}
           onConnect={() => openSettings('providers')}
         />
       </div>

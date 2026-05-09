@@ -1,6 +1,7 @@
 import type { AgentMessage } from '@mariozechner/pi-agent-core';
 import type { Conversation } from '../agent/conversations';
 import type { WorkspaceMod } from '../agent/workspace';
+import type { ModelSelection } from '../agent/settings';
 import { ChatPanel } from './chat-panel';
 import { ModHeader } from './mod-header';
 import { AssetsView } from './assets-view';
@@ -29,6 +30,7 @@ export function BuildView({
   onModDeleted,
   busy,
   hasAi,
+  currentModel,
   onConnect,
 }: {
   mods: WorkspaceMod[];
@@ -48,6 +50,7 @@ export function BuildView({
   onModDeleted?: (folder: string) => void;
   busy: boolean;
   hasAi: boolean;
+  currentModel: ModelSelection | null;
   onConnect: () => void;
 }) {
   if (!activeConvo) {
@@ -119,6 +122,7 @@ export function BuildView({
             activeMod={activeMod}
             initialMessages={activeMessages}
             hasAi={hasAi}
+            activeProvider={currentModel?.provider ?? null}
             onConnect={onConnect}
           />
         </div>
