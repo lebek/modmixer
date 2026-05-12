@@ -62,10 +62,18 @@ import { registerRegistryRoutes } from './main/routes/registry-routes.js';
 import { registerAssetsRoutes } from './main/routes/assets.js';
 import { registerSnapshotsRoutes } from './main/routes/snapshots.js';
 import { registerSystemRoutes } from './main/routes/system.js';
+import {
+  installAssetProtocolHandler,
+  registerAssetSchemeAsPrivileged,
+} from './main/asset-protocol.js';
 
 if (started) {
   app.quit();
 }
+
+// Privileged-scheme registration must happen synchronously before `app.ready`
+// so the renderer can use `modmixer-asset://` URLs in <img src>.
+registerAssetSchemeAsPrivileged();
 
 // Single-instance lock: a second launch (Start Menu re-click, second `npm start`,
 // Squirrel post-install autolaunch racing the first run) should focus the
@@ -259,6 +267,7 @@ const createWindow = () => {
 };
 
 app.on('ready', () => {
+  installAssetProtocolHandler();
   initTelemetry();
   track({ name: 'app_started' });
   // safeStorage is only guaranteed available after `ready` on Linux/Windows.

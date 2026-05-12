@@ -1,5 +1,20 @@
-import type { ModIssue, RegistryMod } from '@/agent/registry';
+import { useState } from 'react';
+import type { ModIssue, ModSource, RegistryMod } from '@/agent/registry';
 import { Badge, CORE_PACKAGE_ID, SourceBadge, shortIssue } from './badges';
+
+function PreviewBanner({ source, folder }: { source: ModSource; folder: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return null;
+  return (
+    <img
+      src={`modmixer-asset://preview/${source}/${encodeURIComponent(folder)}`}
+      alt=""
+      decoding="async"
+      onError={() => setFailed(true)}
+      className="aspect-video w-full shrink-0 border-b border-line bg-raised/40 object-cover"
+    />
+  );
+}
 
 export function ModInfoPanel({
   selectedPid,
@@ -68,7 +83,9 @@ export function ModInfoPanel({
         subtitle={mod.about.author || ' '}
         onClose={onClose}
       />
-      <div className="flex-1 overflow-auto px-4 py-4 space-y-4 text-xs">
+      <div className="flex-1 overflow-auto text-xs">
+        <PreviewBanner source={mod.source} folder={mod.folder} />
+        <div className="px-4 py-4 space-y-4">
         <div className="flex flex-wrap items-center gap-1.5">
           <SourceBadge source={mod.source} isCore={isCore} />
           {mod.hasDlls && <Badge tone="neutral">DLL</Badge>}
@@ -190,6 +207,7 @@ export function ModInfoPanel({
             />
           </Field>
         )}
+        </div>
       </div>
     </aside>
   );
