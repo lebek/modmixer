@@ -28,6 +28,13 @@ It's also useful if you do write code — the agent does the boring parts
 (scaffolding, def-graph lookups, log triage) so you can focus on the
 interesting design decisions.
 
+## Also a mod manager
+
+Even if you never ask the agent to build anything, Modmixer works as a
+standalone mod manager. Browse your Workshop and local mods side-by-side,
+toggle active/inactive, autosort load order, and enable a mod with its
+dependencies in one click.
+
 ## Status
 
 Early. Expect rough edges. Issues and PRs welcome.
