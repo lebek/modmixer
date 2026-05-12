@@ -8,6 +8,8 @@
 
 </div>
 
+![Modmixer screenshot](assets/screenshot.png)
+
 ---
 
 Build RimWorld mods without writing code.
