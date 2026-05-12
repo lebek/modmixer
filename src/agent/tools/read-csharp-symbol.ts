@@ -5,11 +5,12 @@ import fsp from 'node:fs/promises';
 import { openIndexDb } from '../index/db.js';
 import { getIndexStatus } from '../index/rebuild.js';
 import { getIndexPaths } from '../index/paths.js';
+import { resolveSymbol, type SymbolMatch } from '../index/resolve-symbol.js';
 
 const Params = Type.Object({
   name: Type.String({
     description:
-      'Symbol to read. Pass the short name ("StealAIUtility") to get all matches, the full FQN ("RimWorld.StealAIUtility.TryFindBestItemToSteal"), or a partial FQN ("LetterMaker.MakeLetter" — matches by suffix). All overloads of a method are returned — pick the one that matches your stack frame by signature.',
+      'Symbol to look up. Accepts (a) a bare short name like "DrawAt" or "WorkTypeDef" — returns a disambiguation list with namespace + signature for each match; (b) a partial FQN like "LetterMaker.MakeLetter" — returns the body if unique, all overloads if not; (c) a full FQN like "RimWorld.LetterMaker.MakeLetter" — returns just that one body.',
   }),
   kind: Type.Optional(
     Type.String({
@@ -38,16 +39,23 @@ interface SymbolHit {
   truncated: boolean;
 }
 
+interface ResolveOnlyDetails {
+  matches: SymbolMatch[];
+}
+
 const NO_INDEX_MSG =
   'RimWorld source index is not built yet. Open Settings → RimWorld index → Rebuild.';
 
-export const readCsharpSymbolTool: AgentTool<typeof Params, { hits: SymbolHit[] }> = {
+export const readCsharpSymbolTool: AgentTool<
+  typeof Params,
+  { hits: SymbolHit[]; matches?: SymbolMatch[] }
+> = {
   name: 'read_csharp_symbol',
   label: 'Read C# symbol',
   description:
-    'Read the body of a C# type or member from the decompiled RimWorld source. Returns the symbol\'s text only — far smaller than read\'ing the whole file. Pass an FQN for a precise match, or a short name to see every match.',
+    "Look up a C# type or member in the decompiled RimWorld source. Handles both 'what is this and where does it live' and 'show me the body' in one call:\n\n• Pass a bare short name (\"DrawAt\", \"WorkTypeDef\") → returns the symbol-table entries: namespace, kind, FQN, signature. Use this to find what `using …;` you need or to disambiguate before reading a body.\n• Pass a partial FQN (\"LetterMaker.MakeLetter\") or full FQN (\"RimWorld.LetterMaker.MakeLetter\") → returns the symbol body. All overloads are returned together when ambiguous.\n\nFor textual occurrences (call sites, string literals), use search_source. For XML def lookup, use search_defs.",
   parameters: Params,
-  async execute(_id, params): Promise<AgentToolResult<{ hits: SymbolHit[] }>> {
+  async execute(_id, params): Promise<AgentToolResult<{ hits: SymbolHit[]; matches?: SymbolMatch[] }>> {
     const status = getIndexStatus();
     if (status.type === 'absent' || status.type === 'no-rimworld') {
       return {
@@ -56,19 +64,38 @@ export const readCsharpSymbolTool: AgentTool<typeof Params, { hits: SymbolHit[] 
       };
     }
 
+    const { sourceRoot } = getIndexPaths();
+
+    // Bare short name (no dots) → disambiguation mode: return the symbol-table
+    // entries without bodies. The agent re-calls with a specific FQN to fetch
+    // a body. This sidesteps the read_csharp_symbol("Tick") → "# 12 overloads"
+    // bloat that wasted context in pre-merge usage.
+    if (!params.name.includes('.')) {
+      const rawMatches = resolveSymbol(params.name, { kind: params.kind });
+      const matches: SymbolMatch[] = rawMatches.map((m) => ({
+        ...m,
+        filePath: path.resolve(sourceRoot, m.filePath),
+      }));
+      if (matches.length === 0) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `No C# symbol named "${params.name}"${params.kind ? ` (kind=${params.kind})` : ''} in the indexed source. Try search_source for substring matches in C# / XML, or search_defs if "${params.name}" might be an XML def.`,
+            },
+          ],
+          details: { hits: [], matches: [] },
+        };
+      }
+      return {
+        content: [{ type: 'text', text: formatMatches(matches) }],
+        details: { hits: [], matches },
+      };
+    }
+
+    // Dotted name → body-read mode (original behavior).
     const db = openIndexDb();
     const cap = Math.min(Math.max(params.maxBytes ?? 4096, 256), 32768);
-
-    // Resolve `name` against the index in three increasingly fuzzy passes:
-    //   1. exact fqn match — for callers that already know the namespace
-    //      ("Verse.LetterMaker.MakeLetter")
-    //   2. fqn suffix match — for partial FQNs the agent typed off a stack
-    //      frame ("LetterMaker.MakeLetter" → "Verse.LetterMaker.MakeLetter")
-    //   3. shortName match — for bare member names ("MakeLetter")
-    // Each pass returns ALL matches, so method overloads (same fqn, different
-    // startLine — see csharp-indexer.ts) are surfaced together. We stop at the
-    // first pass that yields any rows so a precise FQN doesn't get drowned in
-    // unrelated short-name hits.
     const kindArgs: Record<string, unknown> = params.kind
       ? { kind: params.kind }
       : {};
@@ -82,41 +109,49 @@ export const readCsharpSymbolTool: AgentTool<typeof Params, { hits: SymbolHit[] 
       LIMIT 25
     `;
     type Row = Omit<SymbolHit, 'body' | 'truncated'>;
-    let rows: Row[] = [];
-    if (params.name.includes('.')) {
+    let rows: Row[] = db
+      .prepare(`${select} WHERE fqn = @name${kindClause} ${orderLimit}`)
+      .all({ name: params.name, ...kindArgs }) as Row[];
+    if (rows.length === 0) {
       rows = db
-        .prepare(
-          `${select} WHERE fqn = @name${kindClause} ${orderLimit}`,
-        )
-        .all({ name: params.name, ...kindArgs }) as Row[];
-      if (rows.length === 0) {
-        rows = db
-          .prepare(
-            `${select} WHERE fqn LIKE @suffix${kindClause} ${orderLimit}`,
-          )
-          .all({ suffix: `%.${params.name}`, ...kindArgs }) as Row[];
-      }
-    } else {
-      rows = db
-        .prepare(
-          `${select} WHERE shortName = @name${kindClause} ${orderLimit}`,
-        )
-        .all({ name: params.name, ...kindArgs }) as Row[];
+        .prepare(`${select} WHERE fqn LIKE @suffix${kindClause} ${orderLimit}`)
+        .all({ suffix: `%.${params.name}`, ...kindArgs }) as Row[];
     }
 
     if (rows.length === 0) {
+      // Last-ditch fallback: drop the namespace prefix and try short-name
+      // disambiguation. Catches "Effecter.Spawn" when the actual FQN is
+      // "Verse.EffecterDef.Spawn" — the agent typed off a (wrong) memory.
+      const tail = params.name.split('.').pop() ?? params.name;
+      const rawMatches = resolveSymbol(tail, { kind: params.kind });
+      if (rawMatches.length > 0) {
+        const matches: SymbolMatch[] = rawMatches.map((m) => ({
+          ...m,
+          filePath: path.resolve(sourceRoot, m.filePath),
+        }));
+        return {
+          content: [
+            {
+              type: 'text',
+              text:
+                `No symbol exactly matched "${params.name}". Closest matches by short name "${tail}":\n\n` +
+                formatMatches(matches),
+            },
+          ],
+          details: { hits: [], matches },
+        };
+      }
       return {
         content: [
           {
             type: 'text',
-            text: `No C# symbol found matching "${params.name}"${params.kind ? ` (kind=${params.kind})` : ''}.`,
+            text: `No C# symbol found matching "${params.name}"${params.kind ? ` (kind=${params.kind})` : ''}. Try search_source for substring matches, or search_defs if it might be an XML def.`,
           },
         ],
         details: { hits: [] },
       };
     }
 
-    const { sourceRoot } = getIndexPaths();
     const hits: SymbolHit[] = [];
     for (const r of rows) {
       const abs = path.resolve(sourceRoot, r.filePath);
@@ -135,15 +170,11 @@ export const readCsharpSymbolTool: AgentTool<typeof Params, { hits: SymbolHit[] 
       } catch {
         body = '<could not read source file>';
       }
-      // Surface the absolute path so the agent can `read` it for more context
-      // without guessing where the index lives on disk.
       hits.push({ ...r, filePath: abs, body, truncated });
     }
 
-    // When the query landed on multiple rows with the same FQN — i.e. method
-    // overloads — prefix the response with a one-line index so the caller can
-    // distinguish them by signature without a follow-up call. Plain
-    // single-symbol hits (most reads) get no preamble.
+    // Method overloads share an FQN — index them up front so the caller can
+    // pick the right one by signature without a second tool call.
     const fqnGroups = new Map<string, SymbolHit[]>();
     for (const h of hits) {
       const list = fqnGroups.get(h.fqn) ?? [];
@@ -177,3 +208,20 @@ export const readCsharpSymbolTool: AgentTool<typeof Params, { hits: SymbolHit[] 
     };
   },
 };
+
+function formatMatches(matches: SymbolMatch[]): string {
+  const lines: string[] = [
+    `Found ${matches.length} ${matches.length === 1 ? 'match' : 'matches'}. Re-call with the FQN to read the body:`,
+    '',
+  ];
+  for (const m of matches) {
+    const ns = m.namespace ?? '<global>';
+    const ext = m.isExtensionMethod ? ' [extension method]' : '';
+    lines.push(`* ${m.kind} ${m.fqn}${ext}`);
+    lines.push(`    using:  ${ns};`);
+    if (m.signature) lines.push(`    sig:    ${m.signature}`);
+    lines.push(`    where:  ${m.filePath}:${m.startLine}-${m.endLine}`);
+    lines.push('');
+  }
+  return lines.join('\n').trimEnd();
+}

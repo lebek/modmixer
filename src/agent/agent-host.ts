@@ -43,12 +43,8 @@ import { decompileDllTool } from './tools/decompile-dll.js';
 import { renderSvgToPngTool } from './tools/render-svg-to-png.js';
 import { renderPreviewTool } from './tools/render-preview.js';
 import { searchDefsTool } from './tools/search-defs.js';
-import { getDefDetailsTool } from './tools/get-def-details.js';
-import { listDefDescendantsTool } from './tools/list-def-descendants.js';
 import { readCsharpSymbolTool } from './tools/read-csharp-symbol.js';
-import { resolveSymbolTool } from './tools/resolve-symbol.js';
 import { searchSourceTool } from './tools/search-source.js';
-import { whoUsesDefTool } from './tools/who-uses-def.js';
 import { readLoreTool } from './tools/read-lore.js';
 import { saveLoreTool } from './tools/save-lore.js';
 import { createGuardedBashTool } from './tools/bash.js';
@@ -206,12 +202,8 @@ function buildCustomTools(
     revertSessionTool,
     // RimWorld source/def index — read-only lookups against $MM/index/*.
     searchDefsTool,
-    getDefDetailsTool,
-    listDefDescendantsTool,
     readCsharpSymbolTool,
-    resolveSymbolTool,
     searchSourceTool,
-    whoUsesDefTool,
     readLoreTool,
     saveLoreTool,
     // bash is the catch-all for arbitrary shell exec. The path-policy guard

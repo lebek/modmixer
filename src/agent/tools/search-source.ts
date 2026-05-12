@@ -63,7 +63,7 @@ export const searchSourceTool: AgentTool<typeof Params, { matchedLines: number; 
   name: 'search_source',
   label: 'Search RimWorld source',
   description:
-    'Ripgrep over the decompiled RimWorld C# source AND the indexed Defs XML. Use for finding call sites ("StealAIUtility\\\\b"), patch targets, def cross-references like `<li>Designator_AreaHomeExpand</li>`, attribute values, or any pattern that isn\'t a clean type/method name. For symbol-level C# lookup prefer read_csharp_symbol; for def-by-name lookup prefer search_defs.',
+    'Ripgrep over the decompiled RimWorld C# source AND the indexed Defs XML. Use for finding call sites ("StealAIUtility\\\\b"), patch targets, def cross-references like `<li>Designator_AreaHomeExpand</li>`, attribute values, or any pattern that isn\'t a clean type/method name. For symbol-level C# lookup (by short name or FQN) prefer read_csharp_symbol; for def-by-name lookup prefer search_defs. Zero matches here often means the answer lives in an XML def — try search_defs as the fallback.',
   parameters: Params,
   async execute(_id, params, signal): Promise<AgentToolResult<{ matchedLines: number; truncated: boolean }>> {
     const status = getIndexStatus();
@@ -143,7 +143,7 @@ export const searchSourceTool: AgentTool<typeof Params, { matchedLines: number; 
         );
       }
       tips.push(
-        'for def-by-name lookup use search_defs, for a known C# symbol use read_csharp_symbol or resolve_symbol',
+        'for def-by-name lookup use search_defs, for a C# symbol (by short name or FQN) use read_csharp_symbol',
       );
       const tipsLine = `Tips: ${tips.join('; ')}.`;
       return {
