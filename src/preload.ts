@@ -169,6 +169,25 @@ const api = {
     invoke('modmixer:openrouter:remove-model', slug),
   getOpenRouterCredits: () => invoke('modmixer:openrouter:get-credits'),
 
+  // Local OpenAI-compatible providers
+  listLocalProviders: () => invoke('modmixer:local:list'),
+  addLocalProvider: (input: {
+    label: string;
+    baseUrl: string;
+    apiKey?: string | null;
+  }) => invoke('modmixer:local:add', input),
+  updateLocalProvider: (
+    id: string,
+    patch: { label?: string; baseUrl?: string; apiKey?: string | null },
+  ) => invoke('modmixer:local:update', id, patch),
+  removeLocalProvider: (id: string) => invoke('modmixer:local:remove', id),
+  addLocalModel: (id: string, modelId: string) =>
+    invoke('modmixer:local:add-model', id, modelId),
+  removeLocalModel: (id: string, modelId: string) =>
+    invoke('modmixer:local:remove-model', id, modelId),
+  discoverLocalModels: (baseUrl: string) =>
+    invoke('modmixer:local:discover', baseUrl),
+
   // Shell
   openExternal: (url: string) => invoke('modmixer:shell:open-external', url),
   openFolder: (folder: string) => invoke('modmixer:shell:open-folder', folder),

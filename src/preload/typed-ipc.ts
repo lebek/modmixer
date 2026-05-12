@@ -2,6 +2,7 @@ import { ipcRenderer, type IpcRendererEvent } from 'electron';
 import type { AgentMessage, ThinkingLevel } from '@mariozechner/pi-agent-core';
 import type {
   Consent,
+  LocalProvider,
   ModelSelection,
   OnboardingState,
   Settings,
@@ -245,6 +246,25 @@ export interface Channels {
   'modmixer:openrouter:add-model': (slug: string) => OpenRouterConfig;
   'modmixer:openrouter:remove-model': (slug: string) => OpenRouterConfig;
   'modmixer:openrouter:get-credits': () => OpenRouterCredits | null;
+
+  // Local OpenAI-compatible providers (LM Studio, Ollama, vLLM, llama.cpp, …)
+  'modmixer:local:list': () => LocalProvider[];
+  'modmixer:local:add': (input: {
+    label: string;
+    baseUrl: string;
+    apiKey?: string | null;
+  }) => LocalProvider[];
+  'modmixer:local:update': (
+    id: string,
+    patch: { label?: string; baseUrl?: string; apiKey?: string | null },
+  ) => LocalProvider[];
+  'modmixer:local:remove': (id: string) => LocalProvider[];
+  'modmixer:local:add-model': (id: string, modelId: string) => LocalProvider[];
+  'modmixer:local:remove-model': (
+    id: string,
+    modelId: string,
+  ) => LocalProvider[];
+  'modmixer:local:discover': (baseUrl: string) => string[];
 
   // Shell
   'modmixer:shell:open-external': (url: string) => void;

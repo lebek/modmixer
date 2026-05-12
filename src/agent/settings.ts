@@ -11,6 +11,22 @@ export interface ModelSelection {
   modelId: string;
 }
 
+/**
+ * A user-configured local OpenAI-compatible server. Registered with pi-ai as
+ * provider `local:<id>` so it slots into the same modelRegistry plumbing as
+ * the built-in OAuth providers and OpenRouter.
+ */
+export interface LocalProvider {
+  /** Stable id, minted on creation. Used as the suffix of the pi provider name. */
+  id: string;
+  /** User-supplied display name surfaced in the model picker ("LM Studio"). */
+  label: string;
+  /** OpenAI-compatible endpoint, e.g. `http://localhost:1234/v1`. */
+  baseUrl: string;
+  /** Model ids the user has added (and chosen to surface in the picker). */
+  models: string[];
+}
+
 export type ThemePreference = 'dark' | 'light' | 'auto';
 
 export const THINKING_LEVELS: ThinkingLevel[] = [
@@ -109,6 +125,14 @@ export interface Settings {
    */
   openrouterModels: string[];
   /**
+   * User-configured local OpenAI-compatible servers (LM Studio, Ollama,
+   * llama.cpp, vLLM, …). Each entry produces one provider in the model
+   * picker. API keys live in AuthStorage under `local:<id>` so they're
+   * encrypted at rest — most local servers don't need one, but some proxies
+   * do.
+   */
+  localProviders: LocalProvider[];
+  /**
    * User's preferred reasoning level. Surfaced as a dropdown next to the
    * model picker. Pi clamps this against the active model's capabilities
    * (e.g. "xhigh" → "high" on anything that's not Opus 4.7), so the value
@@ -134,6 +158,7 @@ function computeDefaults(): Settings {
     onboarding: null,
     rimworldInstallOverride: null,
     openrouterModels: [],
+    localProviders: [],
     thinkingLevel: 'xhigh',
   };
 }
@@ -201,6 +226,21 @@ function normalize(raw: unknown, defaults: Settings): Settings {
     next.openrouterModels = obj.openrouterModels.filter(
       (s): s is string => typeof s === 'string' && s.length > 0,
     );
+  }
+
+  if (Array.isArray(obj.localProviders)) {
+    next.localProviders = obj.localProviders.flatMap((raw): LocalProvider[] => {
+      if (!raw || typeof raw !== 'object') return [];
+      const r = raw as Record<string, unknown>;
+      const id = readString(r.id);
+      const label = readString(r.label);
+      const baseUrl = readString(r.baseUrl);
+      if (!id || !label || !baseUrl) return [];
+      const models = Array.isArray(r.models)
+        ? r.models.filter((m): m is string => typeof m === 'string' && m.length > 0)
+        : [];
+      return [{ id, label, baseUrl, models }];
+    });
   }
 
   if (isThinkingLevel(obj.thinkingLevel)) {

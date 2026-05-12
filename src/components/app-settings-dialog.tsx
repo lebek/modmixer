@@ -5,7 +5,7 @@ import type {
   OAuthLink,
   OpenRouterConfig,
 } from '@/agent/agent-host';
-import type { ThemePreference } from '@/agent/settings';
+import type { LocalProvider, ThemePreference } from '@/agent/settings';
 import type { UpdaterState } from '@/agent/updater';
 import { applyTheme } from '@/lib/theme';
 
@@ -513,6 +513,16 @@ function ProvidersSection() {
           </div>
         )}
       </div>
+
+      <div className="flex items-center gap-3">
+        <span className="h-px flex-1 bg-line" />
+        <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted">
+          Or run models locally
+        </span>
+        <span className="h-px flex-1 bg-line" />
+      </div>
+
+      <LocalProvidersSection />
     </div>
   );
 }
@@ -697,6 +707,354 @@ function OpenRouterSection() {
           </ul>
         )}
       </div>
+    </div>
+  );
+}
+
+interface LocalPreset {
+  label: string;
+  baseUrl: string;
+}
+
+// Defaults match each tool's documented OpenAI-compatible endpoint. They're
+// editable after creation — the preset just primes the input fields so the
+// common case is one click.
+const LOCAL_PRESETS: LocalPreset[] = [
+  { label: 'LM Studio', baseUrl: 'http://localhost:1234/v1' },
+  { label: 'Ollama', baseUrl: 'http://localhost:11434/v1' },
+  { label: 'llama.cpp', baseUrl: 'http://localhost:8080/v1' },
+  { label: 'vLLM', baseUrl: 'http://localhost:8000/v1' },
+];
+
+function LocalProvidersSection() {
+  const [providers, setProviders] = useState<LocalProvider[] | null>(null);
+  const [adding, setAdding] = useState(false);
+
+  const refresh = () => {
+    void window.modmixer.listLocalProviders().then(setProviders);
+  };
+
+  useEffect(() => {
+    refresh();
+  }, []);
+
+  if (!providers) return null;
+
+  return (
+    <div className="space-y-3 rounded-md border border-line">
+      <div className="border-b border-line px-3 py-2.5">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-sm font-medium text-ink">Local models</div>
+            <div className="mt-0.5 text-[11px] text-muted">
+              Point Modmixer at any OpenAI-compatible server running on your
+              machine — LM Studio, Ollama, llama.cpp, vLLM. Tool-calling
+              quality varies a lot by model.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="space-y-3 px-3 pb-3">
+        {providers.length === 0 && !adding && (
+          <p className="text-[11px] text-muted">
+            No local servers configured yet.
+          </p>
+        )}
+
+        {providers.map((p) => (
+          <LocalProviderRow
+            key={p.id}
+            provider={p}
+            onChange={setProviders}
+          />
+        ))}
+
+        {adding ? (
+          <LocalProviderForm
+            onSave={async (input) => {
+              const next = await window.modmixer.addLocalProvider(input);
+              setProviders(next);
+              setAdding(false);
+            }}
+            onCancel={() => setAdding(false)}
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={() => setAdding(true)}
+            className="rounded-md border border-dashed border-line bg-paper px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-muted transition-colors hover:border-ink/30 hover:text-ink"
+          >
+            + Add local server
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function LocalProviderForm({
+  onSave,
+  onCancel,
+  initial,
+}: {
+  onSave: (input: {
+    label: string;
+    baseUrl: string;
+    apiKey?: string | null;
+  }) => Promise<void> | void;
+  onCancel: () => void;
+  initial?: { label: string; baseUrl: string };
+}) {
+  const [label, setLabel] = useState(initial?.label ?? '');
+  const [baseUrl, setBaseUrl] = useState(initial?.baseUrl ?? '');
+  const [apiKey, setApiKey] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const applyPreset = (preset: LocalPreset) => {
+    if (!label.trim()) setLabel(preset.label);
+    setBaseUrl(preset.baseUrl);
+  };
+
+  const canSave = label.trim().length > 0 && baseUrl.trim().length > 0;
+
+  const save = async () => {
+    if (!canSave) return;
+    setSaving(true);
+    try {
+      await onSave({
+        label,
+        baseUrl,
+        apiKey: apiKey.trim() ? apiKey : null,
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2 rounded-md border border-line bg-surface/40 px-3 py-2.5">
+      {!initial && (
+        <div className="flex flex-wrap gap-1.5">
+          {LOCAL_PRESETS.map((p) => (
+            <button
+              key={p.label}
+              type="button"
+              onClick={() => applyPreset(p)}
+              className="rounded-md border border-line bg-paper px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.18em] text-muted transition-colors hover:border-ink/30 hover:text-ink"
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div className="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-1.5">
+        <label className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted">
+          Name
+        </label>
+        <input
+          type="text"
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          placeholder="LM Studio"
+          className="rounded-md border border-line bg-paper px-2 py-1 font-mono text-xs text-ink focus:border-accent focus:outline-none"
+        />
+
+        <label className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted">
+          URL
+        </label>
+        <input
+          type="text"
+          value={baseUrl}
+          onChange={(e) => setBaseUrl(e.target.value)}
+          placeholder="http://localhost:1234/v1"
+          className="rounded-md border border-line bg-paper px-2 py-1 font-mono text-xs text-ink focus:border-accent focus:outline-none"
+        />
+
+        <label className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted">
+          API key
+        </label>
+        <input
+          type="password"
+          value={apiKey}
+          onChange={(e) => setApiKey(e.target.value)}
+          placeholder="(usually not needed)"
+          className="rounded-md border border-line bg-paper px-2 py-1 font-mono text-xs text-ink focus:border-accent focus:outline-none"
+        />
+      </div>
+
+      <div className="flex justify-end gap-2 pt-1">
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={saving}
+          className="rounded-md border border-line bg-paper px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-muted transition-colors hover:border-ink/30 hover:text-ink disabled:opacity-40"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={() => void save()}
+          disabled={saving || !canSave}
+          className="rounded-md bg-accent px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-accent-foreground transition-opacity hover:bg-accent-soft disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {saving ? 'Saving…' : 'Save'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function LocalProviderRow({
+  provider,
+  onChange,
+}: {
+  provider: LocalProvider;
+  onChange: (next: LocalProvider[]) => void;
+}) {
+  const [modelInput, setModelInput] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [discovered, setDiscovered] = useState<string[] | null>(null);
+  const [discoverError, setDiscoverError] = useState<string | null>(null);
+
+  const addModel = async (id: string) => {
+    const cleaned = id.trim();
+    if (!cleaned) return;
+    setBusy(true);
+    try {
+      const next = await window.modmixer.addLocalModel(provider.id, cleaned);
+      onChange(next);
+      setModelInput('');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const removeModel = async (modelId: string) => {
+    const next = await window.modmixer.removeLocalModel(provider.id, modelId);
+    onChange(next);
+  };
+
+  const removeProvider = async () => {
+    const next = await window.modmixer.removeLocalProvider(provider.id);
+    onChange(next);
+  };
+
+  const discover = async () => {
+    setDiscoverError(null);
+    setBusy(true);
+    try {
+      const ids = await window.modmixer.discoverLocalModels(provider.baseUrl);
+      setDiscovered(ids);
+      if (ids.length === 0) {
+        setDiscoverError('Server returned no models.');
+      }
+    } catch (err) {
+      setDiscoverError(err instanceof Error ? err.message : String(err));
+      setDiscovered(null);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const unlisted = discovered
+    ? discovered.filter((id) => !provider.models.includes(id))
+    : [];
+
+  return (
+    <div className="space-y-2 rounded-md border border-line bg-paper/40 px-3 py-2.5">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="text-sm font-medium text-ink">{provider.label}</div>
+          <div className="truncate font-mono text-[11px] text-muted">
+            {provider.baseUrl}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => void removeProvider()}
+          className="shrink-0 font-mono text-[10px] uppercase tracking-[0.18em] text-muted transition-colors hover:text-failed"
+        >
+          Remove
+        </button>
+      </div>
+
+      <div className="flex items-center gap-2">
+        <input
+          type="text"
+          value={modelInput}
+          onChange={(e) => setModelInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && modelInput.trim()) void addModel(modelInput);
+          }}
+          placeholder="qwen3-coder, llama3.1, …"
+          className="flex-1 rounded-md border border-line bg-paper px-2 py-1 font-mono text-xs text-ink focus:border-accent focus:outline-none"
+        />
+        <button
+          type="button"
+          onClick={() => void addModel(modelInput)}
+          disabled={busy || !modelInput.trim()}
+          className="rounded-md border border-line bg-paper px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-muted transition-colors hover:border-ink/30 hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Add
+        </button>
+        <button
+          type="button"
+          onClick={() => void discover()}
+          disabled={busy}
+          className="rounded-md border border-line bg-paper px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-muted transition-colors hover:border-ink/30 hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+          title="Fetch /models from the server and list what it's serving"
+        >
+          Discover
+        </button>
+      </div>
+
+      {discoverError && (
+        <div className="rounded-md border border-failed/40 bg-failed/5 px-2 py-1 text-[11px] text-failed">
+          {discoverError}
+        </div>
+      )}
+
+      {unlisted.length > 0 && (
+        <div className="space-y-1 rounded-md border border-line bg-surface/40 p-2">
+          <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted">
+            Available on server
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {unlisted.map((id) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => void addModel(id)}
+                disabled={busy}
+                className="rounded-md border border-line bg-paper px-2 py-0.5 font-mono text-[10px] text-ink transition-colors hover:border-accent hover:text-accent disabled:opacity-40"
+              >
+                + {id}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {provider.models.length > 0 && (
+        <ul className="divide-y divide-line rounded-md border border-line">
+          {provider.models.map((id) => (
+            <li
+              key={id}
+              className="flex items-center justify-between px-2.5 py-1.5"
+            >
+              <span className="font-mono text-xs text-ink">{id}</span>
+              <button
+                onClick={() => void removeModel(id)}
+                className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted transition-colors hover:text-failed"
+              >
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

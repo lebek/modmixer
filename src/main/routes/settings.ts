@@ -95,4 +95,45 @@ export function registerSettingsRoutes(ctx: RouteContext): void {
   );
 
   ipc.handle('modmixer:openrouter:get-credits', () => host.getOpenRouterCredits());
+
+  // Local OpenAI-compatible providers — BYO base URL + (optional) API key.
+  // Same plumbing as OpenRouter, but one provider per server so multiple
+  // local stacks (LM Studio + Ollama + …) can coexist.
+  ipc.handle('modmixer:local:list', () => host.getLocalProviders());
+
+  ipc.handle(
+    'modmixer:local:add',
+    async (
+      _evt,
+      input: { label: string; baseUrl: string; apiKey?: string | null },
+    ) => host.addLocalProvider(input),
+  );
+
+  ipc.handle(
+    'modmixer:local:update',
+    async (
+      _evt,
+      id: string,
+      patch: { label?: string; baseUrl?: string; apiKey?: string | null },
+    ) => host.updateLocalProvider(id, patch),
+  );
+
+  ipc.handle('modmixer:local:remove', async (_evt, id: string) =>
+    host.removeLocalProvider(id),
+  );
+
+  ipc.handle(
+    'modmixer:local:add-model',
+    async (_evt, id: string, modelId: string) => host.addLocalModel(id, modelId),
+  );
+
+  ipc.handle(
+    'modmixer:local:remove-model',
+    async (_evt, id: string, modelId: string) =>
+      host.removeLocalModel(id, modelId),
+  );
+
+  ipc.handle('modmixer:local:discover', async (_evt, baseUrl: string) =>
+    host.discoverLocalModels(baseUrl),
+  );
 }

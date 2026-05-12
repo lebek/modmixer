@@ -121,7 +121,8 @@ import {
 } from './conversations.js';
 import { messageText } from '../lib/agent-utils.js';
 import type { ModelOption } from './models.js';
-import type { ModelSelection } from './settings.js';
+import type { LocalProvider, ModelSelection } from './settings.js';
+import { randomUUID } from 'node:crypto';
 
 const RIMWORLD_POLL_INTERVAL_MS = 10_000;
 const HEARTBEAT_INTERVAL_MS = 60_000;
@@ -262,6 +263,26 @@ const PROVIDER_LABELS: Record<string, string> = {
 
 const OPENROUTER_PROVIDER = 'openrouter';
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
+
+/**
+ * Prefix used for user-defined local OpenAI-compatible providers (LM Studio,
+ * Ollama, vLLM, llama.cpp, …). Each entry is registered with pi as
+ * `${LOCAL_PROVIDER_PREFIX}${id}` so multiple local servers coexist in the
+ * model picker.
+ */
+const LOCAL_PROVIDER_PREFIX = 'local:';
+
+function localProviderName(id: string): string {
+  return `${LOCAL_PROVIDER_PREFIX}${id}`;
+}
+
+/**
+ * Placeholder API key sent to local servers that don't actually authenticate
+ * (LM Studio, Ollama, llama.cpp). Pi's registerProvider() rejects empty
+ * apiKey when models are defined, but the OpenAI SDK forwards whatever
+ * string we pass — these servers don't care what's there.
+ */
+const LOCAL_PROVIDER_PLACEHOLDER_KEY = 'local-llm';
 
 /**
  * OpenRouter slugs that are always present, regardless of what the user has
@@ -562,6 +583,7 @@ export class AgentHost {
       this.authStorage.reload();
       this.modelRegistry.refresh();
       this.applyOpenRouterRegistration();
+      this.applyLocalProvidersRegistration();
     } catch (err) {
       console.error('AgentHost.primeAfterReady failed:', err);
     }
@@ -1232,6 +1254,22 @@ export class AgentHost {
         recommended: isPinnedOpenRouterSlug(slug),
       });
     }
+    // Local OpenAI-compatible servers: one row per user-added model. Provider
+    // label comes straight from the user's settings entry, so multiple local
+    // servers stay distinguishable in the picker (e.g. "LM Studio" vs
+    // "Ollama").
+    for (const local of loadSettings().localProviders) {
+      const name = localProviderName(local.id);
+      for (const modelId of local.models) {
+        out.push({
+          key: `${name}/${modelId}`,
+          provider: name,
+          providerLabel: local.label,
+          modelId,
+          label: modelId,
+        });
+      }
+    }
     return out;
   }
 
@@ -1317,6 +1355,190 @@ export class AgentHost {
     this.emitOAuth({ type: 'links-changed' });
     await this.refreshActiveModel();
     return this.getOpenRouterConfig();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Local OpenAI-compatible providers (LM Studio, Ollama, vLLM, llama.cpp, …)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Register every saved local provider with pi-ai. Called on startup and
+   * after any add/edit/remove. Skips entries with no models — pi rejects a
+   * model-less provider config anyway, and a "configured but empty" entry
+   * surfaces no picker rows.
+   */
+  private applyLocalProvidersRegistration(): void {
+    const { localProviders } = loadSettings();
+    for (const provider of localProviders) {
+      this.registerOneLocalProvider(provider);
+    }
+  }
+
+  private registerOneLocalProvider(provider: LocalProvider): void {
+    const name = localProviderName(provider.id);
+    if (provider.models.length === 0) {
+      // Nothing to register; ensure any previous registration is dropped so a
+      // stale provider doesn't linger after the user removes its last model.
+      this.modelRegistry.unregisterProvider(name);
+      return;
+    }
+    const cred = this.authStorage.get(name);
+    const apiKey =
+      cred?.type === 'api_key' && cred.key ? cred.key : LOCAL_PROVIDER_PLACEHOLDER_KEY;
+    const zero: OpenRouterCost = {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+    };
+    this.modelRegistry.registerProvider(name, {
+      baseUrl: provider.baseUrl,
+      api: 'openai-completions',
+      apiKey,
+      models: provider.models.map((id) => ({
+        id,
+        name: id,
+        // Local servers vary wildly in reasoning support — leave the dropdown
+        // gated to "off" by default. Power users can flip thinking via prompt.
+        reasoning: false,
+        input: ['text'],
+        cost: zero,
+        contextWindow: 128_000,
+        maxTokens: 16_384,
+      })),
+    });
+  }
+
+  getLocalProviders(): LocalProvider[] {
+    return loadSettings().localProviders.map((p) => ({ ...p, models: [...p.models] }));
+  }
+
+  /**
+   * Create a new local provider entry. `apiKey` is optional — pass `null`
+   * for servers that don't authenticate (the common case).
+   */
+  async addLocalProvider(input: {
+    label: string;
+    baseUrl: string;
+    apiKey?: string | null;
+  }): Promise<LocalProvider[]> {
+    const label = input.label.trim();
+    const baseUrl = input.baseUrl.trim().replace(/\/+$/, '');
+    if (!label || !baseUrl) return this.getLocalProviders();
+    const provider: LocalProvider = {
+      id: randomUUID(),
+      label,
+      baseUrl,
+      models: [],
+    };
+    const current = loadSettings().localProviders;
+    saveSettings({ localProviders: [...current, provider] });
+    if (input.apiKey && input.apiKey.trim().length > 0) {
+      this.authStorage.set(localProviderName(provider.id), {
+        type: 'api_key',
+        key: input.apiKey.trim(),
+      });
+    }
+    this.registerOneLocalProvider(provider);
+    this.emitOAuth({ type: 'links-changed' });
+    return this.getLocalProviders();
+  }
+
+  async updateLocalProvider(
+    id: string,
+    patch: { label?: string; baseUrl?: string; apiKey?: string | null },
+  ): Promise<LocalProvider[]> {
+    const current = loadSettings().localProviders;
+    const idx = current.findIndex((p) => p.id === id);
+    if (idx < 0) return this.getLocalProviders();
+    const next = [...current];
+    const merged: LocalProvider = { ...next[idx] };
+    if (patch.label !== undefined) {
+      const v = patch.label.trim();
+      if (v) merged.label = v;
+    }
+    if (patch.baseUrl !== undefined) {
+      const v = patch.baseUrl.trim().replace(/\/+$/, '');
+      if (v) merged.baseUrl = v;
+    }
+    next[idx] = merged;
+    saveSettings({ localProviders: next });
+    if (patch.apiKey !== undefined) {
+      const name = localProviderName(id);
+      if (patch.apiKey && patch.apiKey.trim().length > 0) {
+        this.authStorage.set(name, { type: 'api_key', key: patch.apiKey.trim() });
+      } else {
+        this.authStorage.remove(name);
+      }
+    }
+    this.registerOneLocalProvider(merged);
+    this.emitOAuth({ type: 'links-changed' });
+    await this.refreshActiveModel();
+    return this.getLocalProviders();
+  }
+
+  async removeLocalProvider(id: string): Promise<LocalProvider[]> {
+    const current = loadSettings().localProviders;
+    const next = current.filter((p) => p.id !== id);
+    if (next.length === current.length) return this.getLocalProviders();
+    saveSettings({ localProviders: next });
+    const name = localProviderName(id);
+    this.authStorage.remove(name);
+    this.modelRegistry.unregisterProvider(name);
+    this.emitOAuth({ type: 'links-changed' });
+    await this.refreshActiveModel();
+    return this.getLocalProviders();
+  }
+
+  async addLocalModel(id: string, modelId: string): Promise<LocalProvider[]> {
+    const cleaned = modelId.trim();
+    if (!cleaned) return this.getLocalProviders();
+    const current = loadSettings().localProviders;
+    const idx = current.findIndex((p) => p.id === id);
+    if (idx < 0) return this.getLocalProviders();
+    if (current[idx].models.includes(cleaned)) return this.getLocalProviders();
+    const next = [...current];
+    next[idx] = { ...next[idx], models: [...next[idx].models, cleaned] };
+    saveSettings({ localProviders: next });
+    this.registerOneLocalProvider(next[idx]);
+    this.emitOAuth({ type: 'links-changed' });
+    return this.getLocalProviders();
+  }
+
+  async removeLocalModel(id: string, modelId: string): Promise<LocalProvider[]> {
+    const current = loadSettings().localProviders;
+    const idx = current.findIndex((p) => p.id === id);
+    if (idx < 0) return this.getLocalProviders();
+    const filtered = current[idx].models.filter((m) => m !== modelId);
+    if (filtered.length === current[idx].models.length) return this.getLocalProviders();
+    const next = [...current];
+    next[idx] = { ...next[idx], models: filtered };
+    saveSettings({ localProviders: next });
+    this.registerOneLocalProvider(next[idx]);
+    this.emitOAuth({ type: 'links-changed' });
+    await this.refreshActiveModel();
+    return this.getLocalProviders();
+  }
+
+  /**
+   * Hit the local server's `/models` endpoint and return the advertised
+   * model ids. Powers the "Discover" button in settings so users can see
+   * what their LM Studio / Ollama / vLLM instance is serving without
+   * typing ids by hand. Trailing `/v1` is preserved; we just append `/models`.
+   */
+  async discoverLocalModels(baseUrl: string): Promise<string[]> {
+    const trimmed = baseUrl.trim().replace(/\/+$/, '');
+    if (!trimmed) return [];
+    const url = `${trimmed}/models`;
+    const res = await fetch(url, { headers: { Accept: 'application/json' } });
+    if (!res.ok) {
+      throw new Error(`${res.status} ${res.statusText} from ${url}`);
+    }
+    const body = (await res.json()) as { data?: Array<{ id?: unknown }> };
+    if (!body || !Array.isArray(body.data)) return [];
+    return body.data
+      .map((m) => m?.id)
+      .filter((id): id is string => typeof id === 'string' && id.length > 0);
   }
 
   /** Provider catalog merged with current link status, for the settings UI. */
