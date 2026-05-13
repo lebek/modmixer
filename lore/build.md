@@ -21,7 +21,7 @@ Most-bitten cases:
 | `QuestNode`, `QuestNode_*`, `QuestPart_*`, `QuestGen`, `Slate` | `RimWorld.QuestGen` | Quest scripting. The QuestPart base is in `RimWorld`, but QuestPart_<Subclass> is in QuestGen. |
 | `JobDriver`, `JobDriver_*`, `Toils_*`, `ThinkNode`, `ThinkNode_*`, `WorkGiver_*`, `MentalState_*`, `Pawn_PathFollower` | `Verse.AI` | All pawn AI / job execution. Easy to miss because `JobDef` itself is in `Verse`. |
 | `SoundDef`, `SubSoundDef`, `Sustainer`, `SoundInfo`, `SoundDefOf` | `Verse.Sound` | `SoundDefOf` is the trap — looks like it should be in `RimWorld` alongside other `*DefOf`. |
-| `Texture2D`, `Color`, `Vector2/3`, `Rect`, `GUI.*`, `TextAnchor` | `UnityEngine` | And `TextAnchor` also needs the `UnityEngine.TextRenderingModule` reference (next entry). |
+| `Texture2D`, `Color`, `Vector2/3`, `Rect`, `Mathf`, `Time.deltaTime`, `GUI.*`, `TextAnchor` | `UnityEngine` | `Mathf.Clamp/Min/Max/RoundToInt/Lerp` is the most-bitten — `System.Math` covers some but not all of it (no `Lerp`, no float `Clamp` in net472). And `TextAnchor` also needs the `UnityEngine.TextRenderingModule` reference (next entry). |
 | `Sketch`, `SketchEntity_*`, `SketchResolverDef` | `RimWorld.SketchGen` | Procedural building generation. |
 | `SymbolDef`, `SymbolResolver_*`, `BaseGenUtility` | `RimWorld.BaseGen` | Base/raid scenario generation. |
 

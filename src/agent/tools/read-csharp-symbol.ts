@@ -66,17 +66,17 @@ export const readCsharpSymbolTool: AgentTool<
 
     const { sourceRoot } = getIndexPaths();
 
-    // Bare short name (no dots) → disambiguation mode: return the symbol-table
-    // entries without bodies. The agent re-calls with a specific FQN to fetch
-    // a body. This sidesteps the read_csharp_symbol("Tick") → "# 12 overloads"
-    // bloat that wasted context in pre-merge usage.
+    // Bare short name (no dots) routes through `resolveSymbol` to pick out the
+    // distinct FQNs that share this short name. If there's exactly one logical
+    // symbol (possibly with overloads), drop into body-read mode using that
+    // FQN. Multiple distinct FQNs → return the disambig list so the agent can
+    // pick one — same as before. The single-FQN short-circuit saves the
+    // read("IncidentWorker_Raid") → re-call("…_Raid") two-step that hit
+    // repeatedly in run 2.
+    let lookupName = params.name;
     if (!params.name.includes('.')) {
       const rawMatches = resolveSymbol(params.name, { kind: params.kind });
-      const matches: SymbolMatch[] = rawMatches.map((m) => ({
-        ...m,
-        filePath: path.resolve(sourceRoot, m.filePath),
-      }));
-      if (matches.length === 0) {
+      if (rawMatches.length === 0) {
         return {
           content: [
             {
@@ -87,13 +87,22 @@ export const readCsharpSymbolTool: AgentTool<
           details: { hits: [], matches: [] },
         };
       }
-      return {
-        content: [{ type: 'text', text: formatMatches(matches) }],
-        details: { hits: [], matches },
-      };
+      const distinctFqns = new Set(rawMatches.map((m) => m.fqn));
+      if (distinctFqns.size > 1) {
+        const matches: SymbolMatch[] = rawMatches.map((m) => ({
+          ...m,
+          filePath: path.resolve(sourceRoot, m.filePath),
+        }));
+        return {
+          content: [{ type: 'text', text: formatMatches(matches) }],
+          details: { hits: [], matches },
+        };
+      }
+      // Exactly one logical symbol — use its FQN downstream.
+      lookupName = rawMatches[0].fqn;
     }
 
-    // Dotted name → body-read mode (original behavior).
+    // Dotted (or single-match bare) name → body-read mode.
     const db = openIndexDb();
     const cap = Math.min(Math.max(params.maxBytes ?? 4096, 256), 32768);
     const kindArgs: Record<string, unknown> = params.kind
@@ -109,20 +118,38 @@ export const readCsharpSymbolTool: AgentTool<
       LIMIT 25
     `;
     type Row = Omit<SymbolHit, 'body' | 'truncated'>;
-    let rows: Row[] = db
-      .prepare(`${select} WHERE fqn = @name${kindClause} ${orderLimit}`)
-      .all({ name: params.name, ...kindArgs }) as Row[];
-    if (rows.length === 0) {
-      rows = db
-        .prepare(`${select} WHERE fqn LIKE @suffix${kindClause} ${orderLimit}`)
-        .all({ suffix: `%.${params.name}`, ...kindArgs }) as Row[];
+    const exactStmt = db.prepare(
+      `${select} WHERE fqn = @name${kindClause} ${orderLimit}`,
+    );
+    const suffixStmt = db.prepare(
+      `${select} WHERE fqn LIKE @suffix${kindClause} ${orderLimit}`,
+    );
+
+    // Peel-and-retry: indexed FQNs are stored without their C# namespace
+    // (e.g. "Pawn_NeedsTracker.ShouldHaveNeed", not "RimWorld.Pawn_NeedsTracker.…").
+    // When the model prepends a namespace it knows from `using …;` ("RimWorld.",
+    // "Verse."), drop one leading component at a time and retry. This collapses
+    // the previously-observed read_csharp_symbol("RimWorld.X.Y") → fail → retry
+    // ("X.Y") → success pattern into one call.
+    const variants: string[] = [lookupName];
+    const parts = lookupName.split('.');
+    for (let i = 1; i < parts.length; i++) {
+      variants.push(parts.slice(i).join('.'));
+    }
+
+    let rows: Row[] = [];
+    for (const candidate of variants) {
+      rows = exactStmt.all({ name: candidate, ...kindArgs }) as Row[];
+      if (rows.length > 0) break;
+      rows = suffixStmt.all({ suffix: `%.${candidate}`, ...kindArgs }) as Row[];
+      if (rows.length > 0) break;
     }
 
     if (rows.length === 0) {
       // Last-ditch fallback: drop the namespace prefix and try short-name
       // disambiguation. Catches "Effecter.Spawn" when the actual FQN is
       // "Verse.EffecterDef.Spawn" — the agent typed off a (wrong) memory.
-      const tail = params.name.split('.').pop() ?? params.name;
+      const tail = lookupName.split('.').pop() ?? lookupName;
       const rawMatches = resolveSymbol(tail, { kind: params.kind });
       if (rawMatches.length > 0) {
         const matches: SymbolMatch[] = rawMatches.map((m) => ({

@@ -57,6 +57,7 @@ interface SearchDefsHit {
   pack: string;
   defType: string;
   defName: string | null;
+  inheritName: string | null;
   label: string;
   filePath: string;
 }
@@ -97,7 +98,7 @@ export const searchDefsTool: AgentTool<typeof Params, Details> = {
   name: 'search_defs',
   label: 'Search defs',
   description:
-    "Look up XML defs in the indexed Core + DLCs corpus. Three modes in one tool:\n\n• default — search by defName / label / description. When exactly one def matches, the full merged XML is returned inline (saves a follow-up call). When multiple match, returns summaries.\n• descendantsOf=<Name> — find every def that extends a parent via ParentName (e.g. \"BaseFilth\"). Pass recursive=true to walk transitively.\n• referencedBy=<defName> — find every C# source location that mentions this defName by string literal.\n\nThis tells you what XML data exists. For code BEHAVIOR (how does X work, why isn't Y firing, what's the right API pattern) start with search_source or read_csharp_symbol — the def database can't tell you how the engine consumes a def. Zero results here doesn't mean nothing exists; it usually means the answer lives in C# source, not XML.",
+    "Look up XML defs in the indexed Core + DLCs corpus. Three modes in one tool:\n\n• default — search by defName / label / description / abstract Name. Pass a single keyword (\"Pirate\") or a few whitespace-separated terms (\"BaseHuman raider\") — terms are AND'd. Abstract defs (those with `Name=\"…\"` and no `defName`, e.g. `FactionBase`) are matched on their Name attribute. When exactly one def matches, the full merged XML is returned inline.\n• descendantsOf=<Name> — find every def that extends a parent via ParentName (e.g. \"BaseFilth\"). Pass recursive=true to walk transitively.\n• referencedBy=<defName> — find every C# source location that mentions this defName by string literal.\n\nTemplate-fetch idiom: when you know the exact defName and just want its full XML to copy from (e.g. \"show me the Pirate FactionDef as a template\"), call with `limit=1` (and optionally `merged=true` to fold ParentName inheritance inline). That collapses the common search → identify → re-fetch chain into one call.\n\nThis tells you what XML data exists. For code BEHAVIOR (how does X work, why isn't Y firing, what's the right API pattern) start with search_source or read_csharp_symbol — the def database can't tell you how the engine consumes a def. Zero results here doesn't mean nothing exists; it usually means the answer lives in C# source, not XML.",
   parameters: Params,
   async execute(_id, params): Promise<AgentToolResult<Details>> {
     const status = getIndexStatus();
@@ -133,45 +134,78 @@ export const searchDefsTool: AgentTool<typeof Params, Details> = {
     let rows: SearchDefsHit[];
     if (q.length === 0) {
       const sql = `
-        SELECT pack, defType, defName, label, filePath
+        SELECT pack, defType, defName, inheritName, label, filePath
         FROM def
         ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
-        ORDER BY pack, defType, defName
+        ORDER BY pack, defType, COALESCE(defName, inheritName)
         LIMIT @limit
       `;
       rows = db.prepare(sql).all(args) as SearchDefsHit[];
     } else {
-      const ftsTerm = ftsEscape(q);
-      const sqlFts = `
-        SELECT def.pack, def.defType, def.defName, def.label, def.filePath
-        FROM def_fts
-        JOIN def ON def.id = def_fts.rowid
-        WHERE def_fts MATCH @fts
-        ${where.length ? 'AND ' + where.join(' AND ') : ''}
-        LIMIT @limit
-      `;
-      const sqlLike = `
-        SELECT pack, defType, defName, label, filePath
-        FROM def
-        WHERE defName LIKE @like
-        ${where.length ? 'AND ' + where.join(' AND ') : ''}
-        ORDER BY length(defName), defName
-        LIMIT @limit
-      `;
-      const ftsHits = db
-        .prepare(sqlFts)
-        .all({ ...args, fts: ftsTerm }) as SearchDefsHit[];
-      const likeHits = db
-        .prepare(sqlLike)
-        .all({ ...args, like: `%${q}%` }) as SearchDefsHit[];
-      const seen = new Set<string>();
-      rows = [];
-      for (const r of [...likeHits, ...ftsHits]) {
-        const key = `${r.pack}|${r.defType}|${r.defName ?? ''}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        rows.push(r);
-        if (rows.length >= limit) break;
+      // Split on whitespace and AND the terms. Single-word queries are a
+      // single-term AND (no behavior change). Multi-word queries used to be
+      // phrase-quoted ("FactionDef Pirate") and almost always 0-hit.
+      const allTerms = q.split(/\s+/).filter(Boolean);
+      let terms = allTerms;
+      // If the first term duplicates the defType filter (e.g. query
+      // "FactionDef Pirate" with defType=FactionDef), drop it.
+      if (
+        params.defType &&
+        terms.length > 1 &&
+        terms[0].toLowerCase() === params.defType.toLowerCase()
+      ) {
+        terms = terms.slice(1);
+      }
+
+      const runQuery = (queryTerms: string[]): SearchDefsHit[] => {
+        const ftsTerm = queryTerms
+          .map((t) => `"${t.replace(/"/g, '')}"`)
+          .join(' AND ');
+        const sqlFts = `
+          SELECT def.pack, def.defType, def.defName, def.inheritName, def.label, def.filePath
+          FROM def_fts
+          JOIN def ON def.id = def_fts.rowid
+          WHERE def_fts MATCH @fts
+          ${where.length ? 'AND ' + where.join(' AND ') : ''}
+          LIMIT @limit
+        `;
+        const likeArgs: Record<string, unknown> = { ...args };
+        const likeConds: string[] = [];
+        queryTerms.forEach((t, i) => {
+          const key = `t${i}`;
+          likeConds.push(`(defName LIKE @${key} OR inheritName LIKE @${key})`);
+          likeArgs[key] = `%${t}%`;
+        });
+        const sqlLike = `
+          SELECT pack, defType, defName, inheritName, label, filePath
+          FROM def
+          WHERE ${likeConds.join(' AND ')}
+          ${where.length ? 'AND ' + where.join(' AND ') : ''}
+          ORDER BY length(COALESCE(defName, inheritName)), COALESCE(defName, inheritName)
+          LIMIT @limit
+        `;
+        const ftsHits = db
+          .prepare(sqlFts)
+          .all({ ...args, fts: ftsTerm }) as SearchDefsHit[];
+        const likeHits = db.prepare(sqlLike).all(likeArgs) as SearchDefsHit[];
+        const seen = new Set<string>();
+        const merged: SearchDefsHit[] = [];
+        for (const r of [...likeHits, ...ftsHits]) {
+          const key = `${r.pack}|${r.defType}|${r.defName ?? r.inheritName ?? ''}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          merged.push(r);
+          if (merged.length >= limit) break;
+        }
+        return merged;
+      };
+
+      rows = runQuery(terms);
+      // Fallback: when the AND'd query misses, try the last term alone — it's
+      // usually the actual name, and the leading words are class/category hints
+      // the FTS index doesn't carry (e.g. "IncidentWorker RaidEnemy" → "RaidEnemy").
+      if (rows.length === 0 && terms.length > 1) {
+        rows = runQuery([terms[terms.length - 1]]);
       }
     }
 
@@ -182,13 +216,18 @@ export const searchDefsTool: AgentTool<typeof Params, Details> = {
       ]
         .filter(Boolean)
         .join(', ');
+      const tips = [
+        "Tips: this index covers XML defs only. If you're looking for code behavior or an API pattern, try search_source or read_csharp_symbol.",
+      ];
+      const dlcHint = missingDlcHint(db, q);
+      if (dlcHint) tips.push(dlcHint);
       return {
         content: [
           {
             type: 'text',
             text:
               `No defs matched "${q}"${filterNote ? ` (${filterNote})` : ''}.\n` +
-              'Tips: this index covers XML defs only. If you\'re looking for code behavior or an API pattern, try search_source or read_csharp_symbol.',
+              tips.join(' '),
           },
         ],
         details: { mode: 'search', hits: [] },
@@ -206,17 +245,25 @@ export const searchDefsTool: AgentTool<typeof Params, Details> = {
     // two-call pattern pre-merge.
     const wantMerged = params.merged !== false;
     if (absRows.length === 1) {
-      const expandedRow = fetchDefRow(db, absRows[0].defName, absRows[0].defType, defsRoot);
+      const only = absRows[0];
+      const expandedRow = fetchDefRow(
+        db,
+        only.defName,
+        only.inheritName,
+        only.defType,
+        defsRoot,
+      );
       if (expandedRow) {
         const xml = wantMerged
           ? mergeWithParents(db, expandedRow, defsRoot)
           : expandedRow.xml;
+        const label = formatDefIdentity(expandedRow);
         return {
           content: [
             {
               type: 'text',
               text:
-                `Found 1 def.\n${expandedRow.pack} • ${expandedRow.defType} • ${expandedRow.defName ?? '(abstract)'}\n${expandedRow.filePath}\n\n${xml}`,
+                `Found 1 def.\n${expandedRow.pack} • ${expandedRow.defType} • ${label}\n${expandedRow.filePath}\n\n${xml}`,
             },
           ],
           details: { mode: 'search', hits: absRows, expanded: { ...expandedRow, xml } },
@@ -226,7 +273,7 @@ export const searchDefsTool: AgentTool<typeof Params, Details> = {
 
     const lines = absRows.map(
       (r) =>
-        `${r.pack} • ${r.defType} • ${r.defName ?? '(abstract)'}${r.label ? ` — ${r.label}` : ''}\n    ${r.filePath}`,
+        `${r.pack} • ${r.defType} • ${formatDefIdentity(r)}${r.label ? ` — ${r.label}` : ''}\n    ${r.filePath}`,
     );
     return {
       content: [
@@ -245,17 +292,77 @@ export const searchDefsTool: AgentTool<typeof Params, Details> = {
 function fetchDefRow(
   db: ReturnType<typeof openIndexDb>,
   defName: string | null,
+  inheritName: string | null,
   defType: string,
   defsRoot: string,
 ): DefRow | null {
-  if (!defName) return null;
-  const row = db
-    .prepare(
-      'SELECT pack, defType, defName, inheritName, parentName, filePath, xml FROM def WHERE defName = ? AND defType = ?',
-    )
-    .get(defName, defType) as DefRow | undefined;
+  // Abstract defs have defName=null; identity lives in inheritName (the
+  // value of the XML's Name="…" attribute). Look them up that way.
+  const row = defName
+    ? db
+        .prepare(
+          'SELECT pack, defType, defName, inheritName, parentName, filePath, xml FROM def WHERE defName = ? AND defType = ?',
+        )
+        .get(defName, defType)
+    : inheritName
+      ? db
+          .prepare(
+            'SELECT pack, defType, defName, inheritName, parentName, filePath, xml FROM def WHERE inheritName = ? AND defType = ? AND defName IS NULL',
+          )
+          .get(inheritName, defType)
+      : null;
   if (!row) return null;
-  return { ...row, filePath: path.resolve(defsRoot, row.filePath) };
+  const r = row as DefRow;
+  return { ...r, filePath: path.resolve(defsRoot, r.filePath) };
+}
+
+function formatDefIdentity(r: { defName: string | null; inheritName: string | null }): string {
+  if (r.defName) return r.defName;
+  if (r.inheritName) return `${r.inheritName} (abstract)`;
+  return '(abstract)';
+}
+
+// Known content of DLC packs the user might not own. Keyed by pack name as
+// stored in the `def` table (matches RimWorld Data/<pack>/ folder names). The
+// substrings are short, distinctive defNames or terminology — case-insensitive
+// substring match against the query. If the query mentions one and the DLC
+// isn't indexed, point that out so the agent stops hunting for content that
+// can't exist in this installation.
+const DLC_HINT_TOKENS: Record<string, string[]> = {
+  Anomaly: [
+    'shambler',
+    'sightstealer',
+    'gorehulk',
+    'metalhorror',
+    'fleshbeast',
+    'devourer',
+    'noctol',
+    'chimera',
+    'monolith',
+    'voidnode',
+    'unnatural',
+    'entities',
+  ],
+  Royalty: ['psylink', 'neuroformer', 'bestowing', 'empire', 'royaltitle'],
+  Ideology: ['precept', 'memedef', 'ideodef', 'ritualoutcome'],
+  Biotech: ['xenotype', 'mechanitor', 'genepack', 'growthtier'],
+};
+
+function missingDlcHint(
+  db: ReturnType<typeof openIndexDb>,
+  query: string,
+): string | null {
+  const q = query.toLowerCase();
+  for (const [pack, tokens] of Object.entries(DLC_HINT_TOKENS)) {
+    if (!tokens.some((t) => q.includes(t))) continue;
+    const row = db
+      .prepare('SELECT 1 AS hit FROM def WHERE pack = ? LIMIT 1')
+      .get(pack) as { hit: number } | undefined;
+    if (!row) {
+      return `The ${pack} DLC isn't in this index — that content can't be found here even if it exists in vanilla.`;
+    }
+  }
+  return null;
 }
 
 function mergeWithParents(
@@ -386,6 +493,3 @@ function runReferences(
   };
 }
 
-function ftsEscape(q: string): string {
-  return `"${q.replace(/"/g, '')}"`;
-}
