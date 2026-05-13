@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import { detectRimWorldPaths } from './paths.js';
 import { isRimWorldRunning } from './game.js';
@@ -7,6 +8,13 @@ export interface PrepareDebugSessionOptions {
   paletteEntries?: string[];
   /** When true, write <quickStartDevPaletteOn>True</quickStartDevPaletteOn> so the palette is visible the moment the game loads in. Defaults to true. */
   autoOpenPalette?: boolean;
+  /**
+   * Override which Prefs.xml to edit. The isolated test-launch path passes the
+   * test savedata's Prefs.xml here so palette pins land where RimWorld will
+   * actually read them under `-savedatafolder=...`. When omitted, falls back
+   * to `detectRimWorldPaths().prefsXml` (the user's real install).
+   */
+  prefsPath?: string;
 }
 
 export interface PrepareDebugSessionResult {
@@ -47,8 +55,8 @@ export interface PrepareDebugSessionResult {
 export async function prepareDebugSession(
   opts: PrepareDebugSessionOptions = {},
 ): Promise<PrepareDebugSessionResult> {
-  const { prefsXml } = detectRimWorldPaths();
-  if (!prefsXml) {
+  const prefsXml = opts.prefsPath ?? detectRimWorldPaths().prefsXml;
+  if (!prefsXml || !fs.existsSync(prefsXml)) {
     return {
       skipped: true,
       skipReason:

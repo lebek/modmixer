@@ -205,7 +205,17 @@ async function withTimeout<T>(label: string, ms: number, fn: () => Promise<T>): 
   }
 }
 
-export async function syncModToGame(folder: string): Promise<void> {
+export interface SyncModResult {
+  /**
+   * Workspace folder names whose stale RimWorld symlinks we removed because
+   * they shared the target's packageId. Empty in the typical case; non-empty
+   * when the user has multiple workspace variants of the same mod and a
+   * prior test cycle had synced one of the siblings.
+   */
+  removedStaleSiblings: string[];
+}
+
+export async function syncModToGame(folder: string): Promise<SyncModResult> {
   const t0 = Date.now();
   console.log(`${SYNC_LOG_PREFIX} start folder=${folder}`);
   const { workspaceDir, rimworldModsDir } = getWorkspacePaths();
@@ -225,9 +235,27 @@ export async function syncModToGame(folder: string): Promise<void> {
     // non-fatal: bad XML / scanner failure / timeout shouldn't block sync.
     console.warn(`${SYNC_LOG_PREFIX} scanAssets failed (continuing):`, err);
   }
+  // Strip any stale sibling syncs that share this mod's packageId. RimWorld
+  // scans every folder under Mods/ regardless of <activeMods>; if the user
+  // has six workspace variants of the same mod (six chats exploring "zombie
+  // horde"), every prior test cycle left a junction behind and RimWorld
+  // warns about duplicate packageIds on every launch. Run before the early
+  // "already symlinked" return so the cleanup still happens when the target
+  // itself is unchanged.
+  const removedStaleSiblings = await pruneSiblingSyncs(
+    folder,
+    target,
+    workspaceDir,
+    rimworldModsDir,
+  );
+  if (removedStaleSiblings.length > 0) {
+    console.log(
+      `${SYNC_LOG_PREFIX} pruned ${removedStaleSiblings.length} stale sibling sync(s) sharing packageId: ${removedStaleSiblings.join(', ')}`,
+    );
+  }
   if (await withTimeout('isSymlinkedInto', 5_000, () => isSymlinkedInto(folder, target, rimworldModsDir))) {
     console.log(`${SYNC_LOG_PREFIX} done (already active) total=${Date.now() - t0}ms`);
-    return;
+    return { removedStaleSiblings };
   }
   if (fs.existsSync(link)) {
     throw new Error(
@@ -237,6 +265,89 @@ export async function syncModToGame(folder: string): Promise<void> {
   const type = process.platform === 'win32' ? 'junction' : 'dir';
   await withTimeout('symlink', 5_000, () => fsp.symlink(target, link, type));
   console.log(`${SYNC_LOG_PREFIX} done total=${Date.now() - t0}ms`);
+  return { removedStaleSiblings };
+}
+
+/**
+ * Enumerate RimWorld's Mods/ and remove any modmixer-owned symlinks (realpath
+ * resolves back into the workspace) whose backing folder declares the same
+ * packageId as the target. Only workspace-owned entries are touched, so the
+ * user's Steam Workshop and hand-installed mods stay put even if they happen
+ * to share an id.
+ *
+ * Returns the workspace folder names of removed siblings (not their on-disk
+ * link paths). Empty array on no-op or when the target's packageId is
+ * unreadable (we err on the side of leaving things alone).
+ */
+async function pruneSiblingSyncs(
+  targetFolder: string,
+  targetPath: string,
+  workspaceDir: string,
+  rimworldModsDir: string,
+): Promise<string[]> {
+  if (!fs.existsSync(rimworldModsDir)) return [];
+  const targetPidLc = await readPackageIdLc(targetPath);
+  if (!targetPidLc) return [];
+
+  let resolvedWorkspace: string;
+  try {
+    resolvedWorkspace = await fsp.realpath(workspaceDir);
+  } catch {
+    return [];
+  }
+
+  let entries: fs.Dirent[];
+  try {
+    entries = await fsp.readdir(rimworldModsDir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+
+  const removed: string[] = [];
+  for (const entry of entries) {
+    if (entry.name === targetFolder) continue;
+    const link = path.join(rimworldModsDir, entry.name);
+
+    // Only entries that resolve back into our workspace are modmixer-owned;
+    // anything else (Steam Workshop subscribe, hand-installed mod, the user's
+    // own symlink) we never touch.
+    let resolved: string;
+    try {
+      const lst = await fsp.lstat(link);
+      if (!lst.isSymbolicLink() && process.platform !== 'win32') continue;
+      resolved = await fsp.realpath(link);
+    } catch {
+      continue;
+    }
+    const rel = path.relative(resolvedWorkspace, resolved);
+    if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) continue;
+
+    const pidLc = await readPackageIdLc(resolved);
+    if (!pidLc || pidLc !== targetPidLc) continue;
+
+    try {
+      await fsp.rm(link, { recursive: true, force: true });
+      removed.push(entry.name);
+    } catch (err) {
+      console.warn(
+        `${SYNC_LOG_PREFIX} failed to prune stale sibling sync ${link}:`,
+        err,
+      );
+    }
+  }
+  return removed;
+}
+
+async function readPackageIdLc(modPath: string): Promise<string> {
+  try {
+    const xml = await fsp.readFile(
+      path.join(modPath, 'About', 'About.xml'),
+      'utf8',
+    );
+    return parseAbout(xml).packageId.trim().toLowerCase();
+  } catch {
+    return '';
+  }
 }
 
 export async function unsyncModFromGame(folder: string): Promise<void> {

@@ -426,6 +426,15 @@ export class AgentHost {
   private rimworldPollTimer: NodeJS.Timeout | null = null;
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private monitoringConversationId: string | null = null;
+  /**
+   * Has the running-poll seen RimWorld in `tasklist` at least once for this
+   * session? The "closed — test session ended" toast only fires after this
+   * flips true; otherwise the first poll (10 s after spawn) can race a cold
+   * Unity boot and false-positive, especially on ARM-Windows-under-Prism
+   * where the exe takes longer to register. Reset on every
+   * `startLogMonitoring`.
+   */
+  private rimworldSeenRunning = false;
 
   /**
    * Single-flight OAuth login. A new login attempt aborts any in-flight one.
@@ -1579,6 +1588,7 @@ export class AgentHost {
   startLogMonitoring(conversationId: string): void {
     this.stopLogMonitoring();
     this.monitoringConversationId = conversationId;
+    this.rimworldSeenRunning = false;
     const watcher = getLogWatcher();
     this.logUnsubscribe = watcher.subscribe((groups) => {
       void this.handleLogErrors(groups, conversationId);
@@ -1606,14 +1616,23 @@ export class AgentHost {
       this.heartbeatTimer = null;
     }
     this.monitoringConversationId = null;
+    this.rimworldSeenRunning = false;
   }
 
   private async checkRimWorldStillRunning(): Promise<void> {
     if (!this.monitoringConversationId) return;
-    if (!(await isRimWorldRunning())) {
-      sendToast('Modmixer', 'RimWorld closed — test session ended.');
-      this.stopLogMonitoring();
+    const running = await isRimWorldRunning();
+    if (running) {
+      this.rimworldSeenRunning = true;
+      return;
     }
+    // Not running. Suppress the "closed" toast until we've actually observed
+    // RimWorld up — otherwise a slow cold boot (Unity init, ARM emulation)
+    // trips the toast on the first poll and tears down log monitoring
+    // before the test session even starts.
+    if (!this.rimworldSeenRunning) return;
+    sendToast('Modmixer', 'RimWorld closed — test session ended.');
+    this.stopLogMonitoring();
   }
 
   private async handleLogErrors(

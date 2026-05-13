@@ -3,6 +3,7 @@ import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
 import { isRimWorldRunning, quitRimWorld } from '../game.js';
 import { prepareDebugSession } from '../prefs.js';
 import { shipAndLaunch, type ShipAndLaunchDetails } from '../ship.js';
+import { ensureTestSavedataPrefs } from '../test-savedata.js';
 import { getAgentHost } from '../agent-host.js';
 
 const Params = Type.Object({
@@ -140,11 +141,22 @@ export const runTestCycleTool: AgentTool<typeof Params, RunTestCycleDetails> = {
       lines.push('Quit running RimWorld instance.');
     }
 
-    // 2. Prep Prefs.xml — dev mode + palette pins. Tolerates missing
-    //    Prefs.xml (first-ever launch); the caller proceeds either way.
+    // 2. Prep Prefs.xml — dev mode + palette pins. In isolated mode (the
+    //    default) RimWorld reads Prefs from the test savedata dir, not the
+    //    user's real install, so we seed the test Prefs.xml from real on
+    //    first run and target IT for the edit. Without this, the dev palette
+    //    auto-opens (carried over from a previous seed) but is empty because
+    //    the freshly-pinned entries went to the wrong file.
+    const isolated = params.isolated !== false;
+    let prefsPath: string | undefined;
+    if (isolated) {
+      const seeded = await ensureTestSavedataPrefs();
+      prefsPath = seeded ?? undefined;
+    }
     const prefs = await prepareDebugSession({
       paletteEntries: params.paletteEntries,
       autoOpenPalette: params.autoOpenPalette,
+      prefsPath,
     });
     if (prefs.skipped) {
       lines.push(

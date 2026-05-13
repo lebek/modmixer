@@ -35,6 +35,13 @@ export interface ShipAndLaunchDetails {
   quicktest: boolean;
   isolated: boolean;
   savedataDir?: string;
+  /**
+   * Workspace folder ids whose RimWorld symlinks we pruned during sync
+   * because they shared the target's packageId. Surfaced so the agent (and
+   * the user reading the tool result) knows duplicate-id warnings should
+   * have stopped after this run.
+   */
+  removedStaleSiblings: string[];
 }
 
 export interface ShipAndLaunchResult {
@@ -69,7 +76,7 @@ export async function shipAndLaunch(
     );
   }
 
-  await syncModToGame(opts.folder);
+  const { removedStaleSiblings } = await syncModToGame(opts.folder);
 
   const registry = getRegistry();
   await registry.start();
@@ -112,6 +119,11 @@ export async function shipAndLaunch(
 
     const lines: string[] = [];
     lines.push(`Synced ${opts.folder} into RimWorld's Mods/.`);
+    if (removedStaleSiblings.length > 0) {
+      lines.push(
+        `Pruned ${removedStaleSiblings.length} stale sibling sync(s) sharing packageId ${targetPid} (workspace folders: ${removedStaleSiblings.join(', ')}) — RimWorld will stop warning about duplicates.`,
+      );
+    }
     lines.push(
       `Isolated test session: wrote ${testSet.reducedActive.length} active mods (Core+DLCs+target+deps) to ${sd.configPath}. Real ModsConfig.xml is untouched.`,
     );
@@ -140,6 +152,7 @@ export async function shipAndLaunch(
         quicktest,
         isolated: true,
         savedataDir: sd.savedataDir,
+        removedStaleSiblings,
       },
     };
   }
@@ -205,6 +218,11 @@ export async function shipAndLaunch(
 
   const lines: string[] = [];
   lines.push(`Synced ${opts.folder} into RimWorld's Mods/.`);
+  if (removedStaleSiblings.length > 0) {
+    lines.push(
+      `Pruned ${removedStaleSiblings.length} stale sibling sync(s) sharing packageId ${targetPid} (workspace folders: ${removedStaleSiblings.join(', ')}) — RimWorld will stop warning about duplicates.`,
+    );
+  }
   if (added.length === 0) {
     lines.push(`${targetPid} and its deps were already in <activeMods>.`);
   } else {
@@ -242,6 +260,7 @@ export async function shipAndLaunch(
       alreadyRunning: launch.alreadyRunning,
       quicktest,
       isolated: false,
+      removedStaleSiblings,
     },
   };
 }
