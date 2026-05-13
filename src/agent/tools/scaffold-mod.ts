@@ -69,7 +69,7 @@ export function createScaffoldModTool(
     name: 'scaffold_mod',
     label: 'Scaffold mod',
     description:
-      "Set up a RimWorld mod's About.xml, README, and standard subfolders (About/, Defs/, Patches/, Source/, Textures/). Pass withCSharp=true to also generate a buildable .csproj + Mod.cs. The mod folder itself is an opaque internal id — when the active conversation is already bound to a mod (including the placeholder from \"+ new mod\"), scaffold_mod operates on that folder. Otherwise it mints a fresh folder id; do NOT try to control the folder name via `name`. The mod is NOT yet active in the game — call sync_to_game once scaffolding is done.",
+      "Set up a RimWorld mod's About.xml, README, and standard subfolders (About/, Defs/, Patches/, Source/, Textures/). Pass withCSharp=true to also generate a buildable .csproj + Mod.cs. The mod folder itself is an opaque internal id — when the active conversation is already bound to a mod (including the placeholder from \"+ new mod\"), scaffold_mod operates on that folder. Otherwise it mints a fresh folder id; do NOT try to control the folder name via `name`. The mod is NOT yet active in the game — run_test_cycle handles sync + enable + launch when you're ready to test.",
     parameters: Params,
   async execute(_id, params): Promise<AgentToolResult<ScaffoldModDetails>> {
     const { workspaceDir } = getWorkspacePaths();
@@ -154,9 +154,9 @@ export function createScaffoldModTool(
 
     const relFiles = written.map((f) => path.relative(modPath, f));
     const noteAboutInstall =
-      '\n\nThe mod is in the workspace but not yet active in RimWorld. Call sync_to_game with folder="' +
+      '\n\nThe mod is in the workspace but not yet active in RimWorld. run_test_cycle (folder="' +
       folderName +
-      '" to make it loadable.';
+      '") will sync, enable, and launch it when you\'re ready to test.';
     const noteAboutManaged =
       params.withCSharp && !managedDir
         ? '\n\nNOTE: RimWorld install was not detected, so the .csproj has empty HintPaths. The build will fail until RimWorld is installed via Steam or you fix the HintPath manually.'

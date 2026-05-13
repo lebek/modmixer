@@ -47,7 +47,7 @@ export async function isRimWorldRunning(): Promise<boolean> {
   } catch {
     // pgrep exits non-zero when no match; tasklist may time out via
     // execWithTimeout. Either way: assume not running. A false negative
-    // here is recoverable (launch_rimworld no-ops when the game is up);
+    // here is recoverable (launchRimWorld no-ops when the game is up);
     // a hang is not.
   }
   return false;
@@ -57,8 +57,8 @@ export async function isRimWorldRunning(): Promise<boolean> {
  * Wait until `isRimWorldRunning()` reports false, polling every 250ms up to
  * `timeoutMs`. The kill signal returns immediately on every platform we
  * support, but the OS still needs a moment to reap the process — without
- * this wait, callers race `enable_mod_in_game` (which refuses to run while
- * RimWorld is up) and `launch_rimworld` (which becomes a no-op if the prior
+ * this wait, callers race ModsConfig mutations (which refuse to run while
+ * RimWorld is up) and `launchRimWorld` (which becomes a no-op if the prior
  * process is still alive). Returns true when the process is gone, false on
  * timeout.
  */

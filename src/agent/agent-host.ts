@@ -36,7 +36,6 @@ import { createScaffoldModTool } from './tools/scaffold-mod.js';
 import { setModMetadataTool } from './tools/set-mod-metadata.js';
 import { updateSchematicTool } from './tools/update-schematic.js';
 import { buildModTool } from './tools/build-mod.js';
-import { launchRimWorldTool } from './tools/launch-rimworld.js';
 import { tailPlayerLogTool } from './tools/tail-player-log.js';
 import { listInstalledModsTool } from './tools/list-installed-mods.js';
 import { decompileDllTool } from './tools/decompile-dll.js';
@@ -56,28 +55,9 @@ import {
   createGuardedReadTool,
   createGuardedWriteTool,
 } from './tools/path-guarded.js';
-import { syncToGameTool, unsyncFromGameTool } from './tools/sync-to-game.js';
-import { shipAndLaunchTool } from './tools/ship-and-launch.js';
 import { withConfirmation } from './security/with-confirmation.js';
-import { setActiveModsTool } from './tools/set-active-mods.js';
-import { autosortModsTool } from './tools/autosort-mods.js';
-import { startFixSessionTool } from './tools/start-fix-session.js';
-import { startTestSessionTool } from './tools/start-test-session.js';
-import {
-  applySessionTool,
-  revertSessionTool,
-} from './tools/apply-revert-session.js';
-import { getSessionManager } from './registry/index.js';
 import { SafeStorageAuthBackend } from './security/secure-auth-storage.js';
-import {
-  enableModInGameTool,
-  disableModInGameTool,
-} from './tools/enable-mod-in-game.js';
-import { quitRimWorldTool } from './tools/quit-rimworld.js';
-import { prepareDebugSessionTool } from './tools/prepare-debug-session.js';
-import { isRimWorldRunningTool } from './tools/is-rimworld-running.js';
 import { runTestCycleTool } from './tools/run-test-cycle.js';
-import { watchPlayerLogTool } from './tools/watch-player-log.js';
 import { notifyTestStatusTool } from './tools/notify-test-status.js';
 import { sendToast } from './notifications.js';
 import { loadSettings, saveSettings } from './settings.js';
@@ -144,62 +124,14 @@ function buildCustomTools(
     createScaffoldModTool(getActiveScope),
     setModMetadataTool,
     updateSchematicTool,
-    syncToGameTool,
-    unsyncFromGameTool,
-    enableModInGameTool,
-    disableModInGameTool,
-    prepareDebugSessionTool,
     buildModTool,
-    launchRimWorldTool,
-    shipAndLaunchTool,
-    // quit_rimworld may drop unsaved game progress.
-    withConfirmation(quitRimWorldTool, {
-      label: 'Force-quit RimWorld',
-      summary: 'Send a quit signal to RimWorld. Unsaved game progress will be lost.',
-    }),
-    isRimWorldRunningTool,
     runTestCycleTool,
-    watchPlayerLogTool,
     notifyTestStatusTool,
     tailPlayerLogTool,
     listInstalledModsTool,
     decompileDllTool,
     renderSvgToPngTool,
     renderPreviewTool,
-    // Mod-list manipulation: gated, but auto-approved inside an active fix
-    // session so the agent can iterate freely.
-    withConfirmation(
-      setActiveModsTool,
-      {
-        label: 'Replace active mod list',
-        summary:
-          "Bulk-replace ModsConfig.xml's active mod list. RimWorld must be closed. The previous list is backed up automatically.",
-      },
-      {
-        shouldAutoApprove: () => getSessionManager().getActive() !== null,
-        summarize: (p: { packageIds: string[] }) =>
-          `Set ${p.packageIds.length} active mod(s).`,
-      },
-    ),
-    withConfirmation(
-      autosortModsTool,
-      {
-        label: 'Autosort mod list',
-        summary:
-          "Reorder ModsConfig.xml's active mods according to About.xml deps and the community rules DB.",
-      },
-      {
-        shouldAutoApprove: () => getSessionManager().getActive() !== null,
-        summarize: (p: { apply?: boolean }) =>
-          p.apply
-            ? 'Apply autosort to ModsConfig.xml.'
-            : 'Preview autosort proposal (no write).',
-      },
-    ),
-    startTestSessionTool,
-    startFixSessionTool,
-    applySessionTool,
-    revertSessionTool,
     // RimWorld source/def index — read-only lookups against $MM/index/*.
     searchDefsTool,
     readCsharpSymbolTool,
@@ -225,23 +157,6 @@ function buildCustomTools(
 }
 
 const BUILTIN_TOOL_NAMES = ['read', 'bash', 'edit', 'write', 'grep', 'find', 'ls'];
-
-/**
- * Tools that stay registered (so run_test_cycle can drive them internally
- * via .execute()) but are hidden from the agent's visible tool set. The
- * macro `run_test_cycle` covers every parameter and call site for these
- * during the normal test flow; exposing them too just adds tool-pollution
- * for the model to wade through. Bring entries back into the visible set
- * if/when the modlist-fix feature is wired up — that flow needs
- * watch_player_log, quit_rimworld, and is_rimworld_running standalone.
- */
-const HIDDEN_FROM_AGENT = new Set<string>([
-  'is_rimworld_running',
-  'quit_rimworld',
-  'prepare_debug_session',
-  'ship_and_launch',
-  'watch_player_log',
-]);
 
 /** Friendly provider labels surfaced in the UI. Falls back to the raw id. */
 const PROVIDER_LABELS: Record<string, string> = {
@@ -548,16 +463,13 @@ export class AgentHost {
     );
     this.settingsManager = SettingsManager.create(this.cwd, this.agentDir);
     const customAgentTools = buildCustomTools(this.cwd, () => this.active?.scope ?? null);
-    const visibleAgentTools = customAgentTools.filter(
-      (t) => !HIDDEN_FROM_AGENT.has(t.name),
-    );
     this.allowedToolNames = [
       ...BUILTIN_TOOL_NAMES,
-      ...visibleAgentTools
+      ...customAgentTools
         .map((t) => t.name)
         .filter((n) => !BUILTIN_TOOL_NAMES.includes(n)),
     ];
-    this.customTools = visibleAgentTools.map((tool) =>
+    this.customTools = customAgentTools.map((tool) =>
       toolDefinitionFromAgentTool(tool),
     );
   }
@@ -1712,8 +1624,8 @@ export class AgentHost {
     if (this.monitoringConversationId !== conversationId) return;
     // Don't stop monitoring — the watcher batches across the deadline window
     // and re-arms automatically. If a second cascade fires later in the same
-    // test session, we want to catch it without the agent re-calling
-    // watch_player_log.
+    // test session, we want to catch it without the agent having to do
+    // anything (run_test_cycle armed it once and the watcher self-rearms).
     if (this.active?.conversationId !== conversationId) return;
 
     const total = groups.reduce((acc, g) => acc + g.count, 0);

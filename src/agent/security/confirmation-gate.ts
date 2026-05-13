@@ -17,7 +17,7 @@ export type ConfirmTransportGetter = () => ConfirmTransport | null;
  */
 export interface ConfirmationRequest {
   id: string;
-  /** Tool name as known by the LLM (e.g. `bash`, `enable_mod_in_game`). */
+  /** Tool name as known by the LLM (e.g. `bash`). */
   tool: string;
   /** Short imperative phrase shown in the modal title. */
   label: string;

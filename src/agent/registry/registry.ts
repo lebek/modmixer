@@ -110,7 +110,7 @@ class ModRegistry {
 
   /**
    * Add a single packageId to the end of the active list if not already
-   * present. Idempotent. Convenience wrapper used by enable_mod_in_game.
+   * present. Idempotent. Convenience wrapper used by enableModInGame.
    */
   async addActiveMod(packageId: string): Promise<{ alreadyEnabled: boolean }> {
     const normalized = packageId.toLowerCase();

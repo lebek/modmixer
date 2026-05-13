@@ -25,7 +25,7 @@ export interface PathPolicyRoots {
   dataDir: string | null;
   /** Steam Workshop subscriptions root for RimWorld (294100). */
   workshopDir: string | null;
-  /** RimWorld user-data Mods/ dir (where sync_to_game drops symlinks). */
+  /** RimWorld user-data Mods/ dir (where syncModToGame drops symlinks). */
   rimworldModsDir: string | null;
   /** Player.log directory — for tail/watch tools that pass an absolute path. */
   playerLogDir: string | null;

@@ -2,7 +2,7 @@ import { Type } from 'typebox';
 import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
 import { isRimWorldRunning, quitRimWorld } from '../game.js';
 import { prepareDebugSession } from '../prefs.js';
-import { shipAndLaunchTool, type ShipAndLaunchDetails } from './ship-and-launch.js';
+import { shipAndLaunch, type ShipAndLaunchDetails } from '../ship.js';
 import { getAgentHost } from '../agent-host.js';
 
 const Params = Type.Object({
@@ -44,30 +44,25 @@ const Params = Type.Object({
 interface RunTestCycleDetails {
   /** True when the macro had to bail because RimWorld was running and quitIfRunning was not set. */
   needsQuitConfirmation: boolean;
-  /** Whether quit_rimworld was called and whether it succeeded. */
+  /** Whether the running RimWorld was force-quit and whether it actually exited. */
   quit: { wasRunning: boolean; killed: boolean; exited: boolean } | null;
-  /** prepare_debug_session result; null when Prefs.xml doesn't exist yet. */
+  /** Prefs.xml mutation result; null when Prefs.xml doesn't exist yet. */
   prefs: {
     skipped: boolean;
     skipReason: string | null;
     pinnedNew: string[];
     pinnedAlready: string[];
   } | null;
-  /** ship_and_launch result; null when we bailed before launching. */
+  /** Sync + launch result; null when we bailed before launching. */
   launch: ShipAndLaunchDetails | null;
   /** True when background log monitoring was armed. */
   watching: boolean;
 }
 
 /**
- * Single-call macro for the test-in-game flow. Replaces the 5-step sequence
- * (is_rimworld_running → quit_rimworld? → prepare_debug_session →
- * ship_and_launch → watch_player_log) the agent used to run by hand on every
- * test cycle.
- *
- * Saves four round-trips per test launch (each one paying full input-token
- * cost on the growing context) and removes the corresponding 7-step runbook
- * from the system prompt — see system-prompt.ts.
+ * Single-call macro for the test-in-game flow. Bundles the entire
+ * is-running → quit? → prepare-prefs → ship → launch → watch chain so the
+ * agent doesn't have to orchestrate it turn-by-turn.
  *
  * Quit guarding: if RimWorld is running, the macro bails with
  * needsQuitConfirmation=true UNLESS the caller passed quitIfRunning=true.
@@ -79,7 +74,7 @@ export const runTestCycleTool: AgentTool<typeof Params, RunTestCycleDetails> = {
   name: 'run_test_cycle',
   label: 'Run test cycle (build + launch + watch)',
   description:
-    "Macro: handle the entire test-in-game flow in one call. Runs is_rimworld_running, prepare_debug_session (dev mode + palette pins), ship_and_launch (sync to game + isolated savedata + -quicktest), and arms watch_player_log for background error monitoring. If RimWorld is running and quitIfRunning is unset, bails with needsQuitConfirmation=true so you can ask the user before killing their game; re-call with quitIfRunning=true once they confirm. After this returns, tell the user EXACTLY what to do in-game (they're about to alt-tab) — errors will arrive automatically as '[automated …]' messages via the standard error-triage protocol.",
+    "Macro: the only way to test a mod in-game. Handles the entire flow in one call — checks if RimWorld is running, flips dev-mode + pins palette entries in Prefs.xml, syncs the mod into RimWorld's Mods/, writes an isolated active-mod list (Core + DLCs + target + transitive deps) to a separate savedata folder so the user's real mod list is untouched, launches RimWorld with `-quicktest`, and arms background log monitoring. If RimWorld is running and quitIfRunning is unset, bails with needsQuitConfirmation=true so you can ask the user before killing their game; re-call with quitIfRunning=true once they confirm. After this returns, tell the user EXACTLY what to do in-game (they're about to alt-tab) — errors will arrive automatically as '[automated …]' messages via the standard error-triage protocol.",
   parameters: Params,
   async execute(_id, params): Promise<AgentToolResult<RunTestCycleDetails>> {
     const lines: string[] = [];
@@ -145,7 +140,7 @@ export const runTestCycleTool: AgentTool<typeof Params, RunTestCycleDetails> = {
       lines.push('Quit running RimWorld instance.');
     }
 
-    // 2. prepare_debug_session — dev mode + palette pins. Tolerates missing
+    // 2. Prep Prefs.xml — dev mode + palette pins. Tolerates missing
     //    Prefs.xml (first-ever launch); the caller proceeds either way.
     const prefs = await prepareDebugSession({
       paletteEntries: params.paletteEntries,
@@ -174,29 +169,17 @@ export const runTestCycleTool: AgentTool<typeof Params, RunTestCycleDetails> = {
       lines.push(parts.join(' '));
     }
 
-    // 3. ship_and_launch — delegate to the underlying tool so we inherit
-    //    every behavior (isolated savedata, autosort, dep walk, missing-dep
-    //    surfacing) without copying the body. The tool throws on
-    //    is-running races; we let that propagate.
-    const launchResult = await shipAndLaunchTool.execute(
-      _id,
-      {
-        folder: params.folder,
-        quicktest: params.quicktest,
-        isolated: params.isolated,
-      },
-      undefined as unknown as AbortSignal,
-      undefined,
-    );
-    const launchText = launchResult.content
-      .map((c) => (c.type === 'text' ? c.text : ''))
-      .filter(Boolean)
-      .join(' ');
-    if (launchText) lines.push(launchText);
+    // 3. Sync + launch — isolated savedata, autosort, dep walk, missing-dep
+    //    surfacing. Throws on is-running races; we let that propagate.
+    const launchResult = await shipAndLaunch({
+      folder: params.folder,
+      quicktest: params.quicktest,
+      isolated: params.isolated,
+    });
+    if (launchResult.text) lines.push(launchResult.text);
 
-    // 4. watch_player_log — arm the background log watcher tied to the
-    //    current conversation. Returns immediately; errors flow back as
-    //    auto-prompted user messages.
+    // 4. Arm the background log watcher tied to the current conversation.
+    //    Returns immediately; errors flow back as auto-prompted user messages.
     const host = getAgentHost();
     const conversationId = host.getCurrentId();
     let watching = false;
@@ -223,7 +206,7 @@ export const runTestCycleTool: AgentTool<typeof Params, RunTestCycleDetails> = {
           pinnedNew: prefs.skipped ? [] : prefs.pinnedNew,
           pinnedAlready: prefs.skipped ? [] : prefs.pinnedAlready,
         },
-        launch: launchResult.details ?? null,
+        launch: launchResult.details,
         watching,
       },
     };

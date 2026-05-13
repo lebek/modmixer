@@ -60,9 +60,9 @@ export function registerRegistryRoutes(ctx: RouteContext): void {
   });
 
   // Add a mod to <activeMods> together with its installed transitive deps,
-  // then autosort. Mirrors what `ship_and_launch` does so the UI's "enable"
-  // and "+deps" actions can't drift from the agent's flow. Returns the new
-  // envelope plus a summary of what changed for banner display.
+  // then autosort. Mirrors what `shipAndLaunch` does so the UI's "enable"
+  // and "+deps" actions can't drift from the test-cycle flow. Returns the
+  // new envelope plus a summary of what changed for banner display.
   ipc.handle(
     'modmixer:registry:enable-with-deps',
     async (_evt, packageId: string) => {
