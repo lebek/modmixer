@@ -27,16 +27,20 @@ import type {
   ThinkingLevel,
 } from '@mariozechner/pi-agent-core';
 import {
+  ErrorBuffer,
   formatErrorSummary,
-  getLogWatcher,
-  type LogErrorGroup,
-} from './log-watcher.js';
-import { isRimWorldRunning } from './game.js';
+  type ErrorBufferGroup,
+} from './monitor/error-buffer.js';
+import { getMonitorServer } from './monitor/server.js';
+import type { MonitorConnectionState } from './monitor/protocol.js';
+import { getWorkspaceMod } from './workspace.js';
+import { BRIDGE_PACKAGE_ID, removeBridgeInstall } from './bridge-install.js';
+import { getRegistry } from './registry/index.js';
 import { createScaffoldModTool } from './tools/scaffold-mod.js';
 import { setModMetadataTool } from './tools/set-mod-metadata.js';
 import { updateSchematicTool } from './tools/update-schematic.js';
 import { buildModTool } from './tools/build-mod.js';
-import { tailPlayerLogTool } from './tools/tail-player-log.js';
+import { monitorGetErrorTool } from './tools/monitor-get-error.js';
 import { listInstalledModsTool } from './tools/list-installed-mods.js';
 import { decompileDllTool } from './tools/decompile-dll.js';
 import { renderSvgToPngTool } from './tools/render-svg-to-png.js';
@@ -100,7 +104,6 @@ import type { ModelOption } from './models.js';
 import type { LocalProvider, ModelSelection } from './settings.js';
 import { randomUUID } from 'node:crypto';
 
-const RIMWORLD_POLL_INTERVAL_MS = 10_000;
 const HEARTBEAT_INTERVAL_MS = 60_000;
 
 // Stable substring used to detect a previously-injected recovery prompt when
@@ -127,7 +130,7 @@ function buildCustomTools(
     buildModTool,
     runTestCycleTool,
     notifyTestStatusTool,
-    tailPlayerLogTool,
+    monitorGetErrorTool,
     listInstalledModsTool,
     decompileDllTool,
     renderSvgToPngTool,
@@ -420,21 +423,38 @@ export class AgentHost {
    */
   private pendingScopeReload: ConversationScope | null = null;
 
-  // Background log monitoring (test-in-game flow). Tied to a specific
-  // conversation, dropped when the user switches away.
-  private logUnsubscribe: (() => void) | null = null;
-  private rimworldPollTimer: NodeJS.Timeout | null = null;
+  // Background bridge monitoring (test-in-game flow). Tied to a specific
+  // conversation, dropped when the user switches away. The bridge mod
+  // ships diagnostics over a localhost TCP socket; MonitorServer.on('state')
+  // tells us when the in-game side connects and disconnects, replacing the
+  // tasklist polling we used to do for Player.log-based watching.
+  private errorBuffer: ErrorBuffer | null = null;
+  private errorBufferDetach: (() => void) | null = null;
+  private monitorStateHandler: ((s: MonitorConnectionState) => void) | null =
+    null;
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private monitoringConversationId: string | null = null;
   /**
-   * Has the running-poll seen RimWorld in `tasklist` at least once for this
-   * session? The "closed — test session ended" toast only fires after this
-   * flips true; otherwise the first poll (10 s after spawn) can race a cold
-   * Unity boot and false-positive, especially on ARM-Windows-under-Prism
-   * where the exe takes longer to register. Reset on every
-   * `startLogMonitoring`.
+   * Whether the currently-monitored test session ran in isolated mode
+   * (separate test-savedata ModsConfig.xml) vs against the user's real
+   * <activeMods>. Drives teardown: non-isolated sessions strip
+   * `modmixer.bridge` from <activeMods> on disconnect, isolated ones don't
+   * touch the real config.
    */
-  private rimworldSeenRunning = false;
+  private monitoringIsolated = false;
+  /**
+   * Did we see a bridge_hello during this monitoring session? The
+   * "test session ended" toast only fires after this flips true; otherwise
+   * the user switching to a non-running game would immediately blow away
+   * the freshly-armed monitoring. Reset on every startMonitoring.
+   */
+  private bridgeSeenConnected = false;
+  /**
+   * Has the buffer surfaced at least one error/warning batch since
+   * monitoring started? Gates the periodic "so far so good" heartbeat
+   * toast — once errors arrive, the reassurance is misleading.
+   */
+  private bridgeErrorsSeen = false;
 
   /**
    * Single-flight OAuth login. A new login attempt aborts any in-flight one.
@@ -900,13 +920,13 @@ export class AgentHost {
       throw new Error(`Conversation not found: ${conversationId}`);
     }
 
-    // Switching cancels any background log monitoring tied to the prior
+    // Switching cancels any background bridge monitoring tied to the prior
     // chat — errors won't auto-prompt into a different scope.
     if (
       this.monitoringConversationId &&
       this.monitoringConversationId !== conversationId
     ) {
-      this.stopLogMonitoring();
+      this.stopMonitoring();
     }
 
     if (
@@ -1582,76 +1602,154 @@ export class AgentHost {
   }
 
   // =========================================================================
-  // Background log monitoring (drives the test-in-game flow)
+  // Background bridge monitoring (drives the test-in-game flow)
   // =========================================================================
 
-  startLogMonitoring(conversationId: string): void {
-    this.stopLogMonitoring();
-    this.monitoringConversationId = conversationId;
-    this.rimworldSeenRunning = false;
-    const watcher = getLogWatcher();
-    this.logUnsubscribe = watcher.subscribe((groups) => {
-      void this.handleLogErrors(groups, conversationId);
-    });
-    this.rimworldPollTimer = setInterval(() => {
-      void this.checkRimWorldStillRunning();
-    }, RIMWORLD_POLL_INTERVAL_MS);
-    sendToast('Modmixer', 'Watching Player.log — go test the mod.');
+  /**
+   * Arm the bridge monitor for the test session. Resolves the mod-under-test
+   * context (display name + packageId) so warning-attribution filtering can
+   * give the agent's mod a free pass and the user's mod isn't lumped in
+   * with vanilla-attributed warnings via the count-only threshold.
+   *
+   * `isolated` is stashed only to drive teardown: in non-isolated mode we
+   * also strip modmixer.bridge from the user's real <activeMods> after the
+   * session ends, so RimWorld doesn't warn about a missing mod next launch.
+   */
+  async startMonitoring(opts: {
+    conversationId: string;
+    modFolder: string;
+    isolated: boolean;
+  }): Promise<void> {
+    this.stopMonitoring();
+    this.monitoringConversationId = opts.conversationId;
+    this.monitoringIsolated = opts.isolated;
+    this.bridgeSeenConnected = false;
+    this.bridgeErrorsSeen = false;
+
+    let modUnderTest: { name: string; packageId: string } | undefined;
+    try {
+      const mod = await getWorkspaceMod(opts.modFolder);
+      if (mod) {
+        modUnderTest = {
+          name: mod.about.name,
+          packageId: mod.about.packageId,
+        };
+      }
+    } catch (err) {
+      console.error('startMonitoring: failed to resolve mod context:', err);
+    }
+
+    const monitor = getMonitorServer();
+    this.errorBuffer = new ErrorBuffer();
+    this.errorBufferDetach = this.errorBuffer.attach(monitor, { modUnderTest });
+    const conversationId = opts.conversationId;
+    this.errorBuffer.subscribe((groups) =>
+      void this.handleBridgeErrors(groups, conversationId),
+    );
+
+    this.monitorStateHandler = (state) => this.onMonitorState(state);
+    monitor.on('state', this.monitorStateHandler);
+
+    // The bridge may already be connected (rare race: a previous test
+    // session's RimWorld is still up). If so, treat that as "seen" too,
+    // so disconnect fires the session-ended toast.
+    if (monitor.getState().kind === 'connected') {
+      this.bridgeSeenConnected = true;
+    }
+
+    sendToast('Modmixer', 'Watching for diagnostics — go test the mod.');
     this.heartbeatTimer = setInterval(() => {
+      // Skip the reassurance once errors have actually landed — saying
+      // "no errors yet" 60s after the user got an error toast is jarring
+      // and undermines the previous toast. The chat already shows what was
+      // caught, and the next batch (if any) lands as a fresh toast.
+      if (this.bridgeErrorsSeen) return;
       sendToast('Modmixer', 'So far so good — no errors yet.', {
         silent: true,
       });
     }, HEARTBEAT_INTERVAL_MS);
   }
 
-  stopLogMonitoring(): void {
-    this.logUnsubscribe?.();
-    this.logUnsubscribe = null;
-    if (this.rimworldPollTimer) {
-      clearInterval(this.rimworldPollTimer);
-      this.rimworldPollTimer = null;
+  stopMonitoring(): void {
+    this.errorBufferDetach?.();
+    this.errorBufferDetach = null;
+    this.errorBuffer = null;
+    if (this.monitorStateHandler) {
+      getMonitorServer().off('state', this.monitorStateHandler);
+      this.monitorStateHandler = null;
     }
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;
     }
     this.monitoringConversationId = null;
-    this.rimworldSeenRunning = false;
+    this.monitoringIsolated = false;
+    this.bridgeSeenConnected = false;
+    this.bridgeErrorsSeen = false;
   }
 
-  private async checkRimWorldStillRunning(): Promise<void> {
-    if (!this.monitoringConversationId) return;
-    const running = await isRimWorldRunning();
-    if (running) {
-      this.rimworldSeenRunning = true;
+  private onMonitorState(state: MonitorConnectionState): void {
+    if (state.kind === 'connected') {
+      this.bridgeSeenConnected = true;
       return;
     }
-    // Not running. Suppress the "closed" toast until we've actually observed
-    // RimWorld up — otherwise a slow cold boot (Unity init, ARM emulation)
-    // trips the toast on the first poll and tears down log monitoring
-    // before the test session even starts.
-    if (!this.rimworldSeenRunning) return;
+    // Disconnected (or back to listening). If we never saw the bridge come
+    // up, this is just the initial state — don't fire teardown. Otherwise
+    // the in-game side dropped us, which means the game is quitting (or
+    // crashed). Tear down + clean up the bridge install.
+    if (!this.bridgeSeenConnected) return;
     sendToast('Modmixer', 'RimWorld closed — test session ended.');
-    this.stopLogMonitoring();
+    const wasNonIsolated = !this.monitoringIsolated;
+    this.stopMonitoring();
+    void this.teardownBridgeInstall(wasNonIsolated);
   }
 
-  private async handleLogErrors(
-    groups: LogErrorGroup[],
+  /**
+   * Remove the bridge junction (always) and, when the test session ran
+   * against the user's real ModsConfig, strip `modmixer.bridge` from
+   * <activeMods> so a subsequent manual Steam launch doesn't trip RimWorld's
+   * "missing mod" warning. Failures are logged; we don't surface them to
+   * the user because there's nothing actionable on this side of the flow.
+   */
+  private async teardownBridgeInstall(stripFromActiveMods: boolean): Promise<void> {
+    try {
+      await removeBridgeInstall();
+    } catch (err) {
+      console.error('Failed to remove bridge install:', err);
+    }
+    if (!stripFromActiveMods) return;
+    try {
+      const registry = getRegistry();
+      const snap = registry.getSnapshot();
+      if (!snap.activeOrder.includes(BRIDGE_PACKAGE_ID)) return;
+      const next = snap.activeOrder.filter((p) => p !== BRIDGE_PACKAGE_ID);
+      await registry.setActiveMods(next);
+    } catch (err) {
+      console.error('Failed to strip bridge from active mods:', err);
+    }
+  }
+
+  private async handleBridgeErrors(
+    groups: ErrorBufferGroup[],
     conversationId: string,
   ): Promise<void> {
     if (groups.length === 0) return;
     if (this.monitoringConversationId !== conversationId) return;
-    // Don't stop monitoring — the watcher batches across the deadline window
-    // and re-arms automatically. If a second cascade fires later in the same
-    // test session, we want to catch it without the agent having to do
-    // anything (run_test_cycle armed it once and the watcher self-rearms).
+    // Don't stop monitoring — the buffer batches across the deadline window
+    // and re-arms automatically. Later cascades in the same test session
+    // land as fresh auto-prompts without the agent having to re-arm.
     if (this.active?.conversationId !== conversationId) return;
 
+    // Suppress the "so far so good" heartbeat now that we've actually seen
+    // diagnostics. Set this BEFORE the toast/prompt so a 60s timer firing
+    // mid-await doesn't beat us to it.
+    this.bridgeErrorsSeen = true;
+
     const total = groups.reduce((acc, g) => acc + g.count, 0);
-    const errorWord = total === 1 ? 'error' : 'errors';
+    const eventWord = total === 1 ? 'event' : 'events';
     sendToast(
       'Modmixer',
-      `Caught ${total} ${errorWord} (${groups.length} unique) — investigating…`,
+      `Caught ${total} ${eventWord} (${groups.length} unique) — investigating…`,
     );
 
     try {
@@ -1664,12 +1762,12 @@ export class AgentHost {
         streamingBehavior: 'steer',
       });
     } catch (err) {
-      console.error('Failed to prompt session with log errors:', err);
+      console.error('Failed to prompt session with bridge errors:', err);
     }
   }
 
   async shutdown(): Promise<void> {
-    this.stopLogMonitoring();
+    this.stopMonitoring();
     await this.disposeActive();
   }
 }

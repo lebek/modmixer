@@ -27,7 +27,8 @@ export interface PathPolicyRoots {
   workshopDir: string | null;
   /** RimWorld user-data Mods/ dir (where syncModToGame drops symlinks). */
   rimworldModsDir: string | null;
-  /** Player.log directory — for tail/watch tools that pass an absolute path. */
+  /** Player.log directory — kept allowable so the agent can `read` / `grep`
+   * Player.log for forensic spelunking when bridge data isn't enough. */
   playerLogDir: string | null;
   /**
    * RimWorld source/def index root ($MM/index/). Read-only for the agent —

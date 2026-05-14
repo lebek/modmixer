@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <ModMetaData>
-  <name>ModMixer Bridge</name>
+  <name>Modmixer Bridge</name>
   <packageId>modmixer.bridge</packageId>
-  <author>ModMixer</author>
-  <description>Live diagnostic bridge to ModMixer. Streams perf, mod inventory, Harmony patch graph, and errors to the ModMixer Monitor tab over a localhost TCP connection. Does not modify gameplay.</description>
+  <author>Modmixer</author>
+  <description>Live diagnostic bridge to Modmixer. Streams perf, mod inventory, Harmony patch graph, and errors to the Modmixer Monitor tab over a localhost TCP connection. Does not modify gameplay.</description>
   <supportedVersions>
     <li>1.5</li>
     <li>1.6</li>

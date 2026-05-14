@@ -56,7 +56,7 @@ interface RunTestCycleDetails {
   } | null;
   /** Sync + launch result; null when we bailed before launching. */
   launch: ShipAndLaunchDetails | null;
-  /** True when background log monitoring was armed. */
+  /** True when background bridge monitoring was armed. */
   watching: boolean;
 }
 
@@ -75,7 +75,7 @@ export const runTestCycleTool: AgentTool<typeof Params, RunTestCycleDetails> = {
   name: 'run_test_cycle',
   label: 'Run test cycle (build + launch + watch)',
   description:
-    "Macro: the only way to test a mod in-game. Handles the entire flow in one call — checks if RimWorld is running, flips dev-mode + pins palette entries in Prefs.xml, syncs the mod into RimWorld's Mods/, writes an isolated active-mod list (Core + DLCs + target + transitive deps) to a separate savedata folder so the user's real mod list is untouched, launches RimWorld with `-quicktest`, and arms background log monitoring. If RimWorld is running and quitIfRunning is unset, bails with needsQuitConfirmation=true so you can ask the user before killing their game; re-call with quitIfRunning=true once they confirm. After this returns, tell the user EXACTLY what to do in-game (they're about to alt-tab) — errors will arrive automatically as '[automated …]' messages via the standard error-triage protocol.",
+    "Macro: the only way to test a mod in-game. Handles the entire flow in one call — checks if RimWorld is running, flips dev-mode + pins palette entries in Prefs.xml, syncs the mod into RimWorld's Mods/, installs the Modmixer Bridge mod (Harmony-patched diagnostics over localhost TCP), writes an active-mod list (Core + DLCs + target + transitive deps + bridge) to a separate savedata folder by default so the user's real mod list is untouched, launches RimWorld with `-quicktest`, and arms background bridge monitoring. If RimWorld is running and quitIfRunning is unset, bails with needsQuitConfirmation=true so you can ask the user before killing their game; re-call with quitIfRunning=true once they confirm. After this returns, tell the user EXACTLY what to do in-game (they're about to alt-tab) — errors will arrive automatically as '[automated …]' messages via the standard error-triage protocol.",
   parameters: Params,
   async execute(_id, params): Promise<AgentToolResult<RunTestCycleDetails>> {
     const lines: string[] = [];
@@ -170,6 +170,9 @@ export const runTestCycleTool: AgentTool<typeof Params, RunTestCycleDetails> = {
           ? 'Debug palette already auto-opens.'
           : 'Debug palette will auto-open.',
       );
+      if (!prefs.runInBackgroundWasOn) {
+        parts.push('Enabled run-in-background so the game keeps ticking when you alt-tab.');
+      }
       if (prefs.pinnedNew.length > 0) {
         parts.push(
           `Pinned ${prefs.pinnedNew.length} palette ${prefs.pinnedNew.length === 1 ? 'entry' : 'entries'}: ${prefs.pinnedNew.join(', ')}.`,
@@ -190,20 +193,25 @@ export const runTestCycleTool: AgentTool<typeof Params, RunTestCycleDetails> = {
     });
     if (launchResult.text) lines.push(launchResult.text);
 
-    // 4. Arm the background log watcher tied to the current conversation.
-    //    Returns immediately; errors flow back as auto-prompted user messages.
+    // 4. Arm the background bridge monitor tied to the current conversation.
+    //    Returns immediately; errors flow back as auto-prompted user messages
+    //    over the localhost TCP bridge that run_test_cycle just installed.
     const host = getAgentHost();
     const conversationId = host.getCurrentId();
     let watching = false;
     if (conversationId) {
-      host.startLogMonitoring(conversationId);
+      await host.startMonitoring({
+        conversationId,
+        modFolder: params.folder,
+        isolated: launchResult.details.isolated,
+      });
       watching = true;
       lines.push(
-        'Watching Player.log in the background; errors will arrive as auto-prompts.',
+        'Watching the in-game bridge in the background; errors will arrive as auto-prompts.',
       );
     } else {
       lines.push(
-        'Could not arm log monitoring — no active conversation context.',
+        'Could not arm bridge monitoring — no active conversation context.',
       );
     }
 

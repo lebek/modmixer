@@ -5,7 +5,6 @@ import { spawn, exec } from 'node:child_process';
 import { platform } from 'node:os';
 import { detectRimWorldPaths } from './paths.js';
 import { getWorkspacePaths } from './workspace.js';
-import { getLogWatcher } from './log-watcher.js';
 import { getRegistry } from './registry/index.js';
 
 /**
@@ -213,9 +212,6 @@ export async function launchRimWorld(
   if (await isRimWorldRunning()) {
     return { executable, args, alreadyRunning: true };
   }
-  // Reset the log watcher's read position so monitor_player_log only surfaces
-  // errors from THIS session, not residue from a prior run.
-  getLogWatcher().resetForNewSession();
   // Launch from the install dir so the engine resolves steam_api64.dll and
   // its data folders relative to the exe — same cwd Steam would use.
   const cwd = path.dirname(executable);

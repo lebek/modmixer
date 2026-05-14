@@ -25,7 +25,6 @@ import {
   track,
 } from './agent/telemetry.js';
 import { onModChanged } from './agent/mod-events.js';
-import { getLogWatcher } from './agent/log-watcher.js';
 import {
   analyzeSnapshot,
   getRegistry,
@@ -119,7 +118,7 @@ if (process.argv.includes('--reset-onboarding')) {
 
 // Seed the install-path override from settings so detectRimWorldPaths()
 // honors it from the very first call (registry start, ensureIndexAtStartup,
-// log watcher, …). main.ts updates this again when the user picks a folder.
+// bridge install, …). main.ts updates this again when the user picks a folder.
 setRimWorldInstallOverride(loadSettings().rimworldInstallOverride);
 
 let mainWindow: BrowserWindow | null = null;
@@ -146,9 +145,6 @@ ipcMain.on(CONFIRM_CHANNEL_RESOLVE, (_evt, payload: unknown) => {
   confirmGate.resolveFromRenderer(payload);
 });
 const host = new AgentHost(getWindow);
-// Eagerly initialize the log watcher so the agent finds an active instance
-// the first time it monitors Player.log.
-getLogWatcher();
 // Boot the mod registry so it's primed by the time the renderer asks for a
 // snapshot. Subscribers (renderer broadcast, agent tools) attach below.
 const registry = getRegistry();

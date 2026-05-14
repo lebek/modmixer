@@ -40,7 +40,7 @@ namespace ModMixer.Bridge
             thread = new Thread(RunLoop)
             {
                 IsBackground = true,
-                Name = "ModMixerBridgeClient",
+                Name = "ModmixerBridgeClient",
             };
         }
 

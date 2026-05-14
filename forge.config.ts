@@ -109,6 +109,23 @@ async function stageBetterSqlite() {
   }
 }
 
+// Stage the in-game Modmixer Bridge as a clean RimWorld mod folder. The
+// vendor/ source tree also contains the C# project (.csproj + Source/) and
+// a LICENSE — RimWorld doesn't care about those, and shipping the .cs files
+// would just bloat every installer. Copy only About/ and Assemblies/ to
+// dist/modmixer-bridge/, which gets extraResource'd into the packaged app.
+// bridge-install.ts dual-resolves between this and the dev vendor/ path at
+// runtime.
+async function stageBridge() {
+  const src = path.resolve(__dirname, 'vendor/modmixer-bridge');
+  const dest = path.resolve(__dirname, 'dist/modmixer-bridge');
+  await fs.rm(dest, { recursive: true, force: true });
+  await fs.mkdir(dest, { recursive: true });
+  for (const sub of ['About', 'Assemblies']) {
+    await fs.cp(path.join(src, sub), path.join(dest, sub), { recursive: true });
+  }
+}
+
 // Stage steamworks.js with only the host platform's native binding subdir.
 // node_modules/steamworks.js/dist/ ships {win64, osx, linux64}; signtool
 // can only sign Windows PE binaries, so leaving Linux/macOS .node files in
@@ -181,6 +198,12 @@ const config: ForgeConfig = {
       'dist/steamworks.js',
       'dist/LICENSES.txt',
       'lore',
+      // In-game bridge mod (Harmony-patched diagnostics over localhost TCP).
+      // Staged in generateAssets so we ship only About/ + Assemblies/, not
+      // the C# source. bridge-install.ts junctions this into RimWorld's
+      // Mods/ during run_test_cycle when the user doesn't already have the
+      // bridge installed via Workshop.
+      'dist/modmixer-bridge',
       // Index engine assets. ilspycmd binaries are ~30-50 MB per platform;
       // only the matching <platform>-<arch> subdir for the build host needs
       // a binary present (see resources/ilspycmd/README.md). The tree-sitter
@@ -230,6 +253,7 @@ const config: ForgeConfig = {
       );
       await stagePrunedSteamworks();
       await stageBetterSqlite();
+      await stageBridge();
     },
   },
   // Forge's ForgeRebuildOptions explicitly omits `arch`; the value is read

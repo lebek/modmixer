@@ -34,7 +34,7 @@ namespace ModMixer.Bridge
             }
             catch (Exception ex)
             {
-                Log.Warning("[ModMixerBridge] snapshot failed: " + ex.Message);
+                Log.Warning("[Modmixer Bridge] snapshot failed: " + ex.Message);
                 return;
             }
             client.Send(json);

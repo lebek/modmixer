@@ -33,7 +33,7 @@ namespace ModMixer.Bridge
                 var trace = new StackTrace(2, false);
                 var mods = Attribution.ModsFromStack(trace);
                 var firstLine = text == null ? "" : FirstLine(text);
-                var hash = Hash(firstLine, mods);
+                var hash = HashFromStack(trace);
 
                 var json = new Json().Obj()
                     .K("type").S("error_event")
@@ -67,24 +67,51 @@ namespace ModMixer.Bridge
             return s.Length <= max ? s : s.Substring(0, max);
         }
 
-        private static string Hash(string firstLine, List<string> mods)
+        // Stable hash of the call site, not the message text. Per-pawn /
+        // per-tick variants of the same warning (e.g. "Humanlike pawn Grimes
+        // was added to non-humanlike faction zombie horde" emitted once per
+        // pawn) all hash identically because they share the same stack
+        // signature. Hashing on firstLine would split a cascade into N count-1
+        // groups; hashing on the stack collapses it to one group with count=N
+        // — which is what both the agent triage and the Monitor UI bucketer
+        // rely on.
+        //
+        // Skips our own assembly, the Harmony assembly, and the Verse.Log
+        // type itself — those frames are identical across every captured
+        // event and would otherwise dilute the signature. Caps at 8 frames
+        // because the call site is always in the first few and deeper frames
+        // (ThinkNode chains, Update loops) drift across runs.
+        private static string HashFromStack(StackTrace trace)
         {
             unchecked
             {
                 long h = 1469598103934665603L; // FNV offset basis (signed)
-                if (firstLine != null)
+                if (trace == null) return h.ToString("x");
+                var ourAsm = typeof(ErrorsChannel).Assembly;
+                var harmonyAsm = typeof(Harmony).Assembly;
+                var logType = typeof(Verse.Log);
+                int hashed = 0;
+                foreach (var frame in trace.GetFrames() ?? Array.Empty<StackFrame>())
                 {
-                    for (int i = 0; i < firstLine.Length; i++)
-                        h = ((h << 5) - h) ^ firstLine[i];
-                }
-                if (mods != null)
-                {
-                    foreach (var m in mods)
+                    var method = Harmony.GetMethodFromStackframe(frame);
+                    if (method is MethodInfo mi)
                     {
-                        if (m == null) continue;
-                        for (int i = 0; i < m.Length; i++)
-                            h = ((h << 5) - h) ^ m[i];
+                        var orig = Harmony.GetOriginalMethod(mi);
+                        if (orig != null) method = orig;
                     }
+                    if (method == null) continue;
+                    var asm = method.DeclaringType?.Assembly ?? method.ReflectedType?.Assembly;
+                    if (asm == null) continue;
+                    if (asm == ourAsm || asm == harmonyAsm) continue;
+                    if (method.DeclaringType == logType) continue;
+                    var typeName = method.DeclaringType?.FullName ?? "";
+                    var methodName = method.Name ?? "";
+                    for (int i = 0; i < typeName.Length; i++)
+                        h = ((h << 5) - h) ^ typeName[i];
+                    h = ((h << 5) - h) ^ '.';
+                    for (int i = 0; i < methodName.Length; i++)
+                        h = ((h << 5) - h) ^ methodName[i];
+                    if (++hashed >= 8) break;
                 }
                 return h.ToString("x");
             }

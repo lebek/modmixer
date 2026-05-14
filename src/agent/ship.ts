@@ -9,6 +9,26 @@ import {
   type RegistryMod,
 } from './registry/index.js';
 import { buildTestSavedata } from './test-savedata.js';
+import {
+  BRIDGE_PACKAGE_ID,
+  ensureBridgeInstalled,
+  type BridgeInstallResult,
+} from './bridge-install.js';
+
+/**
+ * Append the bridge packageId to an active-mod list when the bridge is
+ * loadable. Idempotent — a no-op if the list already contains it (the user
+ * may have explicitly added it themselves, in which case we keep their
+ * position rather than moving it to the end).
+ */
+function appendBridgeIfAvailable(
+  activeMods: string[],
+  bridge: BridgeInstallResult,
+): string[] {
+  if (!bridge.available) return activeMods;
+  if (activeMods.includes(BRIDGE_PACKAGE_ID)) return activeMods;
+  return [...activeMods, BRIDGE_PACKAGE_ID];
+}
 
 export interface ShipAndLaunchOptions {
   folder: string;
@@ -81,7 +101,20 @@ export async function shipAndLaunch(
   const registry = getRegistry();
   await registry.start();
   await registry.refresh();
-  const snapshot = registry.getSnapshot();
+  let snapshot = registry.getSnapshot();
+
+  // Install the in-game bridge mod (in addition to the workspace mod being
+  // tested) so error/warning/perf/patch diagnostics stream over the
+  // localhost TCP socket. Skipped when the user already has the bridge
+  // installed via Workshop or as a real folder under Mods/. After the
+  // junction lands we refresh the registry so computeTestSet's dep walk and
+  // autosort see the bridge alongside everything else, and so the
+  // <activeMods> entry we append below isn't reported as missing.
+  const bridge = await ensureBridgeInstalled(snapshot);
+  if (bridge.installed) {
+    await registry.refresh();
+    snapshot = registry.getSnapshot();
+  }
 
   const targetMod = snapshot.mods.find(
     (m) => m.folder === opts.folder && m.source === 'workspace',
@@ -102,13 +135,18 @@ export async function shipAndLaunch(
       targetPackageId: targetPid,
       rules,
     });
+    // Append the bridge packageId after autosort so it loads last — the
+    // bridge's Harmony patches register on ModContentPack ctor, and we want
+    // them to see every other mod's patches already in place when it
+    // initializes the patch graph snapshot.
+    const activeMods = appendBridgeIfAvailable(testSet.reducedActive, bridge);
     // Carry over <version> and <knownExpansions> from the user's real
     // ModsConfig so DLCs the user owns stay declared in the isolated copy
     // (knownExpansions gates DLC content even though the active list also
     // lists DLC packageIds).
     const real = await readModsConfig();
     const sd = await buildTestSavedata({
-      activeMods: testSet.reducedActive,
+      activeMods,
       knownExpansions: real.knownExpansions,
       version: real.version,
     });
@@ -125,7 +163,7 @@ export async function shipAndLaunch(
       );
     }
     lines.push(
-      `Isolated test session: wrote ${testSet.reducedActive.length} active mods (Core+DLCs+target+deps) to ${sd.configPath}. Real ModsConfig.xml is untouched.`,
+      `Isolated test session: wrote ${activeMods.length} active mods (Core+DLCs+target+deps${bridge.available ? '+bridge' : ''}) to ${sd.configPath}. Real ModsConfig.xml is untouched.`,
     );
     if (testSet.missing.length > 0) {
       lines.push(
@@ -144,7 +182,7 @@ export async function shipAndLaunch(
         folder: opts.folder,
         packageId: targetPid,
         alreadyEnabled,
-        added: testSet.reducedActive,
+        added: activeMods,
         missingDeps: testSet.missing,
         reordered: false,
         conflicts: 0,
@@ -205,11 +243,16 @@ export async function shipAndLaunch(
     rules,
   });
 
+  // Same bridge-at-the-end story as the isolated path. We don't add the
+  // bridge to `added` though — the bridge is infrastructure, not part of
+  // the mod-test diff we report back to the agent.
+  const finalActiveOrder = appendBridgeIfAvailable(sorted.order, bridge);
+
   const reordered =
-    sorted.order.length !== before.length ||
-    sorted.order.some((p, i) => p !== before[i]);
+    finalActiveOrder.length !== before.length ||
+    finalActiveOrder.some((p, i) => p !== before[i]);
   if (reordered) {
-    await registry.setActiveMods(sorted.order);
+    await registry.setActiveMods(finalActiveOrder);
   }
 
   const launch = await launchRimWorld({

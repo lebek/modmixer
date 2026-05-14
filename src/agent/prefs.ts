@@ -31,6 +31,7 @@ export interface PrepareDebugSessionResult {
   prefsPath: string | null;
   devModeWasOn: boolean;
   autoOpenPaletteWasOn: boolean;
+  runInBackgroundWasOn: boolean;
   pinnedNew: string[];
   pinnedAlready: string[];
 }
@@ -64,6 +65,7 @@ export async function prepareDebugSession(
       prefsPath: null,
       devModeWasOn: false,
       autoOpenPaletteWasOn: false,
+      runInBackgroundWasOn: false,
       pinnedNew: [],
       pinnedAlready: [],
     };
@@ -112,7 +114,23 @@ export async function prepareDebugSession(
     }
   }
 
-  // 3. Pin entries to <debugActionPalette>. The element may be missing,
+  // 3. runInBackground → True. Test sessions expect the user to alt-tab to
+  // Modmixer; with this off RimWorld pauses the moment it loses focus and the
+  // bridge has nothing to report on.
+  const runInBgMatch = xml.match(/<runInBackground>(True|False)<\/runInBackground>/);
+  const runInBackgroundWasOn = runInBgMatch?.[1] === 'True';
+  if (runInBgMatch) {
+    if (!runInBackgroundWasOn) {
+      xml = xml.replace(
+        /<runInBackground>False<\/runInBackground>/,
+        '<runInBackground>True</runInBackground>',
+      );
+    }
+  } else {
+    xml = insertBeforeClose(xml, '  <runInBackground>True</runInBackground>');
+  }
+
+  // 4. Pin entries to <debugActionPalette>. The element may be missing,
   // self-closed, or populated.
   const pinnedNew: string[] = [];
   const pinnedAlready: string[] = [];
@@ -141,6 +159,7 @@ export async function prepareDebugSession(
     prefsPath: prefsXml,
     devModeWasOn,
     autoOpenPaletteWasOn,
+    runInBackgroundWasOn,
     pinnedNew,
     pinnedAlready,
   };

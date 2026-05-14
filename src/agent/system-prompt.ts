@@ -108,6 +108,30 @@ function isUntitledPlaceholder(modFolder: string, ctx: PromptContext): boolean {
   }
 }
 
+/**
+ * Read the mod's display name + packageId from About.xml at prompt-build
+ * time. The triage rubric needs both to disambiguate attributedMods rows:
+ * the bridge emits `mod.Name` if About.xml has one and falls back to
+ * packageId otherwise, so we tell the agent to match against either.
+ */
+function readModIdentity(
+  modFolder: string,
+  ctx: PromptContext,
+): { name: string; packageId: string } {
+  try {
+    const aboutPath = path.join(
+      ctx.workspaceDir,
+      modFolder,
+      'About',
+      'About.xml',
+    );
+    const about = parseAbout(fs.readFileSync(aboutPath, 'utf8'));
+    return { name: about.name, packageId: about.packageId };
+  } catch {
+    return { name: '(unknown)', packageId: '(unknown)' };
+  }
+}
+
 // Schematic snapshot at compose time. Stays frozen for the conversation —
 // the agent sees later edits via update_schematic tool results, and the
 // on-disk file is the source of truth for the read-only Schematic panel.
@@ -133,6 +157,7 @@ function schematicSnapshotBlock(modFolder: string): string {
 }
 
 function modScopeBlock(modFolder: string, ctx: PromptContext): string {
+  const modIdentity = readModIdentity(modFolder, ctx);
   const untitledIntro = isUntitledPlaceholder(modFolder, ctx)
     ? `This mod was just created via "New Mod" and has placeholder metadata (empty packageId, "Untitled Mod" as the display name in About.xml). The user is about to describe what they want to build — the mod folder, About.xml, and standard subdirs already exist on disk.
 
@@ -160,34 +185,39 @@ Image generation: only two tools are bundled — imagemagick, inkscape, python/P
 - render_preview — for the Workshop preview. Scan Textures/ for the largest representative sprite (omit spritePath if XML-only), default to the 'classic' template + 'rimworld' font + tone-matched background, write to "${modFolder}/About/Preview.png". Parameter descriptions cover template/font/effect picks.
 
 Test-in-game flow when the user wants to run their mod:
-1. Call run_test_cycle folder="${modFolder}". This single tool runs the entire chain: dev-mode prefs + palette pin + ship + launch + log watcher. Pin a palette entry when there's a one-click trigger (e.g. "Actions\\Do incident\\YourIncidentDef"); otherwise pass autoOpenPalette=false. Default isolated=true and quicktest=true; override only when the test needs the user's full mod list or the menus, and say one line about why.
+1. Call run_test_cycle folder="${modFolder}". This single tool runs the entire chain: dev-mode prefs + palette pin + bridge install + ship + launch + bridge monitor. Pin a palette entry when there's a one-click trigger (e.g. "Actions\\Do incident\\YourIncidentDef"); otherwise pass autoOpenPalette=false. Default isolated=true and quicktest=true; override only when the test needs the user's full mod list or the menus, and say one line about why.
 2. If the macro returns needsQuitConfirmation=true, RimWorld is running — ASK the user before re-calling with quitIfRunning=true (they may have unsaved progress).
 3. Once launched, in one short paragraph tell the user EXACTLY what to do in-game. They're about to alt-tab — be specific.
 4. Your turn ends after run_test_cycle returns. If errors arrive you'll be auto-prompted via a "[automated …]" user message — see the error-triage protocol below. Otherwise the user will message you when they're done.
 
 Error-triage protocol (when an "[automated …]" user message lands):
-The auto-prompt is a deduped summary, NOT raw blocks. Each line is one error class — a ×count, a [Ref XXXXXXXX] tag (or [no-ref]), and the message header. Stack traces are NOT inlined.
+The auto-prompt is a deduped summary from the in-game bridge mod. Each row is one error class: a ×count, severity (error/warning), bracketed attribution (the mods identified from the stack frames, e.g. [RimWorld] for vanilla, [${modIdentity.name}] for this mod, or [SomeOtherMod, Harmony]), a [#xxxxxxxx] hash tag, and the message first-line. Stack traces and full text are NOT inlined — info-level Log.Message is filtered out before sending, and unrelated mods' single-occurrence warnings are filtered too, so every row is signal.
 
-To drill in, call tail_player_log(pattern="[Ref AA2B8458]") with the [Ref XXX] tag literally; for [no-ref] items use a distinctive substring of the message. [no-ref] items (def-loader / XML-parse errors) generally have no stack trace — the line in the summary is the full content. Always drill into the highest-count item before triaging — the cascade pattern usually points at the root cause more clearly than the message header.
+To drill in, call monitor_get_error(hash="xxxxxxxx") with the hash from the row's [#…] tag (the brackets and # are decoration; pass just the hex). You get the full message + stack trace + occurrence count + attribution. Always drill into the highest-count row first — cascade pattern usually points at the root cause more clearly than the message header. The bridge retains the last ~200 distinct error classes for the running game session and clears them on disconnect, so drill in promptly.
 
-Monitoring continues automatically — the watcher armed by run_test_cycle batches errors and re-arms; later cascades in the same session deliver as fresh auto-prompts.
+Monitoring continues automatically — the bridge re-arms after each batch; later cascades in the same session arrive as fresh auto-prompts.
 
-Triage each item into one of four categories. Push a notify_test_status toast first (the user is in fullscreen RimWorld and won't see the chat until they alt-tab), then proceed.
-  **Unrelated** — stack trace, types, or paths point to RimWorld core or another mod, NOT to "${modFolder}":
+This mod's identity for matching the attribution column:
+- name: "${modIdentity.name}"
+- packageId: "${modIdentity.packageId}"
+A row is "attributed to us" when either string appears in the bracketed attribution list.
+
+Triage each row into one category. Push a notify_test_status toast first (the user is in fullscreen RimWorld and won't see chat until they alt-tab), then proceed.
+  **Unrelated** — attribution does NOT include "${modIdentity.name}" or "${modIdentity.packageId}", AND the message doesn't name a path under "${modFolder}":
   - notify_test_status severity="info", e.g. "Non-fatal error in <mod>, ignoring — keep testing."
-  - In the chat, one line saying what you saw and that you're ignoring it.
+  - One line in chat saying what you saw and that you're ignoring it.
 
-  **Non-fatal data error** — "couldn't resolve", "has no resolvedGrains", or similar messages that reference "${modFolder}" but DO NOT match the "Could not load texture/AudioClip/asset" pattern. The mod loaded; a def referenced something that didn't resolve at runtime:
-  - notify_test_status severity="warning", e.g. "Non-fatal data error in ${modFolder} — investigate after this run."
-  - In the chat, name the def and the unresolved reference, and propose a specific fix.
-
-  **Suspicious asset-load error** — "Could not load texture", "Could not load AudioClip", or "Could not load asset" naming a path under "${modFolder}". The stub system in the sync pipeline should have prevented this; the error is a pipeline bug, not "user hasn't added assets". See read_lore assets for root-cause ordering and fixes.
+  **Suspicious asset-load error** — message matches "Could not load texture", "Could not load AudioClip", or "Could not load asset" naming a path under "${modFolder}". Attribution will usually be [RimWorld] (Verse's DataLoader does the load, not our code) — the path tells us it's ours. The stub system in the sync pipeline should have prevented this; the error is a pipeline bug, not "user hasn't added assets". See read_lore assets for root-cause ordering and fixes.
   - notify_test_status severity="warning" with a one-line "investigating asset-load issue".
-  - In the chat, name the failing path, state the most likely root cause, and propose a specific fix.
+  - Name the failing path, state likely root cause, propose specific fix.
 
-  **Fatal** — exceptions, Verse.Log:Error pointing into "${modFolder}"'s code, def-parse failures, type-load failures, or anything that prevents the mod from functioning:
+  **Non-fatal data error** — severity=warning AND (attribution includes us OR the message names a def from "${modFolder}"). The mod loaded; a def referenced something that didn't resolve at runtime, or vanilla validation flagged a misconfiguration in our def:
+  - notify_test_status severity="warning", e.g. "Non-fatal data error in ${modIdentity.name} — investigate after this run."
+  - Name the def and the unresolved reference, propose specific fix.
+
+  **Fatal** — severity=error AND (attribution includes us OR the drilled-in stack trace points into our mod's code). Exceptions, def-parse failures, type-load failures, anything that prevents the mod from functioning:
   - notify_test_status severity="error", e.g. "Critical: <one-line cause>."
-  - In the chat, summarize the cause, propose a SPECIFIC fix, and ask "Apply the fix?" — DO NOT edit files until they say yes.
+  - Summarize the cause, propose a SPECIFIC fix, and ask "Apply the fix?" — DO NOT edit files until they say yes.
 
 Build → launch loop for code changes:
 1. build_mod folder="${modFolder}". Read compiler output.

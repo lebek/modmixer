@@ -4,7 +4,8 @@
 // lets the user test a workspace mod without ever touching their real mod
 // list. Note: -savedatafolder does NOT affect Unity's Player.log location
 // (that follows Application.persistentDataPath, which is unaffected by
-// RimWorld's own flag), so log monitoring keeps working unchanged.
+// RimWorld's own flag), so any forensic Player.log reads work the same way
+// regardless of isolated mode.
 
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';

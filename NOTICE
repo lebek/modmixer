@@ -23,7 +23,7 @@ Bundled via npm. Full license texts are aggregated into
 
 C# bridge (vendor/modmixer-bridge)
 ----------------------------------
-The ModMixer Bridge is a small RimWorld mod that streams diagnostics over
+The Modmixer Bridge is a small RimWorld mod that streams diagnostics over
 localhost TCP. It links against:
 
   * Lib.Harmony 2.3.3 — MIT License
