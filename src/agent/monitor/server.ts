@@ -24,10 +24,10 @@ export interface ErrorBucket {
 }
 
 /**
- * Cap on retained buckets. Bridge sends each distinct stack signature
- * exactly once per occurrence, so 200 is the same ceiling the renderer's
- * useMonitorStream uses — keeps the slow-grow case (long session, novel
- * one-off warnings) bounded without trimming legitimate cascades.
+ * Safety cap on retained buckets within a single run. Buckets are dropped
+ * wholesale when a new game session starts (see runId handling), so this
+ * only guards the pathological single-run case (hundreds of distinct stack
+ * signatures in one test). 200 is far above any healthy run.
  */
 const ERROR_BUCKET_CAP = 200;
 
@@ -45,12 +45,29 @@ export class MonitorServer extends EventEmitter {
   private lastSnapshot: BridgeMessage[] = [];
   private buffer = '';
   /**
-   * Server-side error retention. Keyed by hash for O(1) lookup via
-   * getErrorByHash, which backs the agent's monitor_get_error tool.
-   * Cleared on disconnect (matches the renderer's reset semantics — a new
-   * game session shouldn't surface errors from a previous one).
+   * Server-side error retention for the *current run*. Keyed by hash for
+   * O(1) lookup via getErrorByHash, which backs the agent's
+   * monitor_get_error tool.
+   *
+   * Lifetime is the run, not the socket: buckets are dropped only when a
+   * genuinely new game session connects (a new `startedAt` — see
+   * handleLine). They deliberately survive a disconnect so the agent can
+   * still drill into the run it just observed after the user quits the
+   * game, and survive a transient TCP reconnect mid-session.
    */
   private errorBuckets = new Map<string, ErrorBucket>();
+
+  /**
+   * Monotonic run counter. A "run" is one game session — one process the
+   * user launched via run_test_cycle. Incremented when a bridge connects
+   * with a `startedAt` we haven't seen, i.e. a real relaunch (a bare TCP
+   * reconnect keeps the same `startedAt` and the same run). Surfaced to the
+   * agent in every auto-prompt and drill-in so it can tell whether an error
+   * is from before or after its last fix+relaunch.
+   */
+  private runId = 0;
+  /** `startedAt` of the game session that owns the current run, if any. */
+  private runStartedAt: number | null = null;
 
   start(): void {
     if (this.server) return;
@@ -74,6 +91,14 @@ export class MonitorServer extends EventEmitter {
 
   getState(): MonitorConnectionState {
     return this.state;
+  }
+
+  /**
+   * Id of the current run (one game session). 0 before any game has
+   * connected. The errorBuckets always belong to this run.
+   */
+  getRunId(): number {
+    return this.runId;
   }
 
   /** Most recent ModsSnapshot, if any — used to seed the UI on tab open. */
@@ -132,7 +157,10 @@ export class MonitorServer extends EventEmitter {
       if (this.socket === sock) {
         this.socket = null;
         this.lastSnapshot = [];
-        this.errorBuckets.clear();
+        // errorBuckets are NOT cleared here — they belong to the run, not
+        // the socket. They survive until a genuinely new game session
+        // connects (handleLine), so the agent can still drill into the run
+        // it just watched, and a transient TCP reconnect doesn't lose them.
         this.setState({ kind: 'listening', port: BRIDGE_PORT });
       }
     });
@@ -199,6 +227,16 @@ export class MonitorServer extends EventEmitter {
     }
 
     if (msg.type === 'bridge_hello') {
+      // A `startedAt` we haven't seen means a genuinely new game process —
+      // start a new run and drop the previous run's errors. The same
+      // `startedAt` means the bridge merely reconnected (TCP blip); keep
+      // the run and its error history intact.
+      if (this.runStartedAt !== msg.startedAt) {
+        this.runStartedAt = msg.startedAt;
+        this.runId += 1;
+        this.errorBuckets.clear();
+        this.emit('run', this.runId);
+      }
       this.setState({
         kind: 'connected',
         port: BRIDGE_PORT,

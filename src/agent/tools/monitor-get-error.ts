@@ -19,6 +19,8 @@ const Params = Type.Object({
 export interface MonitorGetErrorDetails {
   hash: string;
   found: boolean;
+  /** Id of the current test run — the run the error buckets belong to. */
+  runId: number;
   severity: string | null;
   count: number;
   attributedMods: string[];
@@ -33,26 +35,33 @@ export const monitorGetErrorTool: AgentTool<
   name: 'monitor_get_error',
   label: 'Get full error from bridge',
   description:
-    "Drill into one error class from the most recent [automated …] auto-prompt. The summary's `[#xxxxxxxx]` hash uniquely identifies an error by its stack signature; passing it here returns the full text (message + stack trace) from the latest occurrence, plus severity, attributed mods, and occurrence count. Always drill into the highest-count row first — the cascade pattern usually points at the root cause more clearly than the message header. The bridge retains the last ~200 distinct errors per game session; older entries fall out and become unrecoverable.",
+    "Drill into one error class from an [automated …] auto-prompt. The summary's `[#xxxxxxxx]` hash uniquely identifies an error by its stack signature; passing it here returns the full text (message + stack trace) from the latest occurrence, plus severity, attributed mods, and occurrence count. Always drill into the highest-count row first — the cascade pattern usually points at the root cause more clearly than the message header. Errors are scoped to the current test run; this resolves hashes from the current run only. A hash from an earlier run (each run_test_cycle launch starts a new run) won't be found — that's expected. Use monitor_poll to list every error class in the current run.",
   parameters: Params,
   async execute(_id, params): Promise<AgentToolResult<MonitorGetErrorDetails>> {
     const hash = params.hash.trim().replace(/^\[?#/, '').replace(/\]$/, '');
-    const bucket = getMonitorServer().getErrorByHash(hash);
+    const server = getMonitorServer();
+    const runId = server.getRunId();
+    const bucket = server.getErrorByHash(hash);
     if (!bucket) {
+      const connected = server.getState().kind === 'connected';
       return {
         content: [
           {
             type: 'text',
             text:
-              `No error with hash ${hash} retained by the bridge. ` +
-              `Either the game session has ended (the buffer is cleared on disconnect), ` +
-              `or this error class has been evicted by newer ones (~200 cap). ` +
-              `If a test session is in progress, ask the user to reproduce.`,
+              `No error class with hash ${hash} in test run #${runId}. ` +
+              `Errors are run-scoped: if this hash came from an auto-prompt ` +
+              `for an earlier run, it's expected to be gone — your fix+relaunch ` +
+              `started a fresh run. ` +
+              (connected
+                ? `Call monitor_poll to see every error class in run #${runId}.`
+                : `No game is currently connected; the buckets above are run #${runId}'s last state.`),
           },
         ],
         details: {
           hash,
           found: false,
+          runId,
           severity: null,
           count: 0,
           attributedMods: [],
@@ -62,7 +71,7 @@ export const monitorGetErrorTool: AgentTool<
       };
     }
     const header =
-      `# severity=${bucket.severity} count=${bucket.count} ` +
+      `# run=#${runId} severity=${bucket.severity} count=${bucket.count} ` +
       `attributed=${bucket.attributedMods.join(', ') || 'Unknown'} ` +
       `hash=${bucket.hash}\n`;
     return {
@@ -70,6 +79,7 @@ export const monitorGetErrorTool: AgentTool<
       details: {
         hash: bucket.hash,
         found: true,
+        runId,
         severity: bucket.severity,
         count: bucket.count,
         attributedMods: bucket.attributedMods,

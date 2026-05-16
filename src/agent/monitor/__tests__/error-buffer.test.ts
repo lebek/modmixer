@@ -36,33 +36,44 @@ function makeGroup(overrides: Partial<ErrorBufferGroup>): ErrorBufferGroup {
 }
 
 /**
- * MonitorServer is an EventEmitter, but ErrorBuffer only uses .on/.off; a
- * bare EventEmitter cast is enough for unit tests without standing up a
- * real TCP server.
+ * MonitorServer is an EventEmitter that also exposes getRunId(); ErrorBuffer
+ * uses .on/.off plus that one method. A bare EventEmitter with getRunId
+ * bolted on is enough for unit tests without standing up a real TCP server.
+ * A new run is simulated by emitting a 'run' event (what MonitorServer does
+ * when a new game session connects).
  */
-function makeFakeServer(): EventEmitter {
-  return new EventEmitter();
+type FakeServer = EventEmitter & { getRunId: () => number };
+
+function makeFakeServer(initialRunId = 0): FakeServer {
+  const ee = new EventEmitter() as FakeServer;
+  ee.getRunId = () => initialRunId;
+  return ee;
 }
 
 /**
- * Hook a buffer + capture every flush into an array. Returned `flushes`
- * grows over time; `last()` returns the most recent flush (asserts there is
- * one) to dodge TypeScript's control-flow narrowing on a `let X | null`
- * captured in a callback.
+ * Hook a buffer + capture every flush. `last()` returns the most recent
+ * flush's groups; `lastRunId()` the run id it was tagged with.
  */
 function captureFlushes(buf: ErrorBuffer): {
   flushes: ErrorBufferGroup[][];
   last: () => ErrorBufferGroup[];
+  lastRunId: () => number;
 } {
   const flushes: ErrorBufferGroup[][] = [];
-  buf.subscribe((groups) => {
+  const runIds: number[] = [];
+  buf.subscribe((groups, runId) => {
     flushes.push(groups);
+    runIds.push(runId);
   });
   return {
     flushes,
     last: () => {
       assert.ok(flushes.length > 0, 'expected at least one flush');
       return flushes[flushes.length - 1];
+    },
+    lastRunId: () => {
+      assert.ok(runIds.length > 0, 'expected at least one flush');
+      return runIds[runIds.length - 1];
     },
   };
 }
@@ -133,6 +144,100 @@ describe('ErrorBuffer ingest', () => {
     // h1 firstAt=0 < h3 firstAt=50 → h1 before h3.
     assert.equal(flushed[1].hash, 'h1');
     assert.equal(flushed[2].hash, 'h3');
+  });
+});
+
+describe('ErrorBuffer edge-triggering (report once per run)', () => {
+  it('surfaces an error class once, then stays silent on recurrence', () => {
+    const buf = new ErrorBuffer();
+    const server = makeFakeServer();
+    buf.attach(server as never, {});
+    const cap = captureFlushes(buf);
+
+    server.emit('message', makeEvent({ hash: 'h1' }));
+    buf.flushNow();
+    assert.equal(cap.flushes.length, 1);
+    assert.equal(cap.last()[0].hash, 'h1');
+
+    // The same error keeps firing — must NOT re-prompt.
+    server.emit('message', makeEvent({ hash: 'h1' }));
+    server.emit('message', makeEvent({ hash: 'h1' }));
+    buf.flushNow();
+    assert.equal(cap.flushes.length, 1, 'recurrence must not re-flush');
+  });
+
+  it('still surfaces a class first seen after an earlier flush', () => {
+    const buf = new ErrorBuffer();
+    const server = makeFakeServer();
+    buf.attach(server as never, {});
+    const cap = captureFlushes(buf);
+
+    server.emit('message', makeEvent({ hash: 'h1' }));
+    buf.flushNow();
+    server.emit('message', makeEvent({ hash: 'h2' }));
+    buf.flushNow();
+
+    assert.equal(cap.flushes.length, 2);
+    assert.deepEqual(cap.flushes[0].map((g) => g.hash), ['h1']);
+    assert.deepEqual(cap.flushes[1].map((g) => g.hash), ['h2']);
+  });
+
+  it('a new run clears the reported set so the same class surfaces again', () => {
+    const buf = new ErrorBuffer();
+    const server = makeFakeServer();
+    buf.attach(server as never, {});
+    const cap = captureFlushes(buf);
+
+    server.emit('message', makeEvent({ hash: 'h1' }));
+    buf.flushNow();
+    assert.equal(cap.flushes.length, 1);
+
+    // New game session → new run. The same stack signature is now a fresh
+    // observation and must surface again.
+    server.emit('run', 2);
+    server.emit('message', makeEvent({ hash: 'h1' }));
+    buf.flushNow();
+    assert.equal(cap.flushes.length, 2);
+    assert.equal(cap.last()[0].hash, 'h1');
+  });
+
+  it('a new run drops a pending un-flushed batch', () => {
+    const buf = new ErrorBuffer();
+    const server = makeFakeServer();
+    buf.attach(server as never, {});
+    const cap = captureFlushes(buf);
+
+    server.emit('message', makeEvent({ hash: 'h1' }));
+    // Game restarts before the batch flushed — pending h1 belongs to the
+    // old run and must be discarded.
+    server.emit('run', 2);
+    buf.flushNow();
+    assert.equal(cap.flushes.length, 0);
+  });
+});
+
+describe('ErrorBuffer run id tagging', () => {
+  it('tags the flush with the run id from a run event', () => {
+    const buf = new ErrorBuffer();
+    const server = makeFakeServer();
+    buf.attach(server as never, {});
+    const cap = captureFlushes(buf);
+
+    server.emit('run', 5);
+    server.emit('message', makeEvent({ hash: 'h1' }));
+    buf.flushNow();
+    assert.equal(cap.lastRunId(), 5);
+  });
+
+  it('seeds the run id from the server when a game is already connected', () => {
+    const buf = new ErrorBuffer();
+    const server = makeFakeServer(3); // bridge already up, run #3
+    buf.attach(server as never, {});
+    const cap = captureFlushes(buf);
+
+    server.emit('message', makeEvent({ hash: 'h1' }));
+    buf.flushNow();
+    assert.equal(cap.lastRunId(), 3);
   });
 });
 
@@ -299,10 +404,30 @@ describe('ErrorBuffer flush filtering', () => {
     assert.equal(flushed[0].hash, 'humanlike-cascade');
     assert.equal(flushed[0].count, 3);
   });
+
+  it('a sub-threshold warning is not marked reported and can surface later', () => {
+    const buf = new ErrorBuffer();
+    const server = makeFakeServer();
+    buf.attach(server as never, {});
+    const cap = captureFlushes(buf);
+
+    // One occurrence — below the count threshold, dropped, NOT reported.
+    server.emit('message', makeEvent({ hash: 'w', severity: 'warning' }));
+    buf.flushNow();
+    assert.equal(cap.flushes.length, 0);
+
+    // Now it cascades — must still be able to surface (wasn't suppressed).
+    for (let i = 0; i < 3; i++) {
+      server.emit('message', makeEvent({ hash: 'w', severity: 'warning' }));
+    }
+    buf.flushNow();
+    assert.equal(cap.flushes.length, 1);
+    assert.equal(cap.last()[0].hash, 'w');
+  });
 });
 
 describe('formatErrorSummary', () => {
-  it('renders the deduped summary with severity, attribution, and hash tag', () => {
+  it('renders the run-headed summary with severity, attribution, and hash tag', () => {
     const groups: ErrorBufferGroup[] = [
       makeGroup({
         hash: 'a1',
@@ -323,30 +448,28 @@ describe('formatErrorSummary', () => {
     ];
     // Caller passes groups already sorted by the buffer; format reflects
     // the order it was given.
-    const summary = formatErrorSummary([groups[1], groups[0]]);
+    const summary = formatErrorSummary([groups[1], groups[0]], 4);
     assert.match(summary, /\[automated/);
-    assert.match(summary, /23 events \(2 unique\)/);
+    assert.match(summary, /test run #4/);
+    assert.match(summary, /2 new error classes/);
     assert.match(summary, /\[#b2\]/);
     assert.match(summary, /\[#a1\]/);
     assert.match(summary, /\[RimWorld\]/);
     assert.match(summary, /\[Zombie Horde\]/);
-    // Highest count appears first in the rendered output.
+    // Order is preserved from the caller's sort.
     const b2Idx = summary.indexOf('[#b2]');
     const a1Idx = summary.indexOf('[#a1]');
     assert.ok(b2Idx >= 0 && a1Idx >= 0 && b2Idx < a1Idx);
   });
 
-  it('uses singular "event" when total is 1', () => {
-    const summary = formatErrorSummary([makeGroup({ count: 1, hash: 'x' })]);
-    assert.match(summary, /1 event\b/);
+  it('uses singular "class" when there is one new class', () => {
+    const summary = formatErrorSummary([makeGroup({ count: 1, hash: 'x' })], 1);
+    assert.match(summary, /1 new error class\b/);
+    assert.doesNotMatch(summary, /classes/);
   });
 
-  it('omits the unique-clause when each group occurred exactly once', () => {
-    const summary = formatErrorSummary([
-      makeGroup({ hash: 'a', count: 1 }),
-      makeGroup({ hash: 'b', count: 1 }),
-    ]);
-    assert.match(summary, /2 events during/);
-    assert.doesNotMatch(summary, /unique/);
+  it('carries the run number it was given', () => {
+    const summary = formatErrorSummary([makeGroup({ hash: 'x' })], 12);
+    assert.match(summary, /test run #12/);
   });
 });

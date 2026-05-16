@@ -41,6 +41,7 @@ import { setModMetadataTool } from './tools/set-mod-metadata.js';
 import { updateSchematicTool } from './tools/update-schematic.js';
 import { buildModTool } from './tools/build-mod.js';
 import { monitorGetErrorTool } from './tools/monitor-get-error.js';
+import { monitorPollTool } from './tools/monitor-poll.js';
 import { listInstalledModsTool } from './tools/list-installed-mods.js';
 import { decompileDllTool } from './tools/decompile-dll.js';
 import { renderSvgToPngTool } from './tools/render-svg-to-png.js';
@@ -133,6 +134,7 @@ function buildCustomTools(
     runTestCycleTool,
     notifyTestStatusTool,
     monitorGetErrorTool,
+    monitorPollTool,
     listInstalledModsTool,
     decompileDllTool,
     renderSvgToPngTool,
@@ -1656,8 +1658,8 @@ export class AgentHost {
     this.errorBuffer = new ErrorBuffer();
     this.errorBufferDetach = this.errorBuffer.attach(monitor, { modUnderTest });
     const conversationId = opts.conversationId;
-    this.errorBuffer.subscribe((groups) =>
-      void this.handleBridgeErrors(groups, conversationId),
+    this.errorBuffer.subscribe((groups, runId) =>
+      void this.handleBridgeErrors(groups, runId, conversationId),
     );
 
     this.monitorStateHandler = (state) => this.onMonitorState(state);
@@ -1744,13 +1746,14 @@ export class AgentHost {
 
   private async handleBridgeErrors(
     groups: ErrorBufferGroup[],
+    runId: number,
     conversationId: string,
   ): Promise<void> {
     if (groups.length === 0) return;
     if (this.monitoringConversationId !== conversationId) return;
-    // Don't stop monitoring — the buffer batches across the deadline window
-    // and re-arms automatically. Later cascades in the same test session
-    // land as fresh auto-prompts without the agent having to re-arm.
+    // Don't stop monitoring — the buffer stays attached. It's edge-triggered:
+    // a class already reported in this run won't prompt again, but a class
+    // first seen later in the run lands as its own fresh auto-prompt.
     if (this.active?.conversationId !== conversationId) return;
 
     // Suppress the "so far so good" heartbeat now that we've actually seen
@@ -1758,11 +1761,10 @@ export class AgentHost {
     // mid-await doesn't beat us to it.
     this.bridgeErrorsSeen = true;
 
-    const total = groups.reduce((acc, g) => acc + g.count, 0);
-    const eventWord = total === 1 ? 'event' : 'events';
+    const classWord = groups.length === 1 ? 'error' : 'errors';
     sendToast(
       'Modmixer',
-      `Caught ${total} ${eventWord} (${groups.length} unique) — investigating…`,
+      `Run #${runId}: ${groups.length} new ${classWord} — investigating…`,
     );
 
     try {
@@ -1771,7 +1773,7 @@ export class AgentHost {
       // if a turn is already in flight, otherwise starts a new turn). The
       // triage rubric for interpreting this summary lives in the system
       // prompt — only the dynamic summary lands in the chat.
-      await session.prompt(formatErrorSummary(groups), {
+      await session.prompt(formatErrorSummary(groups, runId), {
         streamingBehavior: 'steer',
       });
     } catch (err) {
