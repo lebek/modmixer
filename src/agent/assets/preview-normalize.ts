@@ -5,7 +5,7 @@ import fsp from 'node:fs/promises';
 // Steam Workshop's preview-image cap is exactly 1 MiB; uploads above that
 // fail with k_EResultLimitExceeded ("limit exceeded" / GenericFailure).
 // Leave a small margin so we don't ship right at the edge.
-const STEAM_PREVIEW_LIMIT_BYTES = 1024 * 1024;
+export const STEAM_PREVIEW_LIMIT_BYTES = 1024 * 1024;
 const SAFETY_MARGIN_BYTES = 50 * 1024;
 const TARGET_BYTES = STEAM_PREVIEW_LIMIT_BYTES - SAFETY_MARGIN_BYTES;
 

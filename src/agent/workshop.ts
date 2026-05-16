@@ -5,6 +5,7 @@ import fsp from 'node:fs/promises';
 import { EventEmitter } from 'node:events';
 import { app } from 'electron';
 import { getWorkspacePaths, readModAbout } from './workspace.js';
+import { STEAM_PREVIEW_LIMIT_BYTES } from './assets/preview-normalize.js';
 import { commitTurn } from './snapshots.js';
 import { track } from './telemetry.js';
 
@@ -270,6 +271,21 @@ export async function publishToWorkshop(folder: string): Promise<PublishResult> 
   const { workspaceDir } = getWorkspacePaths();
   const modFolder = path.join(workspaceDir, folder);
   const previewPath = previewPathFor(folder);
+
+  // Preflight: Steam caps preview images at 1 MiB and rejects oversize uploads
+  // with an opaque k_EResultLimitExceeded. Our generate/browse paths normalize
+  // below the cap, but a hand-placed or imported Preview.png can still exceed
+  // it — catch that here with a readable message instead of a Steam failure.
+  if (previewPath) {
+    const { size } = await fsp.stat(previewPath);
+    if (size > STEAM_PREVIEW_LIMIT_BYTES) {
+      const mb = (size / 1024 / 1024).toFixed(2);
+      throw new Error(
+        `Preview image is ${mb} MB — Steam's limit is 1 MB. Re-pick it with ` +
+          'Browse… or use Generate; Modmixer will resize it to fit.',
+      );
+    }
+  }
 
   const tags = [BASE_TAG, ...about.supportedVersions];
   const changeNote = autoChangeNote();
