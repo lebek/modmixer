@@ -286,6 +286,20 @@ export function ChatPanel({
     return sum;
   }, [messages]);
 
+  // True once the chat contains an assistant turn from a provider we can't
+  // price (e.g. Claude via Anthropic OAuth, billed against Pro/Max credits).
+  // When that happens `chatCost` only covers *part* of the chat, so showing
+  // it — or the OpenRouter balance — would be misleading. Hide both.
+  const hasUncostableTurns = useMemo(
+    () =>
+      messages.some((m) => {
+        if (m.role !== 'assistant') return false;
+        const provider = (m as { provider?: string }).provider;
+        return typeof provider === 'string' && provider !== 'openrouter';
+      }),
+    [messages],
+  );
+
   // Live OpenRouter balance. null = no API key configured, or active model
   // isn't routed through OpenRouter (hide); a number = remaining USD.
   // Refreshed on mount and after each completed turn.
@@ -387,7 +401,10 @@ export function ChatPanel({
       )}
       </div>
       <div className="border-t border-line px-6 py-3">
-        {(chatCost > 0 || balance !== null || contextUsage) && (
+        {(() => {
+          const showCost = chatCost > 0 && !hasUncostableTurns;
+          const showBalance = balance !== null && !hasUncostableTurns;
+          return (showCost || showBalance || contextUsage) && (
           <div className="mb-2 flex flex-wrap justify-end gap-x-4 gap-y-1 font-mono text-[11px] text-subtle">
             {contextUsage && contextUsage.tokens !== null && (() => {
               // Color escalates as the context window fills up — at >95%
@@ -411,20 +428,21 @@ export function ChatPanel({
                 </span>
               );
             })()}
-            {chatCost > 0 && (
+            {showCost && (
               <span className="inline-flex items-center gap-1">
                 chat cost ={' '}
                 <OdometerNumber value={chatCost} format={formatCost} />
               </span>
             )}
-            {balance !== null && (
+            {showBalance && (
               <span className="inline-flex items-center gap-1">
                 balance ={' '}
-                <OdometerNumber value={balance} format={formatCost} />
+                <OdometerNumber value={balance!} format={formatCost} />
               </span>
             )}
           </div>
-        )}
+          );
+        })()}
         {hasAi ? (
           <div className="rounded-md border border-line bg-paper p-3 focus-within:border-ink/40">
             <textarea
