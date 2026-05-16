@@ -223,6 +223,14 @@ export function LibraryView({
     [activeOrder, guarded, onSetActive],
   );
 
+  const launch = useCallback(
+    () =>
+      guarded(async () => {
+        await window.modmixer.launchRimWorld();
+      }),
+    [guarded],
+  );
+
   const canMutate = !busy;
 
   return (
@@ -274,6 +282,14 @@ export function LibraryView({
             className="h-7 rounded-md border border-line px-3 text-[11px] uppercase tracking-wide text-muted hover:border-ink/40 disabled:opacity-50"
           >
             Refresh
+          </button>
+          <button
+            disabled={!canMutate}
+            onClick={launch}
+            className="group inline-flex h-7 items-center gap-1.5 rounded-md border border-accent bg-accent px-3 text-[11px] uppercase tracking-wide text-accent-foreground shadow-sm transition-all hover:bg-accent-soft hover:shadow-md active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none"
+          >
+            <LaunchIcon />
+            Launch RimWorld
           </button>
         </div>
       </div>
@@ -370,6 +386,19 @@ export function LibraryView({
         />
       </div>
     </div>
+  );
+}
+
+function LaunchIcon() {
+  return (
+    <svg
+      aria-hidden
+      className="h-3 w-3 transition-transform group-hover:translate-x-0.5 group-active:translate-x-0"
+      viewBox="0 0 24 24"
+      fill="currentColor"
+    >
+      <path d="M8 5v14l11-7z" />
+    </svg>
   );
 }
 
