@@ -23,6 +23,13 @@ export default defineConfig({
         // Same .wasm-sibling story as web-tree-sitter — keep external so the
         // bundled main.js does require() against the on-disk package.
         '@resvg/resvg-wasm',
+        // Pure-WASM image library (photon-node, via pi-coding-agent's read
+        // tool) used to resize images before sending them to the model. It
+        // reads photon_rs_bg.wasm via readFileSync(__dirname + ...); bundling
+        // breaks __dirname so the .wasm is never found and every image read
+        // fails with "could not be resized". Keep external so require()
+        // resolves the on-disk package next to its .wasm sibling.
+        '@silvia-odwyer/photon-node',
         // Bundles platform-specific ripgrep binaries.
         '@vscode/ripgrep',
         /^node:/,

@@ -11,6 +11,7 @@ import type {
   AgentToolResult,
   AgentToolUpdateCallback,
 } from '@mariozechner/pi-agent-core';
+import type { Api, Model } from '@mariozechner/pi-ai';
 import path from 'node:path';
 import { homedir } from 'node:os';
 import { assertPathAllowed } from '../security/path-policy.js';
@@ -119,7 +120,25 @@ const INDEXED_CS_DEFAULT_LIMIT = 120;
 
 const READ_CSHARP_TRUNCATED_HINT = `[hint] Capped to first ${INDEXED_CS_DEFAULT_LIMIT} lines because this is an indexed RimWorld C# source file. To read a specific class/method body, call \`read_csharp_symbol "<SymbolName>"\` — it returns the body without juggling offsets. To read further into this file, re-call \`read\` with explicit \`offset\` + \`limit\`.`;
 
-export function createGuardedReadTool(cwd: string): AgentTool<any> {
+/**
+ * Note returned in place of an image when the active model has no vision
+ * support. pi's read tool only knows whether resizing an image succeeded —
+ * not whether the model can see images — so on a text-only model it emits a
+ * misleading "could not be resized" message. We catch that case here and say
+ * what's actually wrong.
+ */
+function nonVisionImageNote(model: Model<Api>): string {
+  return (
+    `[Image not shown: the active model "${model.name ?? model.id}" has no ` +
+    `vision support, so images can't be sent to it. Ask the user to describe ` +
+    `the image, or suggest switching to a vision-capable model.]`
+  );
+}
+
+export function createGuardedReadTool(
+  cwd: string,
+  getActiveModel: () => Model<Api> | null,
+): AgentTool<any> {
   // pi's read tool's renderer accepts both `file_path` and `path` for legacy
   // compatibility with Anthropic-style tool calls — guard both.
   const guarded = wrapPathTool(createReadTool(cwd), cwd, ['path', 'file_path']);
@@ -156,6 +175,21 @@ export function createGuardedReadTool(cwd: string): AgentTool<any> {
         signal,
         onUpdate,
       );
+      // If the read produced an image but the active model has no vision
+      // support, replace the whole result with one clear note. Dropping the
+      // image part also stops us shipping an attachment a text-only model
+      // would reject or silently ignore.
+      const model = getActiveModel();
+      if (
+        model &&
+        !model.input.includes('image') &&
+        result.content.some((c) => c.type === 'image')
+      ) {
+        return {
+          ...result,
+          content: [{ type: 'text' as const, text: nonVisionImageNote(model) }],
+        };
+      }
       if (!raw) return result;
       const expanded = expandHome(raw);
       const abs = path.isAbsolute(expanded)

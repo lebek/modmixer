@@ -66,11 +66,12 @@ import { notifyTestStatusTool } from './tools/notify-test-status.js';
 import { sendToast } from './notifications.js';
 import { loadSettings, saveSettings } from './settings.js';
 import {
-  fetchOpenRouterPricing,
+  fetchOpenRouterCatalog,
   getCachedOpenRouterPricing,
-  isOpenRouterPricingStale,
+  getCachedOpenRouterInputs,
+  isOpenRouterCatalogStale,
   type OpenRouterCost,
-} from './openrouter-pricing.js';
+} from './openrouter-catalog.js';
 import {
   fetchOpenRouterCredits,
   type OpenRouterCredits,
@@ -122,6 +123,7 @@ const TRUNCATION_RECOVERY_PROMPT =
 function buildCustomTools(
   cwd: string,
   getActiveScope: () => ConversationScope | null,
+  getActiveModel: () => Model<Api> | null,
 ): AgentTool<any>[] {
   return [
     createScaffoldModTool(getActiveScope),
@@ -150,7 +152,7 @@ function buildCustomTools(
     // Override pi's path-shaped built-ins with versions that enforce the
     // allowlist. Custom tools win over built-ins by name in pi's
     // `_refreshToolRegistry`, so these shadow the defaults entirely.
-    createGuardedReadTool(cwd),
+    createGuardedReadTool(cwd, getActiveModel),
     createGuardedWriteTool(cwd),
     createGuardedEditTool(cwd),
     createGuardedGrepTool(cwd),
@@ -491,7 +493,11 @@ export class AgentHost {
       path.join(this.agentDir, 'models.json'),
     );
     this.settingsManager = SettingsManager.create(this.cwd, this.agentDir);
-    const customAgentTools = buildCustomTools(this.cwd, () => this.active?.scope ?? null);
+    const customAgentTools = buildCustomTools(
+      this.cwd,
+      () => this.active?.scope ?? null,
+      () => this.active?.session.model ?? null,
+    );
     this.allowedToolNames = [
       ...BUILTIN_TOOL_NAMES,
       ...customAgentTools
@@ -520,24 +526,25 @@ export class AgentHost {
     } catch (err) {
       console.error('AgentHost.primeAfterReady failed:', err);
     }
-    // Best-effort pricing prime: cached map is consulted by the
-    // registration above. If the cache is empty or stale, refresh in the
-    // background and re-register so subsequent turns pick up real rates.
-    if (!getCachedOpenRouterPricing() || isOpenRouterPricingStale()) {
-      void fetchOpenRouterPricing()
+    // Best-effort catalogue prime: the cached pricing/modality maps are
+    // consulted by the registration above. If the cache is empty or stale,
+    // refresh in the background and re-register so subsequent turns pick up
+    // real rates and accurate image support.
+    if (isOpenRouterCatalogStale()) {
+      void fetchOpenRouterCatalog()
         .then(() => {
           try {
             this.applyOpenRouterRegistration();
           } catch (err) {
             console.error(
-              'AgentHost: failed to re-register openrouter after pricing fetch:',
+              'AgentHost: failed to re-register openrouter after catalogue fetch:',
               err,
             );
           }
         })
         .catch(() => {
-          // Pricing fetch is best-effort — failures just leave $0 rates in
-          // place until the next launch.
+          // Catalogue fetch is best-effort — failures just leave $0 rates and
+          // text-only input in place until the next launch.
         });
     }
   }
@@ -547,9 +554,9 @@ export class AgentHost {
    * registry. Pi's built-in openrouter catalog includes ~300 entries, but
    * the picker only surfaces what the user has explicitly saved here —
    * registering replaces those built-ins with our short list. Per-million
-   * token rates are pulled from the cached OpenRouter catalogue (see
-   * `openrouter-pricing.ts`); slugs missing from the cache fall back to
-   * zero, which renders as "$0" in the UI until the next refresh lands.
+   * token rates and image support are pulled from the cached OpenRouter
+   * catalogue (see `openrouter-catalog.ts`); slugs missing from the cache
+   * fall back to $0 rates and text-only input until the next refresh lands.
    */
   /**
    * Effective slug list: pinned (always-on, never persisted) slugs first,
@@ -588,6 +595,7 @@ export class AgentHost {
       return;
     }
     const pricing = getCachedOpenRouterPricing() ?? {};
+    const inputs = getCachedOpenRouterInputs() ?? {};
     const zero: OpenRouterCost = {
       input: 0,
       output: 0,
@@ -595,6 +603,11 @@ export class AgentHost {
       cacheWrite: 0,
     };
     const pricingFor = (slug: string): OpenRouterCost => pricing[slug] ?? zero;
+    // Image support comes straight from the catalogue's `input_modalities`.
+    // Slugs missing from the cache fall back to text-only — the safe default,
+    // since the read tool strips images for non-vision models.
+    const inputFor = (slug: string): ('text' | 'image')[] =>
+      inputs[slug] ?? ['text'];
     this.modelRegistry.registerProvider(OPENROUTER_PROVIDER, {
       baseUrl: OPENROUTER_BASE_URL,
       api: 'openai-completions',
@@ -622,7 +635,7 @@ export class AgentHost {
         // known reasoning families we flip this on so the saved preference
         // actually flows through.
         reasoning: slugSupportsReasoning(slug),
-        input: ['text'],
+        input: inputFor(slug),
         cost: pricingFor(slug),
         // 200k is a safe upper bound for "modern" OpenRouter models; the
         // actual limit is enforced server-side regardless of what we say.
