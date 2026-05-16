@@ -320,19 +320,29 @@ export async function publishToWorkshop(folder: string): Promise<PublishResult> 
   // Stage *after* writePublishedFileId so the staged copy includes the
   // freshly-minted About/PublishedFileId.txt for newly-created items.
   const staged = await stageContentForPublish(modFolder);
+
+  // The first publish seeds the Workshop page's title, description, and tags
+  // from About.xml. On later updates we send only content/preview/changeNote
+  // and omit those fields — Steam preserves any UgcUpdate field we leave out,
+  // so a modder's Steam-side edits (BBCode description, rename, tag tweaks)
+  // survive a republish from Modmixer instead of being clobbered.
+  const updateDetails: Parameters<typeof ws.updateItemWithCallback>[1] = {
+    changeNote,
+    previewPath,
+    contentPath: staged.contentPath,
+  };
+  if (!existing) {
+    updateDetails.title = about.name;
+    updateDetails.description = about.description;
+    updateDetails.tags = tags;
+    updateDetails.visibility = VISIBILITY_PUBLIC;
+  }
+
   try {
     await new Promise<void>((resolve, reject) => {
       ws.updateItemWithCallback(
         itemId,
-        {
-          title: about.name,
-          description: about.description,
-          changeNote,
-          previewPath,
-          contentPath: staged.contentPath,
-          tags,
-          visibility: VISIBILITY_PUBLIC,
-        },
+        updateDetails,
         RIMWORLD_APP_ID,
         () => resolve(),
         (err: unknown) => reject(err instanceof Error ? err : new Error(String(err))),
