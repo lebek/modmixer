@@ -149,6 +149,30 @@ async function stagePrunedSteamworks() {
   }
 }
 
+// Stage @silvia-odwyer/photon-node inside a directory literally named
+// node_modules so it lands at resources/node_modules/@silvia-odwyer/
+// photon-node in the packaged app. photon-node is the pure-WASM image
+// library behind pi-coding-agent's read tool (resizes images before they're
+// sent to the model). Unlike better-sqlite3 / web-tree-sitter / resvg-wasm,
+// its loader is buried inside @mariozechner/pi-coding-agent and does a bare
+// `import("@silvia-odwyer/photon-node")` with no resourcesPath fallback — so
+// we can't dual-resolve it from our own code. Shipping it inside a
+// node_modules/ tree under resourcesPath lets Node's bare-specifier
+// resolution find it by directory walk-up out of the asar. photon-node
+// vendors its photon_rs_bg.wasm sibling, so copying the whole package dir
+// keeps its own __dirname-relative readFileSync working.
+async function stagePhotonNodeModules() {
+  const src = path.resolve(
+    __dirname,
+    'node_modules/@silvia-odwyer/photon-node',
+  );
+  const stageRoot = path.resolve(__dirname, 'dist/node_modules');
+  const dest = path.join(stageRoot, '@silvia-odwyer/photon-node');
+  await fs.rm(stageRoot, { recursive: true, force: true });
+  await fs.mkdir(path.dirname(dest), { recursive: true });
+  await fs.cp(src, dest, { recursive: true });
+}
+
 // Azure Trusted Signing wiring. The release workflow installs the
 // Microsoft.Trusted.Signing.Client NuGet package on Windows runners and writes
 // a metadata file describing the cert profile, then exposes both paths via
@@ -242,6 +266,13 @@ const config: ForgeConfig = {
       // resources/preview-templates/, resolved at runtime in
       // preview-template-renderer.ts via the dual-resolve pattern.
       'assets/preview-templates',
+      // Staged node_modules tree (currently just @silvia-odwyer/photon-node).
+      // Flattens to resources/node_modules/, so the bare
+      // `import("@silvia-odwyer/photon-node")` inside pi-coding-agent's read
+      // tool resolves by directory walk-up. Built by stagePhotonNodeModules
+      // in generateAssets. See that function for why photon can't use the
+      // resourcesPath dual-resolve pattern the other native/wasm deps use.
+      'dist/node_modules',
     ],
   },
   hooks: {
@@ -254,6 +285,7 @@ const config: ForgeConfig = {
       await stagePrunedSteamworks();
       await stageBetterSqlite();
       await stageBridge();
+      await stagePhotonNodeModules();
     },
   },
   // Forge's ForgeRebuildOptions explicitly omits `arch`; the value is read
