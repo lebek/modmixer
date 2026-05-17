@@ -10,7 +10,7 @@ import { resolveSymbol, type SymbolMatch } from '../index/resolve-symbol.js';
 const Params = Type.Object({
   name: Type.String({
     description:
-      'Symbol to look up. Accepts (a) a bare short name like "DrawAt" or "WorkTypeDef" — returns a disambiguation list with namespace + signature for each match; (b) a partial FQN like "LetterMaker.MakeLetter" — returns the body if unique, all overloads if not; (c) a full FQN like "RimWorld.LetterMaker.MakeLetter" — returns just that one body.',
+      'Symbol to look up. Accepts (a) a bare short name like "DrawAt" or "WorkTypeDef" — returns the body when one symbol matches, every candidate body inlined when only a few share the name, or a disambiguation list with namespace + signature when many do; (b) a partial FQN like "LetterMaker.MakeLetter" — returns the body if unique, all overloads if not; (c) a full FQN like "RimWorld.LetterMaker.MakeLetter" — returns just that one body.',
   }),
   kind: Type.Optional(
     Type.String({
@@ -46,6 +46,12 @@ interface ResolveOnlyDetails {
 const NO_INDEX_MSG =
   'RimWorld source index is not built yet. Open Settings → RimWorld index → Rebuild.';
 
+// When a bare short name hits a small handful of distinct FQNs, inline every
+// candidate's body instead of returning a list the agent must re-query one
+// FQN at a time. Past either bound, fall back to the disambiguation list.
+const INLINE_FQN_LIMIT = 3;
+const INLINE_BYTE_BUDGET = 6144;
+
 export const readCsharpSymbolTool: AgentTool<
   typeof Params,
   { hits: SymbolHit[]; matches?: SymbolMatch[] }
@@ -53,7 +59,7 @@ export const readCsharpSymbolTool: AgentTool<
   name: 'read_csharp_symbol',
   label: 'Read C# symbol',
   description:
-    "Look up a C# type or member in the decompiled RimWorld source. Handles both 'what is this and where does it live' and 'show me the body' in one call:\n\n• Pass a bare short name (\"DrawAt\", \"WorkTypeDef\") → returns the symbol-table entries: namespace, kind, FQN, signature. Use this to find what `using …;` you need or to disambiguate before reading a body.\n• Pass a partial FQN (\"LetterMaker.MakeLetter\") or full FQN (\"RimWorld.LetterMaker.MakeLetter\") → returns the symbol body. All overloads are returned together when ambiguous.\n\nFor textual occurrences (call sites, string literals), use search_source. For XML def lookup, use search_defs.",
+    "Look up a C# type or member in the decompiled RimWorld source. Handles both 'what is this and where does it live' and 'show me the body' in one call:\n\n• Pass a bare short name (\"DrawAt\", \"WorkTypeDef\") → returns the body when one symbol matches, or every candidate body inlined when only a few symbols share the name (no follow-up call needed). When many symbols share the name, returns the symbol-table entries instead — namespace, kind, FQN, signature — so you can pick one.\n• Pass a partial FQN (\"LetterMaker.MakeLetter\") or full FQN (\"RimWorld.LetterMaker.MakeLetter\") → returns the symbol body. All overloads are returned together when ambiguous.\n\nFor textual occurrences (call sites, string literals), use search_source. For XML def lookup, use search_defs.",
   parameters: Params,
   async execute(_id, params): Promise<AgentToolResult<{ hits: SymbolHit[]; matches?: SymbolMatch[] }>> {
     const status = getIndexStatus();
@@ -93,6 +99,17 @@ export const readCsharpSymbolTool: AgentTool<
           ...m,
           filePath: path.resolve(sourceRoot, m.filePath),
         }));
+        // Small disambiguation set → inline every candidate's body so the
+        // agent picks by reading code, not by spending one re-call per FQN.
+        if (distinctFqns.size <= INLINE_FQN_LIMIT) {
+          const inlined = await inlineMatchBodies(matches, INLINE_BYTE_BUDGET);
+          if (inlined) {
+            return {
+              content: [{ type: 'text', text: inlined.text }],
+              details: { hits: inlined.hits, matches },
+            };
+          }
+        }
         return {
           content: [{ type: 'text', text: formatMatches(matches) }],
           details: { hits: [], matches },
@@ -235,6 +252,55 @@ export const readCsharpSymbolTool: AgentTool<
     };
   },
 };
+
+/**
+ * Read and inline the bodies of a small set of disambiguation candidates so
+ * the agent doesn't have to re-call once per FQN. Returns null — caller falls
+ * back to the bare list — when any file can't be read or the combined bodies
+ * exceed `byteBudget`.
+ */
+async function inlineMatchBodies(
+  matches: SymbolMatch[],
+  byteBudget: number,
+): Promise<{ text: string; hits: SymbolHit[] } | null> {
+  const hits: SymbolHit[] = [];
+  let total = 0;
+  for (const m of matches) {
+    let body: string;
+    try {
+      const fileText = await fsp.readFile(m.filePath, 'utf8');
+      body = fileText
+        .split(/\r?\n/)
+        .slice(m.startLine - 1, m.endLine)
+        .join('\n');
+    } catch {
+      return null;
+    }
+    total += Buffer.byteLength(body, 'utf8');
+    if (total > byteBudget) return null;
+    hits.push({
+      fqn: m.fqn,
+      shortName: m.shortName,
+      kind: m.kind,
+      parentFqn: m.parentFqn,
+      filePath: m.filePath,
+      startLine: m.startLine,
+      endLine: m.endLine,
+      signature: m.signature,
+      body,
+      truncated: false,
+    });
+  }
+  const text =
+    `Found ${matches.length} ${matches.length === 1 ? 'match' : 'matches'} — bodies inlined below. Pick the FQN you need; no follow-up call required.\n\n` +
+    hits
+      .map(
+        (h) =>
+          `=== ${h.kind} ${h.fqn} (${h.filePath}:${h.startLine}-${h.endLine}) ===\n${h.body}`,
+      )
+      .join('\n\n');
+  return { text, hits };
+}
 
 function formatMatches(matches: SymbolMatch[]): string {
   const lines: string[] = [
