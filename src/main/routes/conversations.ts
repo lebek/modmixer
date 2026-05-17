@@ -1,9 +1,12 @@
 import type { ThinkingLevel } from '@mariozechner/pi-agent-core';
 import {
+  archiveConversation,
   clearActiveForMod,
   getActiveForMod,
   listConversations,
+  listConversationsForMod,
   setActiveForMod,
+  unarchiveConversation,
   type ConversationScope,
 } from '../../agent/conversations.js';
 import type { ModelSelection } from '../../agent/settings.js';
@@ -39,12 +42,43 @@ export function registerConversationRoutes(ctx: RouteContext): void {
     await host.closeSession(conversationId);
   });
 
+  // Free a session the multi-chat UI switched away from — a no-op if the
+  // chat has a turn in flight or is driving monitoring. See releaseIdleSession.
+  ipc.handle(
+    'modmixer:agent:release-idle',
+    async (_evt, conversationId: string) => {
+      await host.releaseIdleSession(conversationId);
+    },
+  );
+
   ipc.handle(
     'modmixer:agent:get-context-usage',
     (_evt, conversationId: string) => host.getContextUsage(conversationId),
   );
 
   ipc.handle('modmixer:conversations:list', () => listConversations());
+
+  ipc.handle('modmixer:conversations:list-for-mod', (_evt, folder: string) =>
+    listConversationsForMod(folder),
+  );
+
+  ipc.handle('modmixer:conversations:archive', (_evt, id: string) => {
+    archiveConversation(id);
+  });
+
+  ipc.handle('modmixer:conversations:unarchive', (_evt, id: string) => {
+    unarchiveConversation(id);
+  });
+
+  // Multi-chat: record which chat a mod is showing. Unlike start-fresh this
+  // doesn't create or clear anything — it just moves the active pointer to an
+  // existing chat as the user switches between them.
+  ipc.handle(
+    'modmixer:conversations:set-active-for-mod',
+    (_evt, folder: string, id: string) => {
+      setActiveForMod(folder, id);
+    },
+  );
 
   ipc.handle(
     'modmixer:conversations:create',

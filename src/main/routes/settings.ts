@@ -54,6 +54,11 @@ export function registerSettingsRoutes(ctx: RouteContext): void {
     },
   );
 
+  ipc.handle(
+    'modmixer:settings:set-multi-chat',
+    (_evt, enabled: boolean) => saveSettings({ multiChat: enabled }),
+  );
+
   ipc.handle('modmixer:models:list', () => host.listAvailableModels());
 
   ipc.handle('modmixer:oauth:list', () => host.listOAuthLinks());

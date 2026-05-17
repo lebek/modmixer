@@ -435,6 +435,12 @@ export class AgentHost {
    */
   private constructing = new Map<string, Promise<OpenSession>>();
   /**
+   * Conversations with a turn in flight, tracked from agent_start/agent_end
+   * events. `releaseIdleSession` consults this so the multi-chat UI can free
+   * a switched-away session without aborting live work.
+   */
+  private busyConversations = new Set<string>();
+  /**
    * Built lazily once on first session construction and reused thereafter.
    * The strip-thinking transform is stateless; one extension instance is
    * fine across every session in the app's lifetime.
@@ -687,6 +693,7 @@ export class AgentHost {
     const entry = this.sessions.get(conversationId);
     if (!entry) return;
     this.sessions.delete(conversationId);
+    this.busyConversations.delete(conversationId);
     try {
       await entry.session.abort();
     } catch (err) {
@@ -909,6 +916,12 @@ export class AgentHost {
       event,
     });
 
+    if (event.type === 'agent_start') {
+      this.busyConversations.add(conversationId);
+    } else if (event.type === 'agent_end') {
+      this.busyConversations.delete(conversationId);
+    }
+
     // Auto-title from the first user message as soon as it lands. Don't wait
     // for agent_end, which may never fire if the user closes the window
     // mid-turn.
@@ -1001,6 +1014,21 @@ export class AgentHost {
     if (this.monitoringConversationId === conversationId) {
       this.stopMonitoring();
     }
+    await this.disposeSession(conversationId);
+  }
+
+  /**
+   * Free a session the multi-chat UI has switched away from. Unlike
+   * closeSession this is conservative: it skips a chat with a turn in flight
+   * (disposing would abort live work) and skips the chat currently driving
+   * in-game monitoring. The session reconstructs lazily on the next
+   * openSession, so switching back is seamless. This is what keeps memory
+   * bounded when a mod accumulates many chats.
+   */
+  async releaseIdleSession(conversationId: string): Promise<void> {
+    if (!this.sessions.has(conversationId)) return;
+    if (this.busyConversations.has(conversationId)) return;
+    if (this.monitoringConversationId === conversationId) return;
     await this.disposeSession(conversationId);
   }
 

@@ -133,6 +133,7 @@ export interface Channels {
   'modmixer:agent:send': (conversationId: string, text: string) => void;
   'modmixer:agent:interrupt': (conversationId: string) => void;
   'modmixer:agent:close': (conversationId: string) => void;
+  'modmixer:agent:release-idle': (conversationId: string) => void;
   'modmixer:agent:get-context-usage': (
     conversationId: string,
   ) => import('@mariozechner/pi-coding-agent').ContextUsage | null;
@@ -144,10 +145,18 @@ export interface Channels {
   'modmixer:settings:set-analytics-opt-in': (optIn: boolean) => Settings;
   'modmixer:settings:set-theme': (theme: ThemePreference) => Settings;
   'modmixer:settings:set-thinking-level': (level: ThinkingLevel) => Settings;
+  'modmixer:settings:set-multi-chat': (enabled: boolean) => Settings;
   'modmixer:models:list': () => ModelOption[];
 
   // Conversations
   'modmixer:conversations:list': () => Conversation[];
+  'modmixer:conversations:list-for-mod': (folder: string) => Conversation[];
+  'modmixer:conversations:archive': (id: string) => void;
+  'modmixer:conversations:unarchive': (id: string) => void;
+  'modmixer:conversations:set-active-for-mod': (
+    folder: string,
+    id: string,
+  ) => void;
   'modmixer:conversations:create': (
     scope: ConversationScope,
     title?: string,

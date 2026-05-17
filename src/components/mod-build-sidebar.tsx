@@ -5,6 +5,7 @@ import type { AssetCounts } from '../agent/assets/types';
 import { cn } from '@/lib/cn';
 import { appConfirm } from './app-dialog';
 import { useSnapshots } from './saves-view';
+import { ModChatList } from './mod-chat-list';
 
 export type BuildPanel =
   | 'chat'
@@ -22,6 +23,12 @@ export function ModBuildSidebar({
   onBack,
   showAssets,
   onNewChat,
+  multiChat,
+  chatListRev,
+  onSelectChat,
+  onNewChatMulti,
+  onArchiveChat,
+  onUnarchiveChat,
 }: {
   mod: WorkspaceMod | null;
   convo: Conversation;
@@ -30,9 +37,18 @@ export function ModBuildSidebar({
   onBack: () => void;
   showAssets: boolean;
   onNewChat?: () => void;
+  multiChat: boolean;
+  chatListRev: number;
+  onSelectChat: (convo: Conversation) => void;
+  onNewChatMulti: () => void;
+  onArchiveChat: (id: string) => void;
+  onUnarchiveChat: (id: string) => void;
 }) {
   const [assetCounts, setAssetCounts] = useState<AssetCounts | null>(null);
   const saves = useSnapshots(showAssets && mod ? mod.folder : null);
+  // Multi-chat only applies to a real mod — a pre-scaffold draft has no
+  // folder to list chats against and keeps the single-chat flow.
+  const showMultiChat = multiChat && !!mod;
 
   useEffect(() => {
     if (!mod || !showAssets) {
@@ -79,7 +95,7 @@ export function ModBuildSidebar({
         </div>
       </div>
 
-      <nav className="flex-1 overflow-auto py-1">
+      <nav className="no-scrollbar flex-1 overflow-auto py-1">
         <SidebarRow
           label="Chat"
           subtitle="Make or fix your mod"
@@ -87,6 +103,17 @@ export function ModBuildSidebar({
           active={panel === 'chat'}
           onClick={() => onSelectPanel('chat')}
         />
+        {showMultiChat && mod && (
+          <ModChatList
+            modFolder={mod.folder}
+            activeConversationId={convo.id}
+            refreshKey={chatListRev}
+            onSelect={onSelectChat}
+            onNewChat={onNewChatMulti}
+            onArchive={onArchiveChat}
+            onUnarchive={onUnarchiveChat}
+          />
+        )}
         {showAssets && (
           <SidebarRow
             label="Schematic"
@@ -155,7 +182,7 @@ export function ModBuildSidebar({
         )}
       </nav>
 
-      {onNewChat && (
+      {onNewChat && !showMultiChat && (
         <div className="border-t border-line px-4 py-3">
           <button
             type="button"

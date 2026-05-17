@@ -17,7 +17,12 @@ import { applyTheme } from '@/lib/theme';
 import { ModelPicker } from './model-picker';
 import { ThinkingPicker } from './thinking-picker';
 
-export type SettingsSection = 'providers' | 'general' | 'appearance' | 'index';
+export type SettingsSection =
+  | 'providers'
+  | 'general'
+  | 'appearance'
+  | 'index'
+  | 'advanced';
 
 export function AppSettingsDialog({
   onClose,
@@ -34,6 +39,7 @@ export function AppSettingsDialog({
   const [defaultModel, setDefaultModel] = useState<ModelSelection | null>(null);
   const [defaultThinking, setDefaultThinking] =
     useState<ThinkingLevel>('medium');
+  const [multiChat, setMultiChat] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -44,6 +50,7 @@ export function AppSettingsDialog({
       setTheme(s.theme);
       setDefaultModel(s.model);
       setDefaultThinking(s.thinkingLevel);
+      setMultiChat(s.multiChat);
       setLoaded(true);
     });
     void window.modmixer.listModels().then(setModelOptions);
@@ -76,6 +83,11 @@ export function AppSettingsDialog({
     await window.modmixer.setTheme(next);
   };
 
+  const changeMultiChat = async (next: boolean) => {
+    setMultiChat(next);
+    await window.modmixer.setMultiChat(next);
+  };
+
   const sectionTitle =
     section === 'providers'
       ? 'AI providers'
@@ -83,7 +95,9 @@ export function AppSettingsDialog({
         ? 'Appearance'
         : section === 'index'
           ? 'RimWorld index'
-          : 'General';
+          : section === 'advanced'
+            ? 'Advanced'
+            : 'General';
 
   return (
     <div
@@ -115,6 +129,11 @@ export function AppSettingsDialog({
             active={section === 'general'}
             onClick={() => setSection('general')}
           />
+          <SectionTab
+            label="Advanced"
+            active={section === 'advanced'}
+            onClick={() => setSection('advanced')}
+          />
         </nav>
         <div className="flex min-w-0 flex-1 flex-col">
           <div className="flex items-center justify-between border-b border-line px-5 py-3">
@@ -136,6 +155,15 @@ export function AppSettingsDialog({
               <AppearanceSection theme={theme} onChange={changeTheme} />
             )}
             {section === 'index' && <IndexSection />}
+            {section === 'advanced' &&
+              (!loaded ? (
+                <p className="text-sm text-muted">Loading…</p>
+              ) : (
+                <AdvancedSection
+                  multiChat={multiChat}
+                  onChange={changeMultiChat}
+                />
+              ))}
             {section === 'general' && (
               <>
                 {!loaded ? (
@@ -398,6 +426,45 @@ function AppearanceSection({
             </button>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+function AdvancedSection({
+  multiChat,
+  onChange,
+}: {
+  multiChat: boolean;
+  onChange: (next: boolean) => void | Promise<void>;
+}) {
+  return (
+    <div className="space-y-4">
+      <div>
+        <label className="flex cursor-pointer items-start gap-2">
+          <input
+            type="checkbox"
+            checked={multiChat}
+            onChange={(e) => void onChange(e.target.checked)}
+            className="mt-0.5"
+          />
+          <span className="text-sm text-ink">
+            Multiple chats per mod
+            <span className="mt-0.5 block text-xs text-muted">
+              Keep more than one chat per mod and switch between them from the
+              sidebar — chats can even run at the same time. With this off,
+              each mod has a single chat and starting a new one archives the
+              old.
+            </span>
+          </span>
+        </label>
+        {multiChat && (
+          <div className="mt-2 rounded-md border border-warning/40 bg-warning/5 px-3 py-2 text-xs text-warning">
+            Chats that run at the same time can edit the same mod files with no
+            coordination — if two chats change the same code at once, one can
+            overwrite the other's work. Keep parallel chats on separate tasks.
+          </div>
+        )}
       </div>
     </div>
   );

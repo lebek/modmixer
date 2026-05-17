@@ -139,6 +139,13 @@ export interface Settings {
    * here is the user's intent — not necessarily what the next turn will use.
    */
   thinkingLevel: ThinkingLevel;
+  /**
+   * Advanced opt-in: lets a mod keep multiple chats that the user can switch
+   * between (and run concurrently). Off by default — with it off the UI shows
+   * a single active chat per mod exactly as before, and "+ New chat" archives
+   * the current one.
+   */
+  multiChat: boolean;
 }
 
 let cached: Settings | null = null;
@@ -160,6 +167,7 @@ function computeDefaults(): Settings {
     openrouterModels: [],
     localProviders: [],
     thinkingLevel: 'xhigh',
+    multiChat: false,
   };
 }
 
@@ -246,6 +254,9 @@ function normalize(raw: unknown, defaults: Settings): Settings {
   if (isThinkingLevel(obj.thinkingLevel)) {
     next.thinkingLevel = obj.thinkingLevel;
   }
+
+  const multiChat = readBool(obj.multiChat);
+  if (multiChat !== undefined) next.multiChat = multiChat;
 
   const model = readObjectShape<ModelSelection>(obj.model, {
     provider: readString,

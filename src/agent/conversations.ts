@@ -47,6 +47,13 @@ export interface Conversation {
    * `model` — stamped at creation, backfilled for legacy chats.
    */
   thinkingLevel?: ThinkingLevel;
+  /**
+   * When set, the chat is archived: kept on disk and fully restorable, but
+   * hidden from the default multi-chat list. Undefined means active. Only
+   * ever set while the multi-chat setting is on — regular-mode users never
+   * see this field.
+   */
+  archivedAt?: number;
 }
 
 interface Persisted {
@@ -177,6 +184,21 @@ export function setConvThinkingLevel(id: string, level: ThinkingLevel): void {
   const c = getConversation(id);
   if (!c) return;
   c.thinkingLevel = level;
+  persist();
+}
+
+export function archiveConversation(id: string): void {
+  const c = getConversation(id);
+  if (!c) return;
+  c.archivedAt = Date.now();
+  // Don't bump updatedAt — archiving is a visibility change, not an edit.
+  persist();
+}
+
+export function unarchiveConversation(id: string): void {
+  const c = getConversation(id);
+  if (!c) return;
+  delete c.archivedAt;
   persist();
 }
 

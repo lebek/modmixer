@@ -17,6 +17,8 @@ import { appAlert } from './components/app-dialog';
 import type { BuildPanel } from './components/mod-build-sidebar';
 import {
   dropConversation,
+  isConversationBusy,
+  isConversationEmpty,
   markConversationLoading,
   seedConversation,
   useAnyBusy,
@@ -49,6 +51,10 @@ export function App() {
   const [registryEnvelope, setRegistryEnvelope] = useState<RegistryEnvelope | null>(null);
   const [session, setSession] = useState<ActiveSession | null>(null);
   const [recoveryShown, setRecoveryShown] = useState(false);
+  const [multiChat, setMultiChat] = useState(false);
+  // Bumped after a chat is created/archived/restored so the sidebar's chat
+  // list re-fetches. The list also self-refreshes off agent events.
+  const [chatListRev, setChatListRev] = useState(0);
 
   const hasAi = availableModels.length > 0;
   // Header indicator: lit while ANY open tab's agent is working.
@@ -76,6 +82,15 @@ export function App() {
   useEffect(() => {
     void window.modmixer.getAppVersion().then(setAppVersion);
   }, []);
+
+  // The multi-chat toggle lives in settings; re-read it whenever the settings
+  // dialog closes so flipping it takes effect without a restart.
+  const refreshMultiChat = useCallback(() => {
+    void window.modmixer.getSettings().then((s) => setMultiChat(s.multiChat));
+  }, []);
+  useEffect(() => {
+    refreshMultiChat();
+  }, [refreshMultiChat]);
 
   useEffect(() => {
     void refreshModels();
@@ -272,6 +287,95 @@ export function App() {
         seedConversation(convo.id, []);
       });
   }, [tabs, focusedFolder]);
+
+  // Multi-chat: switch the focused mod's tab to an existing chat. The
+  // previous chat's runtime stays in the store (a background turn keeps
+  // streaming); only its session is freed, and only if it's idle.
+  const selectChat = useCallback(
+    async (convo: Conversation) => {
+      const tab = tabs.find((t) => t.folder === focusedFolder);
+      if (!tab || tab.conversation.id === convo.id) return;
+      const oldId = tab.conversation.id;
+      // A chat with a turn in flight has a live, accurate store runtime —
+      // leave it alone. Otherwise show a loading state until its transcript
+      // re-hydrates (its session may have been freed while switched away).
+      if (!isConversationBusy(convo.id)) markConversationLoading(convo.id);
+      await window.modmixer.setActiveConversationForMod(tab.folder, convo.id);
+      setTabs((prev) =>
+        prev.map((t) =>
+          t.folder === tab.folder
+            ? { ...t, conversation: convo, buildPanel: 'chat' }
+            : t,
+        ),
+      );
+      // Switching is non-destructive — keep the previous chat, just free its
+      // session if it's idle. Untouched chats are reaped by newChatMulti, not
+      // here: deleting on switch-away would orphan a chat the user is about
+      // to return to.
+      void window.modmixer.releaseIdleConversation(oldId);
+      void window.modmixer
+        .openConversationSession(convo.id)
+        .then(({ messages }) => {
+          if (!isConversationBusy(convo.id)) {
+            seedConversation(convo.id, messages);
+          }
+        })
+        .catch((err) => {
+          console.error('Failed to open conversation session:', err);
+          if (!isConversationBusy(convo.id)) seedConversation(convo.id, []);
+        });
+    },
+    [tabs, focusedFolder],
+  );
+
+  // Multi-chat "+ New chat": create a chat and switch to it. Unlike the
+  // single-chat flow this keeps the previous chat — it stays in the list.
+  const newChatMulti = useCallback(async () => {
+    const tab = tabs.find((t) => t.folder === focusedFolder);
+    if (!tab) return;
+    // If the user never sent a message to the chat they're on, drop it as the
+    // next one is created — otherwise "+ New chat" stacks up untouched "New
+    // chat" entries. The new chat is always kept, so the mod never ends up
+    // with zero chats.
+    const oldId = tab.conversation.id;
+    const discardOld = isConversationEmpty(oldId);
+    const convo = await window.modmixer.startFreshChatForMod(tab.folder);
+    await selectChat(convo);
+    if (discardOld) {
+      void window.modmixer.deleteConversation(oldId);
+      dropConversation(oldId);
+    }
+    setChatListRev((n) => n + 1);
+  }, [tabs, focusedFolder, selectChat]);
+
+  // Archive a chat. If it's the one on screen, fall back to the most recent
+  // remaining chat (or a fresh one when nothing is left).
+  const archiveChat = useCallback(
+    async (id: string) => {
+      await window.modmixer.archiveConversation(id);
+      const tab = tabs.find((t) => t.folder === focusedFolder);
+      if (tab && tab.conversation.id === id) {
+        const list = await window.modmixer.listConversationsForMod(tab.folder);
+        const next = list
+          .filter((c) => c.id !== id && !c.archivedAt)
+          .sort((a, b) => b.updatedAt - a.updatedAt)[0];
+        if (next) {
+          await selectChat(next);
+        } else {
+          await selectChat(
+            await window.modmixer.startFreshChatForMod(tab.folder),
+          );
+        }
+      }
+      setChatListRev((n) => n + 1);
+    },
+    [tabs, focusedFolder, selectChat],
+  );
+
+  const unarchiveChat = useCallback(async (id: string) => {
+    await window.modmixer.unarchiveConversation(id);
+    setChatListRev((n) => n + 1);
+  }, []);
 
   // Restore from a save replaces the focused mod's whole world: files, chat
   // list, and which chat is active. Re-seed the conversation store and swap
@@ -564,6 +668,12 @@ export function App() {
           hasAi={hasAi}
           availableModels={availableModels}
           onConnect={() => openSettings('providers')}
+          multiChat={multiChat}
+          chatListRev={chatListRev}
+          onSelectChat={selectChat}
+          onNewChatMulti={newChatMulti}
+          onArchiveChat={archiveChat}
+          onUnarchiveChat={unarchiveChat}
         />
       ) : (
         <ModsView
@@ -576,7 +686,10 @@ export function App() {
       {settingsSection && (
         <AppSettingsDialog
           initialSection={settingsSection}
-          onClose={() => setSettingsSection(null)}
+          onClose={() => {
+            setSettingsSection(null);
+            refreshMultiChat();
+          }}
         />
       )}
 

@@ -247,3 +247,26 @@ function anyBusy(): boolean {
 export function useAnyBusy(): boolean {
   return useSyncExternalStore(subscribeGlobal, anyBusy);
 }
+
+/**
+ * Non-reactive check: does this conversation have a turn in flight right now?
+ * Used when the multi-chat UI switches chats — re-seeding a busy chat from its
+ * transcript would drop the in-flight streaming state, so the switch skips the
+ * re-seed when this is true.
+ */
+export function isConversationBusy(conversationId: string): boolean {
+  const rt = runtimes.get(conversationId);
+  return !!rt && (rt.busy || rt.streaming !== null);
+}
+
+/**
+ * Non-reactive check: has this conversation never received a user message?
+ * The multi-chat switcher discards such chats on switch-away so the list isn't
+ * littered with untouched "New chat" entries. Returns false when the runtime
+ * is unknown or busy — we only discard a chat we can positively confirm empty.
+ */
+export function isConversationEmpty(conversationId: string): boolean {
+  const rt = runtimes.get(conversationId);
+  if (!rt || rt.busy || rt.streaming) return false;
+  return !rt.messages.some((m) => m.role === 'user');
+}

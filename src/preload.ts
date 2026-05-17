@@ -46,6 +46,8 @@ const api = {
     invoke('modmixer:agent:interrupt', conversationId),
   closeConversation: (conversationId: string) =>
     invoke('modmixer:agent:close', conversationId),
+  releaseIdleConversation: (conversationId: string) =>
+    invoke('modmixer:agent:release-idle', conversationId),
   getContextUsage: (conversationId: string) =>
     invoke('modmixer:agent:get-context-usage', conversationId),
   onEvent: (handler: (env: import('./preload/typed-ipc').AgentEventEnvelope) => void) =>
@@ -66,10 +68,20 @@ const api = {
     invoke('modmixer:settings:set-theme', theme),
   setThinkingLevel: (level: import('@mariozechner/pi-agent-core').ThinkingLevel) =>
     invoke('modmixer:settings:set-thinking-level', level),
+  setMultiChat: (enabled: boolean) =>
+    invoke('modmixer:settings:set-multi-chat', enabled),
   listModels: () => invoke('modmixer:models:list'),
 
   // Conversations
   listConversations: () => invoke('modmixer:conversations:list'),
+  listConversationsForMod: (folder: string) =>
+    invoke('modmixer:conversations:list-for-mod', folder),
+  archiveConversation: (id: string) =>
+    invoke('modmixer:conversations:archive', id),
+  unarchiveConversation: (id: string) =>
+    invoke('modmixer:conversations:unarchive', id),
+  setActiveConversationForMod: (folder: string, id: string) =>
+    invoke('modmixer:conversations:set-active-for-mod', folder, id),
   createConversation: (
     scope: import('./agent/conversations').ConversationScope,
     title?: string,

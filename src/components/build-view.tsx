@@ -25,6 +25,12 @@ export function BuildView({
   hasAi,
   availableModels,
   onConnect,
+  multiChat,
+  chatListRev,
+  onSelectChat,
+  onNewChatMulti,
+  onArchiveChat,
+  onUnarchiveChat,
 }: {
   activeMod: WorkspaceMod | null;
   activeConvo: Conversation;
@@ -40,6 +46,12 @@ export function BuildView({
   hasAi: boolean;
   availableModels: ModelOption[];
   onConnect: () => void;
+  multiChat: boolean;
+  chatListRev: number;
+  onSelectChat: (convo: Conversation) => void;
+  onNewChatMulti: () => void;
+  onArchiveChat: (id: string) => void;
+  onUnarchiveChat: (id: string) => void;
 }) {
   // Pre-scaffold "new mod" chat: no mod yet, no Assets to browse.
   // Force panel='chat' and hide the Assets entry until a mod exists.
@@ -55,6 +67,12 @@ export function BuildView({
         onBack={onBack}
         showAssets={!newModInProgress}
         onNewChat={newModInProgress ? undefined : onNewChat}
+        multiChat={multiChat}
+        chatListRev={chatListRev}
+        onSelectChat={onSelectChat}
+        onNewChatMulti={onNewChatMulti}
+        onArchiveChat={onArchiveChat}
+        onUnarchiveChat={onUnarchiveChat}
       />
       <div className="flex min-w-0 flex-1 flex-col">
         {activeMod && (
