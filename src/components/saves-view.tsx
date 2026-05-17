@@ -110,7 +110,7 @@ export function SavesView({
               onCancel={() => setNewLabel(null)}
               onCommit={(label) =>
                 run(async () => {
-                  await window.modmixer.saveSnapshot(label || null);
+                  await window.modmixer.saveSnapshot(folder, label || null);
                   setNewLabel(null);
                 })
               }

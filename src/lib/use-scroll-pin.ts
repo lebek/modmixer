@@ -18,11 +18,19 @@ import { useCallback, useEffect, useRef, useState, type DependencyList, type Ref
  * `instantOnFirstRun` makes the very first scroll instant (use when the
  * container has just mounted and we don't want a long animation through
  * the whole transcript).
+ *
+ * `scrollToEnd` overrides how the bottom is reached. A virtualized list
+ * can't just `scrollTo(scrollHeight)` — unmeasured rows make scrollHeight an
+ * estimate — so it passes a function that drives the virtualizer instead.
  */
 export function useScrollPin(
   ref: RefObject<HTMLElement | null>,
   deps: DependencyList,
-  options: { slack?: number; instantOnFirstRun?: boolean } = {},
+  options: {
+    slack?: number;
+    instantOnFirstRun?: boolean;
+    scrollToEnd?: (smooth: boolean) => void;
+  } = {},
 ): {
   pinned: boolean;
   hasNewBelow: boolean;
@@ -30,7 +38,7 @@ export function useScrollPin(
   /** Reset the "first run" flag — call from your conversation-switch effect. */
   resetFirstRun: () => void;
 } {
-  const { slack = 64, instantOnFirstRun = true } = options;
+  const { slack = 64, instantOnFirstRun = true, scrollToEnd } = options;
   const [pinned, setPinned] = useState(true);
   const [hasNewBelow, setHasNewBelow] = useState(false);
   const justSwitched = useRef(instantOnFirstRun);
@@ -81,10 +89,14 @@ export function useScrollPin(
       const el = ref.current;
       if (!el) return;
       programmatic.current = true;
-      el.scrollTo({
-        top: el.scrollHeight,
-        behavior: smooth ? 'smooth' : 'auto',
-      });
+      if (scrollToEnd) {
+        scrollToEnd(smooth);
+      } else {
+        el.scrollTo({
+          top: el.scrollHeight,
+          behavior: smooth ? 'smooth' : 'auto',
+        });
+      }
       if (programmaticTimer.current !== null) {
         window.clearTimeout(programmaticTimer.current);
       }
@@ -96,7 +108,7 @@ export function useScrollPin(
         smooth ? 600 : 50,
       );
     },
-    [ref],
+    [ref, scrollToEnd],
   );
 
   useEffect(() => {

@@ -19,10 +19,11 @@ export function registerSettingsRoutes(ctx: RouteContext): void {
 
   ipc.handle(
     'modmixer:settings:set-model',
-    async (_evt, selection: ModelSelection) => {
-      const next = saveSettings({ model: selection });
-      await host.setModel(selection);
-      return next;
+    (_evt, selection: ModelSelection) => {
+      // The default model for NEW chats only. Existing chats carry their own
+      // model (see modmixer:conversations:set-model), so this never touches a
+      // live session.
+      return saveSettings({ model: selection });
     },
   );
 
@@ -47,9 +48,9 @@ export function registerSettingsRoutes(ctx: RouteContext): void {
   ipc.handle(
     'modmixer:settings:set-thinking-level',
     (_evt, level: ThinkingLevel) => {
-      const next = saveSettings({ thinkingLevel: level });
-      host.setThinkingLevel(level);
-      return next;
+      // Default reasoning effort for NEW chats only; existing chats keep
+      // their own (see modmixer:conversations:set-thinking-level).
+      return saveSettings({ thinkingLevel: level });
     },
   );
 

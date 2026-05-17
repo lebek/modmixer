@@ -1,3 +1,4 @@
+import type { ThinkingLevel } from '@mariozechner/pi-agent-core';
 import {
   clearActiveForMod,
   getActiveForMod,
@@ -5,23 +6,37 @@ import {
   setActiveForMod,
   type ConversationScope,
 } from '../../agent/conversations.js';
+import type { ModelSelection } from '../../agent/settings.js';
 import type { RouteContext } from './context.js';
 
 /**
- * Agent send/interrupt + conversation index. send/create/switch all gate
+ * Agent send/interrupt/close + conversation index. send/create/open all gate
  * on `requireConsent` because they would otherwise let the agent run before
  * the user has accepted the consent screen.
+ *
+ * Every agent channel is keyed by `conversationId` — one open conversation
+ * per mod tab, each with its own independently-running session.
  */
 export function registerConversationRoutes(ctx: RouteContext): void {
   const { ipc, host, requireConsent } = ctx;
 
-  ipc.handle('modmixer:agent:send', async (_evt, text: string) => {
-    requireConsent();
-    await host.send(text);
-  });
+  ipc.handle(
+    'modmixer:agent:send',
+    async (_evt, conversationId: string, text: string) => {
+      requireConsent();
+      await host.send(conversationId, text);
+    },
+  );
 
-  ipc.handle('modmixer:agent:interrupt', async () => {
-    await host.interrupt();
+  ipc.handle(
+    'modmixer:agent:interrupt',
+    async (_evt, conversationId: string) => {
+      await host.interrupt(conversationId);
+    },
+  );
+
+  ipc.handle('modmixer:agent:close', async (_evt, conversationId: string) => {
+    await host.closeSession(conversationId);
   });
 
   ipc.handle(
@@ -39,62 +54,66 @@ export function registerConversationRoutes(ctx: RouteContext): void {
     },
   );
 
-  ipc.handle('modmixer:conversations:switch', async (_evt, id: string) => {
-    requireConsent();
-    const convo = await host.switchTo(id);
-    // If this conversation is mod-scoped, mark it active for that mod so the
-    // sidebar can recover the right chat on app restart.
-    if (convo.scope.type === 'mod') {
-      setActiveForMod(convo.scope.modFolder, convo.id);
-    }
-    return {
-      conversation: convo,
-      messages: host.getActiveMessages(),
-    };
-  });
-
   ipc.handle('modmixer:conversations:delete', async (_evt, id: string) => {
     await host.deleteConversation(id);
   });
 
-  ipc.handle('modmixer:conversations:get-active', () => host.getCurrentId());
-
-  ipc.handle('modmixer:conversations:get-active-messages', () =>
-    host.getActiveMessages(),
+  // Per-chat model + reasoning effort. Persisted on the Conversation and
+  // applied to the live session; other open chats are unaffected.
+  ipc.handle(
+    'modmixer:conversations:set-model',
+    async (_evt, conversationId: string, selection: ModelSelection) => {
+      await host.setConversationModel(conversationId, selection);
+    },
   );
 
-  /**
-   * Get-or-create the "active chat" for a mod. If one exists in the index,
-   * switch to it; otherwise create a fresh mod-scoped conversation, mark it
-   * active, and return its first hydrated state.
-   */
   ipc.handle(
-    'modmixer:conversations:open-for-mod',
-    async (_evt, folder: string) => {
-      requireConsent();
-      const existing = getActiveForMod(folder);
-      const convo = existing
-        ? await host.switchTo(existing.id)
-        : await (async () => {
-            const created = await host.createConversation({
-              type: 'mod',
-              modFolder: folder,
-            });
-            await host.switchTo(created.id);
-            setActiveForMod(folder, created.id);
-            return created;
-          })();
-      return {
-        conversation: convo,
-        messages: host.getActiveMessages(),
-      };
+    'modmixer:conversations:set-thinking-level',
+    (_evt, conversationId: string, level: ThinkingLevel) => {
+      host.setConversationThinkingLevel(conversationId, level);
     },
   );
 
   /**
-   * Replace the current chat for a mod with a fresh one. The previous chat
-   * stays on disk in the session log, just no longer surfaced as the active
-   * chat for this mod.
+   * Resolve the "active chat" for a mod to a Conversation — get-or-create in
+   * the index only, NO session construction. This is the fast half of opening
+   * a mod: the renderer shows the workspace immediately off this, then opens
+   * the session in the background via `open-session`.
+   */
+  ipc.handle(
+    'modmixer:conversations:resolve-for-mod',
+    async (_evt, folder: string) => {
+      requireConsent();
+      const existing = getActiveForMod(folder);
+      if (existing) return existing;
+      const created = await host.createConversation({
+        type: 'mod',
+        modFolder: folder,
+      });
+      setActiveForMod(folder, created.id);
+      return created;
+    },
+  );
+
+  /**
+   * Open a conversation's live agent session (constructs it if needed) and
+   * return its hydrated transcript. The slow half of opening a mod — the
+   * renderer runs it in the background once the workspace is already up.
+   */
+  ipc.handle(
+    'modmixer:conversations:open-session',
+    async (_evt, conversationId: string) => {
+      requireConsent();
+      await host.openSession(conversationId);
+      return { messages: host.getMessages(conversationId) };
+    },
+  );
+
+  /**
+   * Replace the current chat for a mod with a fresh one and return its
+   * Conversation. Like resolve-for-mod this does NOT construct the session —
+   * the caller opens it via `open-session`. The previous chat stays on disk;
+   * the caller closes its session (modmixer:agent:close).
    */
   ipc.handle(
     'modmixer:conversations:start-fresh-for-mod',
@@ -105,12 +124,8 @@ export function registerConversationRoutes(ctx: RouteContext): void {
         type: 'mod',
         modFolder: folder,
       });
-      await host.switchTo(created.id);
       setActiveForMod(folder, created.id);
-      return {
-        conversation: created,
-        messages: host.getActiveMessages(),
-      };
+      return created;
     },
   );
 }

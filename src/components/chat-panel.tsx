@@ -1,49 +1,21 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
-import type { AgentMessage } from '@mariozechner/pi-agent-core';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
+import type { AgentMessage, ThinkingLevel } from '@mariozechner/pi-agent-core';
 import type { Conversation } from '../agent/conversations';
 import type { WorkspaceMod } from '../agent/workspace';
-import type { AgentEventEnvelope } from '../preload';
+import type { ModelOption } from '../agent/models';
+import type { ModelSelection } from '../agent/settings';
 import { cn } from '@/lib/cn';
 import { extractText, extractThinking, extractToolCalls } from '@/lib/agent-utils';
 import { useAsyncAction } from '@/lib/use-async-action';
 import { useScrollPin } from '@/lib/use-scroll-pin';
+import { useConversationRuntime, markIdle } from '../conversations-store';
 import { Markdown } from './markdown';
+import { ModelPicker } from './model-picker';
+import { ThinkingPicker } from './thinking-picker';
 import { ToolResultBubble } from './tool-result-renderer';
 
 type ToolStatus = 'running' | 'done' | 'error';
-
-/**
- * Reconstruct tool-call status from a message list. Without this, tool
- * calls in a re-opened chat display as "running" indefinitely because
- * `tool_execution_*` events only fire live — they aren't replayed when
- * the conversation is hydrated from disk.
- *
- * A toolResult message in the transcript is the authoritative finished
- * state (its `isError` flag tells us done vs failed). Tool calls
- * without a matching result are left as "running"; that case really
- * only happens when a turn was interrupted mid-tool, and the running
- * label is a reasonable "this never finished" signal until the agent
- * resumes (which would then send live events).
- */
-function deriveToolStates(
-  msgs: AgentMessage[],
-): Record<string, { name: string; status: ToolStatus }> {
-  const out: Record<string, { name: string; status: ToolStatus }> = {};
-  for (const m of msgs) {
-    if (m.role === 'assistant') {
-      for (const c of extractToolCalls(m.content)) {
-        if (!out[c.id]) out[c.id] = { name: c.name, status: 'running' };
-      }
-    } else if (m.role === 'toolResult') {
-      const prev = out[m.toolCallId];
-      out[m.toolCallId] = {
-        name: prev?.name ?? m.toolName ?? m.toolCallId,
-        status: m.isError ? 'error' : 'done',
-      };
-    }
-  }
-  return out;
-}
 
 /**
  * pi-ai stamps every assistant message with a `provider`/`usage.cost.total`
@@ -113,16 +85,14 @@ function OdometerNumber({
 export function ChatPanel({
   conversation,
   activeMod,
-  initialMessages,
   hasAi,
-  activeProvider,
+  availableModels,
   onConnect,
 }: {
   conversation: Conversation;
   activeMod: WorkspaceMod | null;
-  initialMessages: AgentMessage[];
   hasAi: boolean;
-  activeProvider: string | null;
+  availableModels: ModelOption[];
   onConnect: () => void;
 }) {
   // A mod-scoped chat with an empty packageId is the renderer-created
@@ -136,95 +106,74 @@ export function ChatPanel({
     activeMod.about.packageId.trim() === ''
       ? 'new'
       : conversation.scope.type;
-  const [messages, setMessages] = useState<AgentMessage[]>(initialMessages);
-  const [streaming, setStreaming] = useState<AgentMessage | null>(null);
-  const [toolStates, setToolStates] = useState<
-    Record<string, { name: string; status: ToolStatus }>
-  >(() => deriveToolStates(initialMessages));
-  const [busy, setBusy] = useState(false);
-  const [compacting, setCompacting] = useState(false);
-  const send = useAsyncAction((text: string) => window.modmixer.send(text));
-  const interruptAction = useAsyncAction(() => window.modmixer.interrupt());
+  const { messages, streaming, toolStates, busy, compacting, loading } =
+    useConversationRuntime(conversation.id);
+  // Model + reasoning effort are per-chat. Seeded from the conversation (the
+  // main process backfills both on first open) and held locally so the
+  // pickers reflect a change immediately; each change also persists via IPC.
+  const [model, setModel] = useState<ModelSelection | null>(
+    conversation.model ?? null,
+  );
+  const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel>(
+    conversation.thinkingLevel ?? 'medium',
+  );
+  const changeModel = (selection: ModelSelection) => {
+    setModel(selection);
+    void window.modmixer.setConversationModel(conversation.id, selection);
+  };
+  const changeThinking = (level: ThinkingLevel) => {
+    setThinkingLevel(level);
+    void window.modmixer.setConversationThinkingLevel(conversation.id, level);
+  };
+  const send = useAsyncAction((text: string) =>
+    window.modmixer.send(conversation.id, text),
+  );
+  const interruptAction = useAsyncAction(() =>
+    window.modmixer.interrupt(conversation.id),
+  );
   const error = send.error ?? interruptAction.error;
   const [input, setInput] = useState('');
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
-  const visibleMessageCount = streaming ? messages.length + 1 : messages.length;
-  const { pinned, hasNewBelow, jumpToBottom, resetFirstRun } = useScrollPin(
-    scrollRef,
-    [visibleMessageCount, streaming, toolStates, compacting],
+  // The streaming assistant message is appended as the last row so it
+  // scrolls and measures like any other.
+  const visible = useMemo(
+    () => (streaming ? [...messages, streaming] : messages),
+    [messages, streaming],
   );
-
-  // Reset on conversation switch.
-  useEffect(() => {
-    setMessages(initialMessages);
-    setStreaming(null);
-    setToolStates(deriveToolStates(initialMessages));
-    setBusy(false);
-    setCompacting(false);
-    send.reset();
-    interruptAction.reset();
-    resetFirstRun();
-    // send/interruptAction/resetFirstRun are stable refs.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [conversation.id, initialMessages]);
-
-  useEffect(() => {
-    return window.modmixer.onEvent((env: AgentEventEnvelope) => {
-      if (env.conversationId !== conversation.id) return;
-      const event = env.event;
-      switch (event.type) {
-        case 'agent_start':
-          setBusy(true);
-          send.reset();
-          break;
-        case 'agent_end':
-          setBusy(false);
-          setStreaming(null);
-          break;
-        case 'message_start':
-        case 'message_update':
-          if (event.message.role === 'assistant') setStreaming(event.message);
-          break;
-        case 'message_end':
-          setMessages((prev) => [...prev, event.message]);
-          if (event.message.role === 'assistant') setStreaming(null);
-          break;
-        case 'tool_execution_start':
-          setToolStates((prev) => ({
-            ...prev,
-            [event.toolCallId]: { name: event.toolName, status: 'running' },
-          }));
-          break;
-        case 'tool_execution_end':
-          setToolStates((prev) => ({
-            ...prev,
-            [event.toolCallId]: {
-              name: event.toolName,
-              status: event.isError ? 'error' : 'done',
-            },
-          }));
-          break;
-        case 'compaction_start':
-          setCompacting(true);
-          break;
-        case 'compaction_end':
-          setCompacting(false);
-          // The summary becomes a compactionSummary message that pi-coding-agent
-          // injects on the next prompt(); the rendered transcript will pick it
-          // up via message_end. Nothing extra to do here.
-          break;
-      }
-    });
-  }, [conversation.id]);
+  // Virtualized message list: only the visible window of bubbles is
+  // rendered + markdown-parsed, so mounting a long transcript (opening a
+  // mod, switching tabs) costs a handful of renders instead of all N.
+  const rowVirtualizer = useVirtualizer<HTMLDivElement, HTMLDivElement>({
+    count: visible.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 140,
+    overscan: 6,
+  });
+  const scrollToEnd = useCallback(
+    (smooth: boolean) => {
+      const count = rowVirtualizer.options.count;
+      if (count === 0) return;
+      rowVirtualizer.scrollToIndex(count - 1, {
+        align: 'end',
+        behavior: smooth ? 'smooth' : 'auto',
+      });
+    },
+    [rowVirtualizer],
+  );
+  const { pinned, hasNewBelow, jumpToBottom } = useScrollPin(
+    scrollRef,
+    [visible.length, streaming, toolStates, compacting],
+    { scrollToEnd },
+  );
 
   const submit = async () => {
     const text = input.trim();
-    if (!text || busy) return;
+    if (!text || busy || loading) return;
     setInput('');
     const result = await send.run(text);
     // null = the IPC threw before any agent_end event would clear busy.
-    if (result === null) setBusy(false);
+    if (result === null) markIdle(conversation.id);
   };
 
   const interrupt = async () => {
@@ -254,11 +203,6 @@ export function ChatPanel({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [busy]);
-
-  const visible = useMemo(
-    () => (streaming ? [...messages, streaming] : messages),
-    [messages, streaming],
-  );
 
   // One pass over visible builds the toolCallId → args map so each toolResult
   // bubble doesn't have to do an O(N) backward scan. Returning the same
@@ -304,7 +248,7 @@ export function ChatPanel({
   // isn't routed through OpenRouter (hide); a number = remaining USD.
   // Refreshed on mount and after each completed turn.
   const [balance, setBalance] = useState<number | null>(null);
-  const isOpenRouter = activeProvider === 'openrouter';
+  const isOpenRouter = model?.provider === 'openrouter';
   // Live context-window usage from pi (`AgentSession.getContextUsage()`).
   // Updates every turn as the assistant's `usage` lands.
   const [contextUsage, setContextUsage] = useState<{
@@ -358,33 +302,59 @@ export function ChatPanel({
     };
   }, [conversation.id, isOpenRouter]);
 
+  const showCost = chatCost > 0 && !hasUncostableTurns;
+  const showBalance = balance !== null && !hasUncostableTurns;
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="relative min-h-0 flex-1">
-      <div ref={scrollRef} className="absolute inset-0 space-y-3 overflow-auto px-6 py-4">
-        {visible.length === 0 && (
+      <div
+        ref={scrollRef}
+        className="absolute inset-0 overflow-auto px-6 py-4"
+      >
+        {loading ? (
+          <ChatLoading />
+        ) : visible.length === 0 ? (
           <ScopeEmptyState scope={effectiveScope} />
+        ) : (
+          <div
+            className="relative w-full"
+            style={{ height: rowVirtualizer.getTotalSize() }}
+          >
+            {rowVirtualizer.getVirtualItems().map((vi) => {
+              const m = visible[vi.index];
+              return (
+                <div
+                  key={vi.key}
+                  data-index={vi.index}
+                  ref={rowVirtualizer.measureElement}
+                  className="absolute left-0 top-0 w-full pb-3"
+                  style={{ transform: `translateY(${vi.start}px)` }}
+                >
+                  <MessageBubble
+                    message={m}
+                    toolStates={toolStates}
+                    toolCallArgs={
+                      m.role === 'toolResult'
+                        ? toolCallArgsById.get(m.toolCallId)
+                        : undefined
+                    }
+                    isStreaming={
+                      streaming != null && vi.index === visible.length - 1
+                    }
+                  />
+                </div>
+              );
+            })}
+          </div>
         )}
-        {visible.map((m, i) => (
-          <MessageBubble
-            key={`${(m as { timestamp?: number }).timestamp ?? i}-${i}`}
-            message={m}
-            toolStates={toolStates}
-            toolCallArgs={
-              m.role === 'toolResult'
-                ? toolCallArgsById.get(m.toolCallId)
-                : undefined
-            }
-            isStreaming={streaming != null && i === visible.length - 1}
-          />
-        ))}
         {compacting && (
-          <div className="juicy-shimmer-bar rounded-md border border-line bg-paper/70 px-3 py-2 font-mono text-[10px] uppercase tracking-[0.18em] text-muted">
+          <div className="juicy-shimmer-bar mt-3 rounded-md border border-line bg-paper/70 px-3 py-2 font-mono text-[10px] uppercase tracking-[0.18em] text-muted">
             compacting context…
           </div>
         )}
         {error && (
-          <div className="rounded-md border border-failed/40 bg-failed/5 px-3 py-2 text-xs text-failed">
+          <div className="mt-3 rounded-md border border-failed/40 bg-failed/5 px-3 py-2 text-xs text-failed">
             {error}
           </div>
         )}
@@ -401,48 +371,61 @@ export function ChatPanel({
       )}
       </div>
       <div className="border-t border-line px-6 py-3">
-        {(() => {
-          const showCost = chatCost > 0 && !hasUncostableTurns;
-          const showBalance = balance !== null && !hasUncostableTurns;
-          return (showCost || showBalance || contextUsage) && (
-          <div className="mb-2 flex flex-wrap justify-end gap-x-4 gap-y-1 font-mono text-[11px] text-subtle">
-            {contextUsage && contextUsage.tokens !== null && (() => {
-              // Color escalates as the context window fills up — at >95%
-              // the next turn is about to compact, so we want the user
-              // to *notice*.
-              const ratio = contextUsage.tokens / contextUsage.contextWindow;
-              const cls =
-                ratio >= 0.95
-                  ? 'text-failed'
-                  : ratio >= 0.8
-                    ? 'text-accent'
-                    : '';
-              return (
-                <span className={cn('inline-flex items-center gap-1', cls)}>
-                  context ={' '}
-                  <OdometerNumber
-                    value={contextUsage.tokens}
-                    format={formatTokens}
-                  />
-                  /{formatTokens(contextUsage.contextWindow)}
-                </span>
-              );
-            })()}
-            {showCost && (
-              <span className="inline-flex items-center gap-1">
-                chat cost ={' '}
-                <OdometerNumber value={chatCost} format={formatCost} />
-              </span>
-            )}
-            {showBalance && (
-              <span className="inline-flex items-center gap-1">
-                balance ={' '}
-                <OdometerNumber value={balance!} format={formatCost} />
-              </span>
+        {hasAi && (
+          // This chat's model + reasoning toolbar on the left, live
+          // telemetry on the right. Per-conversation: changing these here
+          // only affects this chat.
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5">
+            <div className="flex items-center gap-1.5">
+              <ModelPicker
+                models={availableModels}
+                current={model}
+                onChange={changeModel}
+                onConnect={onConnect}
+              />
+              <ThinkingPicker current={thinkingLevel} onChange={changeThinking} />
+            </div>
+            {(showCost || showBalance || contextUsage) && (
+              <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-1 font-mono text-[11px] text-subtle">
+                {contextUsage && contextUsage.tokens !== null && (() => {
+                  // Color escalates as the context window fills up — at >95%
+                  // the next turn is about to compact, so we want the user
+                  // to *notice*.
+                  const ratio =
+                    contextUsage.tokens / contextUsage.contextWindow;
+                  const cls =
+                    ratio >= 0.95
+                      ? 'text-failed'
+                      : ratio >= 0.8
+                        ? 'text-accent'
+                        : '';
+                  return (
+                    <span className={cn('inline-flex items-center gap-1', cls)}>
+                      context ={' '}
+                      <OdometerNumber
+                        value={contextUsage.tokens}
+                        format={formatTokens}
+                      />
+                      /{formatTokens(contextUsage.contextWindow)}
+                    </span>
+                  );
+                })()}
+                {showCost && (
+                  <span className="inline-flex items-center gap-1">
+                    chat cost ={' '}
+                    <OdometerNumber value={chatCost} format={formatCost} />
+                  </span>
+                )}
+                {showBalance && (
+                  <span className="inline-flex items-center gap-1">
+                    balance ={' '}
+                    <OdometerNumber value={balance!} format={formatCost} />
+                  </span>
+                )}
+              </div>
             )}
           </div>
-          );
-        })()}
+        )}
         {hasAi ? (
           <div className="rounded-md border border-line bg-paper p-3 focus-within:border-ink/40">
             <textarea
@@ -464,10 +447,13 @@ export function ChatPanel({
                   void interrupt();
                 }
               }}
-              placeholder={placeholderForScope(effectiveScope)}
+              placeholder={
+                loading ? 'Loading chat…' : placeholderForScope(effectiveScope)
+              }
+              disabled={loading}
               // Auto-grow with content (Chromium 123+); bounded so a long
               // message doesn't push the chat scroll out of view.
-              className="block min-h-[1.75rem] max-h-40 w-full resize-none bg-transparent text-sm text-ink placeholder:text-subtle focus:outline-none [field-sizing:content]"
+              className="block min-h-[1.75rem] max-h-40 w-full resize-none bg-transparent text-sm text-ink placeholder:text-subtle focus:outline-none disabled:opacity-60 [field-sizing:content]"
               rows={1}
             />
             <div className="mt-2 flex items-center justify-end gap-2">
@@ -581,6 +567,25 @@ function ScopeEmptyState({ scope }: { scope: 'mod' | 'new' }) {
         modmixer · idle
       </div>
       {text}
+    </div>
+  );
+}
+
+function ChatLoading() {
+  return (
+    <div className="flex h-full items-center justify-center">
+      <div className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.18em] text-subtle">
+        <span className="inline-flex items-end gap-0.5">
+          {[0, 140, 280].map((delay) => (
+            <span
+              key={delay}
+              className="juicy-bounce-dot inline-block h-1 w-1 rounded-full bg-pending"
+              style={{ animationDelay: `${delay}ms` }}
+            />
+          ))}
+        </span>
+        <span>loading chat…</span>
+      </div>
     </div>
   );
 }

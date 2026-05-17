@@ -1,37 +1,47 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { AgentMessage, ThinkingLevel } from '@mariozechner/pi-agent-core';
 import type { Conversation } from './agent/conversations';
 import type { WorkspaceMod } from './agent/workspace';
 import type { ModelOption } from './agent/models';
-import type { ModelSelection } from './agent/settings';
 import type { ActiveSession } from './agent/registry';
 import type { RegistryEnvelope } from './preload';
 import { GridMark } from './components/grid-mark';
-import { ModelPicker } from './components/model-picker';
-import { ThinkingPicker } from './components/thinking-picker';
 import { AppSettingsDialog, type SettingsSection } from './components/app-settings-dialog';
 import { IndexProgressModal } from './components/index-progress-modal';
-import { TabNav, type Tab } from './components/tab-nav';
+import { TabNav, type AppView, type ModTabDescriptor } from './components/tab-nav';
 import { BuildView } from './components/build-view';
 import { ModsView } from './components/mods-view';
 import { LibraryView } from './components/library-view';
 import type { RestoreResult } from './components/saves-view';
 import { SessionRecoveryDialog } from './components/session-recovery-dialog';
 import { appAlert } from './components/app-dialog';
-
 import type { BuildPanel } from './components/mod-build-sidebar';
+import {
+  dropConversation,
+  markConversationLoading,
+  seedConversation,
+  useAnyBusy,
+  useConversationRuntime,
+} from './conversations-store';
+
+/**
+ * One open mod tab. Each tab is an independent build session: its own
+ * conversation, its own agent session in the main process, its own sidebar
+ * panel selection. Live chat state (messages, streaming, busy) is NOT held
+ * here — it lives in the conversation store so a background tab keeps
+ * accumulating while the user is focused elsewhere.
+ */
+interface ModTab {
+  folder: string;
+  conversation: Conversation;
+  buildPanel: BuildPanel;
+}
 
 export function App() {
-  const [tab, setTab] = useState<Tab>('mods');
+  const [view, setView] = useState<AppView>('mods');
   const [mods, setMods] = useState<WorkspaceMod[]>([]);
-  const [activeModFolder, setActiveModFolder] = useState<string | null>(null);
-  const [activeConvo, setActiveConvo] = useState<Conversation | null>(null);
-  const [activeMessages, setActiveMessages] = useState<AgentMessage[]>([]);
-  const [buildPanel, setBuildPanel] = useState<BuildPanel>('chat');
-  const [busy, setBusy] = useState(false);
+  const [tabs, setTabs] = useState<ModTab[]>([]);
+  const [focusedFolder, setFocusedFolder] = useState<string | null>(null);
   const [availableModels, setAvailableModels] = useState<ModelOption[]>([]);
-  const [currentModel, setCurrentModel] = useState<ModelSelection | null>(null);
-  const [thinkingLevel, setThinkingLevelState] = useState<ThinkingLevel>('medium');
   const [settingsSection, setSettingsSection] = useState<SettingsSection | null>(
     null,
   );
@@ -41,6 +51,18 @@ export function App() {
   const [recoveryShown, setRecoveryShown] = useState(false);
 
   const hasAi = availableModels.length > 0;
+  // Header indicator: lit while ANY open tab's agent is working.
+  const busy = useAnyBusy();
+
+  const focusedTab = tabs.find((t) => t.folder === focusedFolder) ?? null;
+  const activeMod = focusedTab
+    ? mods.find((m) => m.folder === focusedTab.folder) ?? null
+    : null;
+  // Drives the focused mod's Test button — unconditionally called (empty id
+  // resolves to an idle runtime when no tab is focused).
+  const focusedBusy = useConversationRuntime(
+    focusedTab?.conversation.id ?? '',
+  ).busy;
 
   const refreshModels = useCallback(async () => {
     const list = await window.modmixer.listModels();
@@ -57,10 +79,6 @@ export function App() {
 
   useEffect(() => {
     void refreshModels();
-    void window.modmixer.getSettings().then((s) => {
-      setCurrentModel(s.model);
-      setThinkingLevelState(s.thinkingLevel);
-    });
     // links-changed and login-success/logout all imply the available-model
     // list may have changed.
     return window.modmixer.onOAuthEvent((event) => {
@@ -82,30 +100,26 @@ export function App() {
   useEffect(() => {
     void refreshMods();
     const offEvent = window.modmixer.onEvent((env) => {
-      switch (env.event.type) {
-        case 'agent_start':
-          setBusy(true);
-          break;
-        case 'agent_end':
-          setBusy(false);
-          void refreshMods();
-          break;
-      }
+      // A finished turn may have changed the mod on disk (new files, About
+      // edits) — refresh the workspace list. Per-conversation chat state is
+      // owned by the conversation store, not here.
+      if (env.event.type === 'agent_end') void refreshMods();
     });
     const offModChanged = window.modmixer.onModChanged(() => {
       void refreshMods();
     });
     const offScope = window.modmixer.onScopeUpgraded((env) => {
       if (env.scope.type !== 'mod') return;
-      void (async () => {
-        await refreshMods();
-        setActiveModFolder(env.scope.type === 'mod' ? env.scope.modFolder : null);
-        setActiveConvo((prev) =>
-          prev && prev.id === env.conversationId
-            ? { ...prev, scope: env.scope }
-            : prev,
-        );
-      })();
+      void refreshMods();
+      // scaffold_mod upgraded a conversation's scope — keep the tab's copy
+      // of the conversation in sync.
+      setTabs((prev) =>
+        prev.map((t) =>
+          t.conversation.id === env.conversationId
+            ? { ...t, conversation: { ...t.conversation, scope: env.scope } }
+            : t,
+        ),
+      );
     });
     return () => {
       offEvent();
@@ -167,59 +181,123 @@ export function App() {
     [],
   );
 
-  const setModel = useCallback(async (selection: ModelSelection) => {
-    setCurrentModel(selection);
-    await window.modmixer.setModel(selection);
-  }, []);
-
-  const setThinkingLevel = useCallback(async (level: ThinkingLevel) => {
-    setThinkingLevelState(level);
-    await window.modmixer.setThinkingLevel(level);
-  }, []);
-
+  /**
+   * Open a mod in a tab. Each mod opens exactly once — re-opening one that's
+   * already open just focuses its existing tab. Other tabs keep running.
+   */
   const openMod = useCallback(
     async (folder: string) => {
-      setBuildPanel('chat');
-      setTab('build');
-      // Same mod = no-op past the tab switch. Re-hydrating would reset
-      // ChatPanel and drop in-flight streaming + tool state.
-      if (folder === activeModFolder && activeConvo) return;
-      const hydrated = await window.modmixer.openConversationForMod(folder);
-      setActiveModFolder(folder);
-      setActiveConvo(hydrated.conversation);
-      setActiveMessages(hydrated.messages);
+      if (tabs.some((t) => t.folder === folder)) {
+        setFocusedFolder(folder);
+        setView('mod');
+        return;
+      }
+      // Fast: resolve the Conversation (index op, no session) so the
+      // workspace can appear immediately.
+      const convo = await window.modmixer.resolveConversationForMod(folder);
+      markConversationLoading(convo.id);
+      setTabs((prev) =>
+        prev.some((t) => t.folder === folder)
+          ? prev
+          : [...prev, { folder, conversation: convo, buildPanel: 'chat' }],
+      );
+      setFocusedFolder(folder);
+      setView('mod');
+      // Slow: construct the session + hydrate the transcript off the
+      // critical path. The chat shows a loading state until this lands.
+      void window.modmixer
+        .openConversationSession(convo.id)
+        .then(({ messages }) => seedConversation(convo.id, messages))
+        .catch((err) => {
+          console.error('Failed to open conversation session:', err);
+          seedConversation(convo.id, []);
+        });
     },
-    [activeModFolder, activeConvo],
+    [tabs],
   );
 
-  const exitMod = useCallback(() => {
-    setActiveModFolder(null);
-    setActiveConvo(null);
-    setActiveMessages([]);
-    setBuildPanel('chat');
-  }, []);
+  /** Close a tab: dispose its session, forget its runtime, focus a neighbour. */
+  const closeTab = useCallback(
+    (folder: string) => {
+      const idx = tabs.findIndex((t) => t.folder === folder);
+      if (idx < 0) return;
+      const tab = tabs[idx];
+      void window.modmixer.closeConversation(tab.conversation.id);
+      dropConversation(tab.conversation.id);
+      const next = tabs.filter((t) => t.folder !== folder);
+      setTabs(next);
+      if (focusedFolder === folder) {
+        const neighbour = next[idx] ?? next[idx - 1] ?? null;
+        setFocusedFolder(neighbour?.folder ?? null);
+        if (!neighbour) setView('mods');
+      }
+    },
+    [tabs, focusedFolder],
+  );
+
+  const setTabBuildPanel = useCallback(
+    (folder: string, panel: BuildPanel) => {
+      setTabs((prev) =>
+        prev.map((t) => (t.folder === folder ? { ...t, buildPanel: panel } : t)),
+      );
+    },
+    [],
+  );
+
+  // Sidebar "back": return to Home without closing the tab.
+  const goHome = useCallback(() => setView('mods'), []);
 
   const startFreshChat = useCallback(async () => {
-    if (!activeModFolder) return;
-    const hydrated = await window.modmixer.startFreshChatForMod(activeModFolder);
-    setActiveConvo(hydrated.conversation);
-    setActiveMessages(hydrated.messages);
-    setBuildPanel('chat');
-  }, [activeModFolder]);
+    const tab = tabs.find((t) => t.folder === focusedFolder);
+    if (!tab) return;
+    const oldId = tab.conversation.id;
+    const convo = await window.modmixer.startFreshChatForMod(tab.folder);
+    markConversationLoading(convo.id);
+    setTabs((prev) =>
+      prev.map((t) =>
+        t.folder === tab.folder
+          ? { ...t, conversation: convo, buildPanel: 'chat' }
+          : t,
+      ),
+    );
+    // The previous chat is archived on disk; drop its live session + runtime.
+    await window.modmixer.closeConversation(oldId);
+    dropConversation(oldId);
+    // Construct the fresh session in the background.
+    void window.modmixer
+      .openConversationSession(convo.id)
+      .then(({ messages }) => seedConversation(convo.id, messages))
+      .catch((err) => {
+        console.error('Failed to open conversation session:', err);
+        seedConversation(convo.id, []);
+      });
+  }, [tabs, focusedFolder]);
 
-  // Restore from a save replaces the mod's whole world: files, chat list,
-  // and which chat is active. Apply all of it in one render so the UI
-  // doesn't flash through a half-restored state.
-  const onSavesRestored = useCallback((result: RestoreResult) => {
-    setMods(result.mods);
-    if (result.hydrated) {
-      setActiveConvo(result.hydrated.conversation);
-      setActiveMessages(result.hydrated.messages);
-    } else {
-      setActiveConvo(null);
-      setActiveMessages([]);
-    }
-  }, []);
+  // Restore from a save replaces the focused mod's whole world: files, chat
+  // list, and which chat is active. Re-seed the conversation store and swap
+  // the tab's conversation in one render so the UI doesn't flash.
+  const onSavesRestored = useCallback(
+    (result: RestoreResult) => {
+      setMods(result.mods);
+      if (!result.hydrated) return;
+      const restored = result.hydrated;
+      const oldId = tabs.find(
+        (t) => t.folder === focusedFolder,
+      )?.conversation.id;
+      if (oldId && oldId !== restored.conversation.id) {
+        dropConversation(oldId);
+      }
+      seedConversation(restored.conversation.id, restored.messages);
+      setTabs((prev) =>
+        prev.map((t) =>
+          t.folder === focusedFolder
+            ? { ...t, conversation: restored.conversation }
+            : t,
+        ),
+      );
+    },
+    [tabs, focusedFolder],
+  );
 
   // "Enable" for a workspace mod has to be atomic: create the symlink AND
   // add the packageId to <activeMods>. If we did only one, RimWorld either
@@ -283,11 +361,12 @@ export function App() {
   };
 
   const test = async () => {
-    if (!activeConvo || !activeModFolder || !hasAi) return;
-    const mod = mods.find((m) => m.folder === activeModFolder);
-    const displayName = mod?.about.name || activeModFolder;
+    if (!focusedTab || !hasAi) return;
+    const mod = mods.find((m) => m.folder === focusedTab.folder);
+    const displayName = mod?.about.name || focusedTab.folder;
     try {
       await window.modmixer.send(
+        focusedTab.conversation.id,
         `Test "${displayName}" in RimWorld now. Run the full test-in-game flow including monitoring the log for errors.`,
       );
     } catch (err) {
@@ -303,21 +382,24 @@ export function App() {
   // the image, then auto-submit a request. The agent's system prompt
   // teaches it to write to {folder}/About/Preview.png at 1280×720.
   const generatePreview = async () => {
-    if (!activeConvo || !activeModFolder || !hasAi) return;
-    const mod = mods.find((m) => m.folder === activeModFolder);
-    const displayName = mod?.about.name || activeModFolder;
-    setBuildPanel('chat');
+    if (!focusedTab || !hasAi) return;
+    const folder = focusedTab.folder;
+    const conversationId = focusedTab.conversation.id;
+    const mod = mods.find((m) => m.folder === folder);
+    const displayName = mod?.about.name || folder;
+    setTabBuildPanel(folder, 'chat');
     try {
       // If the user has supplied a background image (Preview panel drop zone),
       // tell the agent to use it as render_preview's `backgroundImagePath`
       // and skip the gradient/color choice. Path lives in the workspace
       // sidecar, which is allowed by render_preview's path policy.
-      const bg = await window.modmixer.getPreviewBg(activeModFolder);
+      const bg = await window.modmixer.getPreviewBg(folder);
       const bgInstruction = bg
         ? ` The user has supplied a background image at ${bg.path} — pass it as render_preview's backgroundImagePath (do not pick a background color/gradient) and choose a titleEffect like "outline" or "shadow" so the title stays legible over the image.`
         : '';
       await window.modmixer.send(
-        `Generate a Steam Workshop preview image for "${displayName}" and save it to ${activeModFolder}/About/Preview.png. Use render_preview — pick a template, choose a sprite from Textures/ if any exist, and pick a background and title treatment that fits the mod's tone.${bgInstruction}`,
+        conversationId,
+        `Generate a Steam Workshop preview image for "${displayName}" and save it to ${folder}/About/Preview.png. Use render_preview — pick a template, choose a sprite from Textures/ if any exist, and pick a background and title treatment that fits the mod's tone.${bgInstruction}`,
       );
     } catch (err) {
       console.error(err);
@@ -364,16 +446,20 @@ export function App() {
     }
   };
 
-  const activeMod =
-    activeModFolder
-      ? mods.find((m) => m.folder === activeModFolder) ?? null
-      : null;
+  const tabDescriptors: ModTabDescriptor[] = tabs.map((t) => {
+    const mod = mods.find((m) => m.folder === t.folder);
+    return {
+      folder: t.folder,
+      conversationId: t.conversation.id,
+      title: mod?.about.name || t.conversation.title || t.folder,
+    };
+  });
 
   return (
     <div className="flex h-full flex-col bg-paper text-ink">
-      <header className="flex items-center justify-between border-b border-line px-5 py-3">
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2.5">
+      <header className="flex items-center justify-between gap-3 border-b border-line px-5 py-3">
+        <div className="flex min-w-0 flex-1 items-center gap-4">
+          <div className="flex shrink-0 items-center gap-2.5">
             <GridMark loading={busy} />
             <span className="font-display text-sm font-medium tracking-tight">
               modmixer
@@ -385,21 +471,20 @@ export function App() {
             )}
           </div>
           <TabNav
-            active={tab}
-            onChange={setTab}
+            view={view}
+            focusedFolder={focusedFolder}
+            tabs={tabDescriptors}
             sessionActive={!!session}
+            onSelectMods={() => setView('mods')}
+            onSelectLibrary={() => setView('library')}
+            onSelectTab={(folder) => {
+              setFocusedFolder(folder);
+              setView('mod');
+            }}
+            onCloseTab={closeTab}
           />
         </div>
-        <div className="flex items-center gap-3">
-          <ModelPicker
-            models={availableModels}
-            current={currentModel}
-            onChange={setModel}
-            onConnect={() => openSettings('providers')}
-          />
-          {hasAi && (
-            <ThinkingPicker current={thinkingLevel} onChange={setThinkingLevel} />
-          )}
+        <div className="flex shrink-0 items-center gap-3">
           <button
             onClick={() =>
               void window.modmixer.openExternal(
@@ -442,14 +527,7 @@ export function App() {
         </div>
       </header>
 
-      {tab === 'mods' && (
-        <ModsView
-          mods={mods}
-          onOpen={openMod}
-          onNewMod={newMod}
-        />
-      )}
-      {tab === 'library' && (
+      {view === 'library' ? (
         <LibraryView
           envelope={registryEnvelope}
           session={session}
@@ -461,42 +539,40 @@ export function App() {
           onApplySession={applySession}
           onRevertSession={revertSession}
         />
-      )}
-      {/* Stays mounted across tab switches so ChatPanel's state and event
-          subscription survive — otherwise in-flight streaming and the
-          user's just-sent message vanish on the way back. */}
-      <div
-        className={
-          tab === 'build' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'
-        }
-      >
+      ) : view === 'mod' && focusedTab ? (
+        // Only the focused tab's workspace is mounted — live chat state lives
+        // in the conversation store, so unmounting an inactive tab is free
+        // and a background agent keeps streaming regardless. Keyed by folder
+        // so switching tabs cleanly remounts the workspace.
         <BuildView
-          mods={mods}
+          key={focusedTab.folder}
           activeMod={activeMod}
-          activeConvo={activeConvo}
-          activeMessages={activeMessages}
-          panel={buildPanel}
-          onSelectPanel={setBuildPanel}
-          onOpenMod={openMod}
-          onNewMod={newMod}
-          onImportMod={importMod}
-          onBack={exitMod}
+          activeConvo={focusedTab.conversation}
+          panel={focusedTab.buildPanel}
+          onSelectPanel={(panel) => setTabBuildPanel(focusedTab.folder, panel)}
+          onBack={goHome}
           onTest={test}
           onGeneratePreview={generatePreview}
           onNewChat={startFreshChat}
           onSavesRestored={onSavesRestored}
-          onModDeleted={async () => {
-            exitMod();
-            await refreshMods();
-            await refreshRegistry();
-            setTab('mods');
+          onModDeleted={(folder) => {
+            closeTab(folder);
+            void refreshMods();
+            void refreshRegistry();
           }}
-          busy={busy}
+          busy={focusedBusy}
           hasAi={hasAi}
-          currentModel={currentModel}
+          availableModels={availableModels}
           onConnect={() => openSettings('providers')}
         />
-      </div>
+      ) : (
+        <ModsView
+          mods={mods}
+          onOpen={openMod}
+          onNewMod={newMod}
+          onImportMod={importMod}
+        />
+      )}
       {settingsSection && (
         <AppSettingsDialog
           initialSection={settingsSection}
@@ -525,7 +601,7 @@ export function App() {
           }}
           onDismiss={() => {
             setRecoveryShown(false);
-            setTab('library');
+            setView('library');
           }}
         />
       )}

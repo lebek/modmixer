@@ -1,13 +1,21 @@
 import { useEffect, useState } from 'react';
+import type { ThinkingLevel } from '@mariozechner/pi-agent-core';
 import { sanitizeAuthorHandle } from '@/lib/identifiers';
 import type {
   OAuthEvent,
   OAuthLink,
   OpenRouterConfig,
 } from '@/agent/agent-host';
-import type { LocalProvider, ThemePreference } from '@/agent/settings';
+import type {
+  LocalProvider,
+  ModelSelection,
+  ThemePreference,
+} from '@/agent/settings';
+import type { ModelOption } from '@/agent/models';
 import type { UpdaterState } from '@/agent/updater';
 import { applyTheme } from '@/lib/theme';
+import { ModelPicker } from './model-picker';
+import { ThinkingPicker } from './thinking-picker';
 
 export type SettingsSection = 'providers' | 'general' | 'appearance' | 'index';
 
@@ -22,6 +30,10 @@ export function AppSettingsDialog({
   const [author, setAuthor] = useState<string>('');
   const [analyticsOptIn, setAnalyticsOptIn] = useState<boolean>(false);
   const [theme, setTheme] = useState<ThemePreference>('dark');
+  const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);
+  const [defaultModel, setDefaultModel] = useState<ModelSelection | null>(null);
+  const [defaultThinking, setDefaultThinking] =
+    useState<ThinkingLevel>('medium');
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -30,8 +42,11 @@ export function AppSettingsDialog({
       setAuthor(s.defaultAuthor);
       setAnalyticsOptIn(s.analyticsOptIn);
       setTheme(s.theme);
+      setDefaultModel(s.model);
+      setDefaultThinking(s.thinkingLevel);
       setLoaded(true);
     });
+    void window.modmixer.listModels().then(setModelOptions);
   }, []);
 
   useEffect(() => {
@@ -128,6 +143,34 @@ export function AppSettingsDialog({
                 ) : (
                   <div className="space-y-4">
                     <UpdateRow />
+                    <div>
+                      <label className="mb-1 block font-mono text-[10px] uppercase tracking-[0.18em] text-muted">
+                        Default model for new chats
+                      </label>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <ModelPicker
+                          models={modelOptions}
+                          current={defaultModel}
+                          onChange={(sel) => {
+                            setDefaultModel(sel);
+                            void window.modmixer.setModel(sel);
+                          }}
+                          onConnect={() => setSection('providers')}
+                        />
+                        <ThinkingPicker
+                          current={defaultThinking}
+                          onChange={(level) => {
+                            setDefaultThinking(level);
+                            void window.modmixer.setThinkingLevel(level);
+                          }}
+                        />
+                      </div>
+                      <p className="mt-1.5 text-xs text-muted">
+                        New chats start with these. Change a chat's model or
+                        thinking level any time from its own toolbar — that
+                        only affects that chat.
+                      </p>
+                    </div>
                     <div>
                       <label className="mb-1 block font-mono text-[10px] uppercase tracking-[0.18em] text-muted">
                         Default author handle

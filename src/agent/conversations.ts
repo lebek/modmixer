@@ -1,6 +1,8 @@
 import { app } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
+import type { ThinkingLevel } from '@mariozechner/pi-agent-core';
+import type { ModelSelection } from './settings.js';
 
 export type ConversationScope =
   | { type: 'new' }
@@ -33,6 +35,18 @@ export interface Conversation {
    * field existed backfill on first rehydration.
    */
   systemPrompt?: string;
+  /**
+   * Model this chat runs on, chosen from its in-chat toolbar. Per-conversation
+   * (NOT per-mod) — a mod with several chats can run each on a different
+   * model. Stamped at creation from the settings default; backfilled on first
+   * rehydration for chats created before this field existed.
+   */
+  model?: ModelSelection;
+  /**
+   * Reasoning effort for this chat. Same per-conversation semantics as
+   * `model` — stamped at creation, backfilled for legacy chats.
+   */
+  thinkingLevel?: ThinkingLevel;
 }
 
 interface Persisted {
@@ -90,6 +104,8 @@ export function addConversation(entry: {
   scope: ConversationScope;
   title?: string;
   systemPrompt?: string;
+  model?: ModelSelection;
+  thinkingLevel?: ThinkingLevel;
 }): Conversation {
   const now = Date.now();
   const convo: Conversation = {
@@ -100,6 +116,8 @@ export function addConversation(entry: {
     createdAt: now,
     updatedAt: now,
     systemPrompt: entry.systemPrompt,
+    model: entry.model,
+    thinkingLevel: entry.thinkingLevel,
   };
   load().conversations.push(convo);
   persist();
@@ -144,6 +162,21 @@ export function setSystemPrompt(id: string, systemPrompt: string): void {
   if (!c) return;
   c.systemPrompt = systemPrompt;
   // Don't bump updatedAt — this is bookkeeping, not a user-visible change.
+  persist();
+}
+
+export function setConvModel(id: string, model: ModelSelection): void {
+  const c = getConversation(id);
+  if (!c) return;
+  c.model = model;
+  // Don't bump updatedAt — a model switch shouldn't reorder the chat list.
+  persist();
+}
+
+export function setConvThinkingLevel(id: string, level: ThinkingLevel): void {
+  const c = getConversation(id);
+  if (!c) return;
+  c.thinkingLevel = level;
   persist();
 }
 

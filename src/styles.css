@@ -105,6 +105,16 @@ body {
   color: var(--accent-foreground);
 }
 
+/* Hide the scrollbar on an element that still scrolls. Used on the mod-tab
+   strip — with many tabs open it overflows horizontally, and the user
+   scrolls it with the mouse wheel rather than a visible bar. */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
 @keyframes gridmark-pulse {
   0%,
   100% {

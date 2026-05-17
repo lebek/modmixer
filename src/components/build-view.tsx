@@ -1,7 +1,6 @@
-import type { AgentMessage } from '@mariozechner/pi-agent-core';
 import type { Conversation } from '../agent/conversations';
 import type { WorkspaceMod } from '../agent/workspace';
-import type { ModelSelection } from '../agent/settings';
+import type { ModelOption } from '../agent/models';
 import { ChatPanel } from './chat-panel';
 import { ModHeader } from './mod-header';
 import { AssetsView } from './assets-view';
@@ -10,18 +9,12 @@ import { ModPublishPanel } from './mod-publish-panel';
 import { ModDepsPanel } from './mod-deps-panel';
 import { ModBuildSidebar, type BuildPanel } from './mod-build-sidebar';
 import { SavesView, type RestoreResult } from './saves-view';
-import { BuildLanding } from './build-landing';
 
 export function BuildView({
-  mods,
   activeMod,
   activeConvo,
-  activeMessages,
   panel,
   onSelectPanel,
-  onOpenMod,
-  onNewMod,
-  onImportMod,
   onBack,
   onTest,
   onGeneratePreview,
@@ -30,18 +23,13 @@ export function BuildView({
   onModDeleted,
   busy,
   hasAi,
-  currentModel,
+  availableModels,
   onConnect,
 }: {
-  mods: WorkspaceMod[];
   activeMod: WorkspaceMod | null;
-  activeConvo: Conversation | null;
-  activeMessages: AgentMessage[];
+  activeConvo: Conversation;
   panel: BuildPanel;
   onSelectPanel: (panel: BuildPanel) => void;
-  onOpenMod: (folder: string) => void;
-  onNewMod: () => void;
-  onImportMod: () => void;
   onBack: () => void;
   onTest: () => void;
   onGeneratePreview: () => void;
@@ -50,20 +38,9 @@ export function BuildView({
   onModDeleted?: (folder: string) => void;
   busy: boolean;
   hasAi: boolean;
-  currentModel: ModelSelection | null;
+  availableModels: ModelOption[];
   onConnect: () => void;
 }) {
-  if (!activeConvo) {
-    return (
-      <BuildLanding
-        mods={mods}
-        onOpen={onOpenMod}
-        onNewMod={onNewMod}
-        onImportMod={onImportMod}
-      />
-    );
-  }
-
   // Pre-scaffold "new mod" chat: no mod yet, no Assets to browse.
   // Force panel='chat' and hide the Assets entry until a mod exists.
   const newModInProgress = !activeMod;
@@ -118,11 +95,11 @@ export function BuildView({
           }
         >
           <ChatPanel
+            key={activeConvo.id}
             conversation={activeConvo}
             activeMod={activeMod}
-            initialMessages={activeMessages}
             hasAi={hasAi}
-            activeProvider={currentModel?.provider ?? null}
+            availableModels={availableModels}
             onConnect={onConnect}
           />
         </div>

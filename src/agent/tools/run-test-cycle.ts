@@ -70,165 +70,167 @@ interface RunTestCycleDetails {
  * The agent is expected to ask the user before destroying their unsaved
  * game progress; a "yes" round-trip + retry with quitIfRunning=true keeps
  * that consent boundary explicit.
+ *
+ * Built per conversation: `conversationId` is captured so the background
+ * bridge monitor this arms is bound to the chat that launched the test,
+ * even when several mod tabs are open at once. Only one in-game test can
+ * run at a time — startMonitoring throws if another mod is mid-test, and
+ * that error propagates back to the agent as a tool result.
  */
-export const runTestCycleTool: AgentTool<typeof Params, RunTestCycleDetails> = {
-  name: 'run_test_cycle',
-  label: 'Run test cycle (build + launch + watch)',
-  description:
-    "Macro: the only way to test a mod in-game. Handles the entire flow in one call — checks if RimWorld is running, flips dev-mode + pins palette entries in Prefs.xml, syncs the mod into RimWorld's Mods/, installs the Modmixer Bridge mod (Harmony-patched diagnostics over localhost TCP), writes an active-mod list (Core + DLCs + target + transitive deps + bridge) to a separate savedata folder by default so the user's real mod list is untouched, launches RimWorld with `-quicktest`, and arms background bridge monitoring. If RimWorld is running and quitIfRunning is unset, bails with needsQuitConfirmation=true so you can ask the user before killing their game; re-call with quitIfRunning=true once they confirm. After this returns, tell the user EXACTLY what to do in-game (they're about to alt-tab) — errors will arrive automatically as '[automated …]' messages via the standard error-triage protocol.",
-  parameters: Params,
-  async execute(_id, params): Promise<AgentToolResult<RunTestCycleDetails>> {
-    const lines: string[] = [];
+export function createRunTestCycleTool(
+  conversationId: string,
+): AgentTool<typeof Params, RunTestCycleDetails> {
+  return {
+    name: 'run_test_cycle',
+    label: 'Run test cycle (build + launch + watch)',
+    description:
+      "Macro: the only way to test a mod in-game. Handles the entire flow in one call — checks if RimWorld is running, flips dev-mode + pins palette entries in Prefs.xml, syncs the mod into RimWorld's Mods/, installs the Modmixer Bridge mod (Harmony-patched diagnostics over localhost TCP), writes an active-mod list (Core + DLCs + target + transitive deps + bridge) to a separate savedata folder by default so the user's real mod list is untouched, launches RimWorld with `-quicktest`, and arms background bridge monitoring. If RimWorld is running and quitIfRunning is unset, bails with needsQuitConfirmation=true so you can ask the user before killing their game; re-call with quitIfRunning=true once they confirm. After this returns, tell the user EXACTLY what to do in-game (they're about to alt-tab) — errors will arrive automatically as '[automated …]' messages via the standard error-triage protocol.",
+    parameters: Params,
+    async execute(_id, params): Promise<AgentToolResult<RunTestCycleDetails>> {
+      const lines: string[] = [];
 
-    // 1. RimWorld-running guard. If running and the user hasn't authorized a
-    //    quit, bail with a clear message so the agent asks first instead of
-    //    silently destroying the user's session.
-    let quitResult: RunTestCycleDetails['quit'] = null;
-    if (await isRimWorldRunning()) {
-      if (!params.quitIfRunning) {
-        return {
-          content: [
-            {
-              type: 'text',
-              text: 'RimWorld is currently running. Ask the user whether to quit it (they may have unsaved progress), then re-call run_test_cycle with quitIfRunning=true.',
+      // 1. RimWorld-running guard. If running and the user hasn't authorized a
+      //    quit, bail with a clear message so the agent asks first instead of
+      //    silently destroying the user's session.
+      let quitResult: RunTestCycleDetails['quit'] = null;
+      if (await isRimWorldRunning()) {
+        if (!params.quitIfRunning) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: 'RimWorld is currently running. Ask the user whether to quit it (they may have unsaved progress), then re-call run_test_cycle with quitIfRunning=true.',
+              },
+            ],
+            details: {
+              needsQuitConfirmation: true,
+              quit: null,
+              prefs: null,
+              launch: null,
+              watching: false,
             },
-          ],
-          details: {
-            needsQuitConfirmation: true,
-            quit: null,
-            prefs: null,
-            launch: null,
-            watching: false,
-          },
-        };
-      }
-      const { killed, exited } = await quitRimWorld();
-      quitResult = { wasRunning: true, killed, exited };
-      if (!killed) {
-        return {
-          content: [
-            {
-              type: 'text',
-              text: 'Failed to quit RimWorld — try quitting it manually and retry.',
+          };
+        }
+        const { killed, exited } = await quitRimWorld();
+        quitResult = { wasRunning: true, killed, exited };
+        if (!killed) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: 'Failed to quit RimWorld — try quitting it manually and retry.',
+              },
+            ],
+            details: {
+              needsQuitConfirmation: false,
+              quit: quitResult,
+              prefs: null,
+              launch: null,
+              watching: false,
             },
-          ],
-          details: {
-            needsQuitConfirmation: false,
-            quit: quitResult,
-            prefs: null,
-            launch: null,
-            watching: false,
-          },
-        };
-      }
-      if (!exited) {
-        return {
-          content: [
-            {
-              type: 'text',
-              text: 'Sent quit signal but RimWorld is still running after 10s. Wait, then retry.',
+          };
+        }
+        if (!exited) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: 'Sent quit signal but RimWorld is still running after 10s. Wait, then retry.',
+              },
+            ],
+            details: {
+              needsQuitConfirmation: false,
+              quit: quitResult,
+              prefs: null,
+              launch: null,
+              watching: false,
             },
-          ],
-          details: {
-            needsQuitConfirmation: false,
-            quit: quitResult,
-            prefs: null,
-            launch: null,
-            watching: false,
-          },
-        };
+          };
+        }
+        lines.push('Quit running RimWorld instance.');
       }
-      lines.push('Quit running RimWorld instance.');
-    }
 
-    // 2. Prep Prefs.xml — dev mode + palette pins. In isolated mode (the
-    //    default) RimWorld reads Prefs from the test savedata dir, not the
-    //    user's real install, so we seed the test Prefs.xml from real on
-    //    first run and target IT for the edit. Without this, the dev palette
-    //    auto-opens (carried over from a previous seed) but is empty because
-    //    the freshly-pinned entries went to the wrong file.
-    const isolated = params.isolated !== false;
-    let prefsPath: string | undefined;
-    if (isolated) {
-      const seeded = await ensureTestSavedataPrefs();
-      prefsPath = seeded ?? undefined;
-    }
-    const prefs = await prepareDebugSession({
-      paletteEntries: params.paletteEntries,
-      autoOpenPalette: params.autoOpenPalette,
-      prefsPath,
-    });
-    if (prefs.skipped) {
-      lines.push(
-        `Prefs.xml not found yet (${prefs.skipReason}); dev mode will engage on next run.`,
-      );
-    } else {
-      const parts: string[] = [];
-      parts.push(prefs.devModeWasOn ? 'Dev mode on.' : 'Enabled dev mode.');
-      parts.push(
-        prefs.autoOpenPaletteWasOn
-          ? 'Debug palette already auto-opens.'
-          : 'Debug palette will auto-open.',
-      );
-      if (!prefs.runInBackgroundWasOn) {
-        parts.push('Enabled run-in-background so the game keeps ticking when you alt-tab.');
+      // 2. Prep Prefs.xml — dev mode + palette pins. In isolated mode (the
+      //    default) RimWorld reads Prefs from the test savedata dir, not the
+      //    user's real install, so we seed the test Prefs.xml from real on
+      //    first run and target IT for the edit. Without this, the dev palette
+      //    auto-opens (carried over from a previous seed) but is empty because
+      //    the freshly-pinned entries went to the wrong file.
+      const isolated = params.isolated !== false;
+      let prefsPath: string | undefined;
+      if (isolated) {
+        const seeded = await ensureTestSavedataPrefs();
+        prefsPath = seeded ?? undefined;
       }
-      if (prefs.pinnedNew.length > 0) {
-        parts.push(
-          `Pinned ${prefs.pinnedNew.length} palette ${prefs.pinnedNew.length === 1 ? 'entry' : 'entries'}: ${prefs.pinnedNew.join(', ')}.`,
+      const prefs = await prepareDebugSession({
+        paletteEntries: params.paletteEntries,
+        autoOpenPalette: params.autoOpenPalette,
+        prefsPath,
+      });
+      if (prefs.skipped) {
+        lines.push(
+          `Prefs.xml not found yet (${prefs.skipReason}); dev mode will engage on next run.`,
         );
+      } else {
+        const parts: string[] = [];
+        parts.push(prefs.devModeWasOn ? 'Dev mode on.' : 'Enabled dev mode.');
+        parts.push(
+          prefs.autoOpenPaletteWasOn
+            ? 'Debug palette already auto-opens.'
+            : 'Debug palette will auto-open.',
+        );
+        if (!prefs.runInBackgroundWasOn) {
+          parts.push('Enabled run-in-background so the game keeps ticking when you alt-tab.');
+        }
+        if (prefs.pinnedNew.length > 0) {
+          parts.push(
+            `Pinned ${prefs.pinnedNew.length} palette ${prefs.pinnedNew.length === 1 ? 'entry' : 'entries'}: ${prefs.pinnedNew.join(', ')}.`,
+          );
+        }
+        if (prefs.pinnedAlready.length > 0) {
+          parts.push(`Already pinned: ${prefs.pinnedAlready.join(', ')}.`);
+        }
+        lines.push(parts.join(' '));
       }
-      if (prefs.pinnedAlready.length > 0) {
-        parts.push(`Already pinned: ${prefs.pinnedAlready.join(', ')}.`);
-      }
-      lines.push(parts.join(' '));
-    }
 
-    // 3. Sync + launch — isolated savedata, autosort, dep walk, missing-dep
-    //    surfacing. Throws on is-running races; we let that propagate.
-    const launchResult = await shipAndLaunch({
-      folder: params.folder,
-      quicktest: params.quicktest,
-      isolated: params.isolated,
-    });
-    if (launchResult.text) lines.push(launchResult.text);
+      // 3. Sync + launch — isolated savedata, autosort, dep walk, missing-dep
+      //    surfacing. Throws on is-running races; we let that propagate.
+      const launchResult = await shipAndLaunch({
+        folder: params.folder,
+        quicktest: params.quicktest,
+        isolated: params.isolated,
+      });
+      if (launchResult.text) lines.push(launchResult.text);
 
-    // 4. Arm the background bridge monitor tied to the current conversation.
-    //    Returns immediately; errors flow back as auto-prompted user messages
-    //    over the localhost TCP bridge that run_test_cycle just installed.
-    const host = getAgentHost();
-    const conversationId = host.getCurrentId();
-    let watching = false;
-    if (conversationId) {
-      await host.startMonitoring({
+      // 4. Arm the background bridge monitor tied to this conversation.
+      //    Returns immediately; errors flow back as auto-prompted user messages
+      //    over the localhost TCP bridge that run_test_cycle just installed.
+      //    startMonitoring throws if another mod is already mid-test — we let
+      //    that propagate as an error tool result.
+      await getAgentHost().startMonitoring({
         conversationId,
         modFolder: params.folder,
         isolated: launchResult.details.isolated,
       });
-      watching = true;
       lines.push(
         'Watching the in-game bridge in the background; errors will arrive as auto-prompts.',
       );
-    } else {
-      lines.push(
-        'Could not arm bridge monitoring — no active conversation context.',
-      );
-    }
 
-    return {
-      content: [{ type: 'text', text: lines.join(' ') }],
-      details: {
-        needsQuitConfirmation: false,
-        quit: quitResult,
-        prefs: {
-          skipped: prefs.skipped,
-          skipReason: prefs.skipReason,
-          pinnedNew: prefs.skipped ? [] : prefs.pinnedNew,
-          pinnedAlready: prefs.skipped ? [] : prefs.pinnedAlready,
+      return {
+        content: [{ type: 'text', text: lines.join(' ') }],
+        details: {
+          needsQuitConfirmation: false,
+          quit: quitResult,
+          prefs: {
+            skipped: prefs.skipped,
+            skipReason: prefs.skipReason,
+            pinnedNew: prefs.skipped ? [] : prefs.pinnedNew,
+            pinnedAlready: prefs.skipped ? [] : prefs.pinnedAlready,
+          },
+          launch: launchResult.details,
+          watching: true,
         },
-        launch: launchResult.details,
-        watching,
-      },
-    };
-  },
-};
+      };
+    },
+  };
+}

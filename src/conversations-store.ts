@@ -1,0 +1,249 @@
+import { useCallback, useSyncExternalStore } from 'react';
+import type { AgentMessage } from '@mariozechner/pi-agent-core';
+import type { AgentSessionEvent } from '@mariozechner/pi-coding-agent';
+import type { AgentEventEnvelope } from './preload';
+import { extractToolCalls } from './lib/agent-utils';
+
+/**
+ * Renderer-side store for live agent state, keyed by conversation id.
+ *
+ * Why this exists: with concurrent build sessions, a background mod tab's
+ * agent keeps streaming while the user is focused elsewhere. If the chat
+ * component owned that state (as it used to), unmounting the inactive tab
+ * would drop the event subscription and lose the in-flight turn. So the
+ * single global event subscription and all per-conversation accumulation
+ * live here instead — components are pure views over `runtimes`.
+ *
+ * That same split is what makes "many tabs" cheap: inactive tabs hold only
+ * a Map entry, and `useSyncExternalStore` with per-id subscriptions means an
+ * event for one conversation re-renders only that conversation's views.
+ */
+
+export type ToolStatus = 'running' | 'done' | 'error';
+
+export interface ToolState {
+  name: string;
+  status: ToolStatus;
+}
+
+/** Per-conversation runtime: everything the chat UI derives from events. */
+export interface ConvoRuntime {
+  messages: AgentMessage[];
+  /** Assistant message currently streaming, or null between turns. */
+  streaming: AgentMessage | null;
+  toolStates: Record<string, ToolState>;
+  /** A turn is in flight — drives the per-tab busy indicator. */
+  busy: boolean;
+  compacting: boolean;
+  /**
+   * The conversation's agent session is still being constructed in the main
+   * process — the workspace is shown but the transcript isn't loaded yet.
+   */
+  loading: boolean;
+}
+
+/**
+ * Reconstruct tool-call status from a message list. `tool_execution_*`
+ * events only fire live, so a re-opened chat needs its finished tool calls
+ * derived from the transcript or they'd render "running" forever. A
+ * toolResult message is the authoritative finished state.
+ */
+export function deriveToolStates(
+  msgs: AgentMessage[],
+): Record<string, ToolState> {
+  const out: Record<string, ToolState> = {};
+  for (const m of msgs) {
+    if (m.role === 'assistant') {
+      for (const c of extractToolCalls(m.content)) {
+        if (!out[c.id]) out[c.id] = { name: c.name, status: 'running' };
+      }
+    } else if (m.role === 'toolResult') {
+      const prev = out[m.toolCallId];
+      out[m.toolCallId] = {
+        name: prev?.name ?? m.toolName ?? m.toolCallId,
+        status: m.isError ? 'error' : 'done',
+      };
+    }
+  }
+  return out;
+}
+
+const EMPTY: ConvoRuntime = {
+  messages: [],
+  streaming: null,
+  toolStates: {},
+  busy: false,
+  compacting: false,
+  loading: false,
+};
+
+const runtimes = new Map<string, ConvoRuntime>();
+const listeners = new Map<string, Set<() => void>>();
+const globalListeners = new Set<() => void>();
+
+function notify(conversationId: string): void {
+  const ls = listeners.get(conversationId);
+  if (ls) for (const fn of [...ls]) fn();
+  // The "any session busy" header indicator depends on every conversation.
+  for (const fn of [...globalListeners]) fn();
+}
+
+/**
+ * Mark a conversation's session as loading — its mod tab/workspace is shown
+ * but the transcript hasn't arrived. Cleared by seedConversation.
+ */
+export function markConversationLoading(conversationId: string): void {
+  runtimes.set(conversationId, {
+    messages: [],
+    streaming: null,
+    toolStates: {},
+    busy: false,
+    compacting: false,
+    loading: true,
+  });
+  notify(conversationId);
+}
+
+/** Seed a conversation's runtime from its hydrated transcript. */
+export function seedConversation(
+  conversationId: string,
+  messages: AgentMessage[],
+): void {
+  runtimes.set(conversationId, {
+    messages,
+    streaming: null,
+    toolStates: deriveToolStates(messages),
+    busy: false,
+    compacting: false,
+    loading: false,
+  });
+  notify(conversationId);
+}
+
+/** Forget a conversation's runtime — call when its mod tab closes. */
+export function dropConversation(conversationId: string): void {
+  if (!runtimes.delete(conversationId)) return;
+  notify(conversationId);
+}
+
+/**
+ * Force a conversation back to idle. Belt-and-braces for when a send() IPC
+ * rejects before any agent_end event would have cleared `busy`.
+ */
+export function markIdle(conversationId: string): void {
+  const cur = runtimes.get(conversationId);
+  if (!cur || (!cur.busy && !cur.streaming)) return;
+  runtimes.set(conversationId, { ...cur, busy: false, streaming: null });
+  notify(conversationId);
+}
+
+/** Apply one agent event to a runtime, returning a new object iff it changed. */
+function applyEvent(cur: ConvoRuntime, event: AgentSessionEvent): ConvoRuntime {
+  switch (event.type) {
+    case 'agent_start':
+      return { ...cur, busy: true };
+    case 'agent_end':
+      return { ...cur, busy: false, streaming: null };
+    case 'message_start':
+    case 'message_update':
+      return event.message.role === 'assistant'
+        ? { ...cur, streaming: event.message }
+        : cur;
+    case 'message_end':
+      return {
+        ...cur,
+        messages: [...cur.messages, event.message],
+        streaming: event.message.role === 'assistant' ? null : cur.streaming,
+      };
+    case 'tool_execution_start':
+      return {
+        ...cur,
+        toolStates: {
+          ...cur.toolStates,
+          [event.toolCallId]: { name: event.toolName, status: 'running' },
+        },
+      };
+    case 'tool_execution_end':
+      return {
+        ...cur,
+        toolStates: {
+          ...cur.toolStates,
+          [event.toolCallId]: {
+            name: event.toolName,
+            status: event.isError ? 'error' : 'done',
+          },
+        },
+      };
+    case 'compaction_start':
+      return { ...cur, compacting: true };
+    case 'compaction_end':
+      return { ...cur, compacting: false };
+    default:
+      return cur;
+  }
+}
+
+function handleEvent(env: AgentEventEnvelope): void {
+  const id = env.conversationId;
+  if (!id) return;
+  const cur = runtimes.get(id);
+  // Events for a conversation with no open tab are dropped — there's no
+  // runtime to accumulate into. A tab is always seeded before it can send.
+  if (!cur) return;
+  const next = applyEvent(cur, env.event);
+  if (next === cur) return;
+  runtimes.set(id, next);
+  notify(id);
+}
+
+// One global subscription for the whole renderer lifetime. Events are routed
+// to the right conversation by id — this is what keeps a background tab's
+// turn accumulating while its chat component is unmounted.
+window.modmixer.onEvent(handleEvent);
+
+function subscribeTo(conversationId: string, cb: () => void): () => void {
+  let set = listeners.get(conversationId);
+  if (!set) {
+    set = new Set();
+    listeners.set(conversationId, set);
+  }
+  set.add(cb);
+  return () => {
+    const s = listeners.get(conversationId);
+    if (!s) return;
+    s.delete(cb);
+    if (s.size === 0) listeners.delete(conversationId);
+  };
+}
+
+/** Subscribe a component to one conversation's live runtime. */
+export function useConversationRuntime(conversationId: string): ConvoRuntime {
+  const subscribe = useCallback(
+    (cb: () => void) => subscribeTo(conversationId, cb),
+    [conversationId],
+  );
+  const getSnapshot = useCallback(
+    () => runtimes.get(conversationId) ?? EMPTY,
+    [conversationId],
+  );
+  return useSyncExternalStore(subscribe, getSnapshot);
+}
+
+function subscribeGlobal(cb: () => void): () => void {
+  globalListeners.add(cb);
+  return () => {
+    globalListeners.delete(cb);
+  };
+}
+
+function anyBusy(): boolean {
+  for (const rt of runtimes.values()) {
+    if (rt.busy) return true;
+  }
+  return false;
+}
+
+/** True while any open conversation has a turn in flight. */
+export function useAnyBusy(): boolean {
+  return useSyncExternalStore(subscribeGlobal, anyBusy);
+}

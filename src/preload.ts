@@ -40,8 +40,12 @@ const api = {
     invoke('modmixer:env:clear-rimworld-install-override'),
 
   // Agent
-  send: (text: string) => invoke('modmixer:agent:send', text),
-  interrupt: () => invoke('modmixer:agent:interrupt'),
+  send: (conversationId: string, text: string) =>
+    invoke('modmixer:agent:send', conversationId, text),
+  interrupt: (conversationId: string) =>
+    invoke('modmixer:agent:interrupt', conversationId),
+  closeConversation: (conversationId: string) =>
+    invoke('modmixer:agent:close', conversationId),
   getContextUsage: (conversationId: string) =>
     invoke('modmixer:agent:get-context-usage', conversationId),
   onEvent: (handler: (env: import('./preload/typed-ipc').AgentEventEnvelope) => void) =>
@@ -70,16 +74,26 @@ const api = {
     scope: import('./agent/conversations').ConversationScope,
     title?: string,
   ) => invoke('modmixer:conversations:create', scope, title),
-  switchConversation: (id: string) => invoke('modmixer:conversations:switch', id),
   deleteConversation: (id: string) => invoke('modmixer:conversations:delete', id),
-  getActiveConversationId: () => invoke('modmixer:conversations:get-active'),
-  getActiveMessages: () => invoke('modmixer:conversations:get-active-messages'),
+  setConversationModel: (
+    conversationId: string,
+    selection: import('./agent/settings').ModelSelection,
+  ) => invoke('modmixer:conversations:set-model', conversationId, selection),
+  setConversationThinkingLevel: (
+    conversationId: string,
+    level: import('@mariozechner/pi-agent-core').ThinkingLevel,
+  ) =>
+    invoke('modmixer:conversations:set-thinking-level', conversationId, level),
   /**
-   * Resolve to the "active chat" for a mod, creating one if none exists.
-   * Switches the agent to it as a side-effect.
+   * Resolve the "active chat" for a mod to a Conversation (creating one if
+   * none exists) — fast, no session construction. Pair with
+   * openConversationSession to load the transcript in the background.
    */
-  openConversationForMod: (folder: string) =>
-    invoke('modmixer:conversations:open-for-mod', folder),
+  resolveConversationForMod: (folder: string) =>
+    invoke('modmixer:conversations:resolve-for-mod', folder),
+  /** Open a conversation's agent session and return its hydrated transcript. */
+  openConversationSession: (conversationId: string) =>
+    invoke('modmixer:conversations:open-session', conversationId),
   /**
    * Replace the active chat for a mod with a fresh one. The previous chat's
    * session file is left on disk.
@@ -246,8 +260,8 @@ const api = {
   // Saves (snapshots) — rollback for the active mod's history.
   listSnapshots: (folder: string) =>
     invoke('modmixer:snapshots:list', folder),
-  saveSnapshot: (label: string | null) =>
-    invoke('modmixer:snapshots:save', label),
+  saveSnapshot: (folder: string, label: string | null) =>
+    invoke('modmixer:snapshots:save', folder, label),
   renameSnapshot: (folder: string, sha: string, label: string | null) =>
     invoke('modmixer:snapshots:rename', folder, sha, label),
   deleteSnapshot: (folder: string, sha: string) =>

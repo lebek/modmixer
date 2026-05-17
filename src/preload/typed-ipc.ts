@@ -130,8 +130,9 @@ export interface Channels {
   'modmixer:env:clear-rimworld-install-override': () => null;
 
   // Agent
-  'modmixer:agent:send': (text: string) => void;
-  'modmixer:agent:interrupt': () => void;
+  'modmixer:agent:send': (conversationId: string, text: string) => void;
+  'modmixer:agent:interrupt': (conversationId: string) => void;
+  'modmixer:agent:close': (conversationId: string) => void;
   'modmixer:agent:get-context-usage': (
     conversationId: string,
   ) => import('@mariozechner/pi-coding-agent').ContextUsage | null;
@@ -151,14 +152,20 @@ export interface Channels {
     scope: ConversationScope,
     title?: string,
   ) => Conversation;
-  'modmixer:conversations:switch': (id: string) => HydratedConversation;
   'modmixer:conversations:delete': (id: string) => void;
-  'modmixer:conversations:get-active': () => string | null;
-  'modmixer:conversations:get-active-messages': () => AgentMessage[];
-  'modmixer:conversations:open-for-mod': (folder: string) => HydratedConversation;
-  'modmixer:conversations:start-fresh-for-mod': (
-    folder: string,
-  ) => HydratedConversation;
+  'modmixer:conversations:set-model': (
+    conversationId: string,
+    selection: ModelSelection,
+  ) => void;
+  'modmixer:conversations:set-thinking-level': (
+    conversationId: string,
+    level: ThinkingLevel,
+  ) => void;
+  'modmixer:conversations:resolve-for-mod': (folder: string) => Conversation;
+  'modmixer:conversations:open-session': (
+    conversationId: string,
+  ) => { messages: AgentMessage[] };
+  'modmixer:conversations:start-fresh-for-mod': (folder: string) => Conversation;
 
   // Mods (workspace)
   'modmixer:mods:list-workspace': () => WorkspaceMod[];
@@ -306,7 +313,10 @@ export interface Channels {
 
   // Saves (snapshots)
   'modmixer:snapshots:list': (folder: string) => SaveRecord[];
-  'modmixer:snapshots:save': (label: string | null) => SaveRecord | null;
+  'modmixer:snapshots:save': (
+    folder: string,
+    label: string | null,
+  ) => SaveRecord | null;
   'modmixer:snapshots:rename': (
     folder: string,
     sha: string,

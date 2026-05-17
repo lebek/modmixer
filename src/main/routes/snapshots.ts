@@ -10,12 +10,12 @@ import type { RouteContext } from './context.js';
 /**
  * Saves (snapshots) — the gamer-facing rollback feature.
  *
- * The "Save" action is implicit on the active conversation: the renderer
- * passes a label, the host pulls folder + leaf entry id from the active
- * session and commits. List/rename/delete are folder-scoped so the saves
- * sidebar can render even when the conversation has been deleted. Restore
- * always goes through the host so chat-rewind can dispose+reconstruct the
- * active session if needed.
+ * "Save" is folder-scoped: the renderer passes the focused mod's folder and
+ * a label, and the host snapshots that folder plus its chat slice.
+ * List/rename/delete are folder-scoped too, so the saves sidebar can render
+ * even when the conversation has been deleted. Restore always goes through
+ * the host so chat-rewind can dispose+reconstruct any sessions scoped to
+ * the mod being restored.
  */
 export function registerSnapshotsRoutes(ctx: RouteContext): void {
   const { ipc, getWindow, host } = ctx;
@@ -24,8 +24,10 @@ export function registerSnapshotsRoutes(ctx: RouteContext): void {
     listSaves(folder),
   );
 
-  ipc.handle('modmixer:snapshots:save', (_evt, label: string | null) =>
-    host.commitManualSave(label),
+  ipc.handle(
+    'modmixer:snapshots:save',
+    (_evt, folder: string, label: string | null) =>
+      host.commitManualSave(folder, label),
   );
 
   ipc.handle(

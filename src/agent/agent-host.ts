@@ -62,7 +62,7 @@ import {
 } from './tools/path-guarded.js';
 import { withConfirmation } from './security/with-confirmation.js';
 import { SafeStorageAuthBackend } from './security/secure-auth-storage.js';
-import { runTestCycleTool } from './tools/run-test-cycle.js';
+import { createRunTestCycleTool } from './tools/run-test-cycle.js';
 import { notifyTestStatusTool } from './tools/notify-test-status.js';
 import { sendToast } from './notifications.js';
 import { loadSettings, saveSettings } from './settings.js';
@@ -94,6 +94,8 @@ import {
   isDefaultTitle,
   removeConversation,
   setActiveForMod,
+  setConvModel,
+  setConvThinkingLevel,
   setScope,
   setSystemPrompt,
   setTitle,
@@ -123,6 +125,7 @@ const TRUNCATION_RECOVERY_PROMPT =
  */
 function buildCustomTools(
   cwd: string,
+  conversationId: string,
   getActiveScope: () => ConversationScope | null,
   getActiveModel: () => Model<Api> | null,
 ): AgentTool<any>[] {
@@ -131,7 +134,7 @@ function buildCustomTools(
     setModMetadataTool,
     updateSchematicTool,
     buildModTool,
-    runTestCycleTool,
+    createRunTestCycleTool(conversationId),
     notifyTestStatusTool,
     monitorGetErrorTool,
     monitorPollTool,
@@ -394,11 +397,19 @@ export function getAgentHost(): AgentHost {
   return hostInstance;
 }
 
-interface ActiveSession {
+interface OpenSession {
   conversationId: string;
   scope: ConversationScope;
   session: AgentSession;
   unsubscribe: () => void;
+  /**
+   * Set when an in-flight tool call (currently only scaffold_mod) upgrades
+   * this conversation's scope. The next send() for this conversation
+   * reconstructs the AgentSession against the new scope before prompting,
+   * so the user's next message hits a fresh system prompt without us
+   * mutating one in flight.
+   */
+  pendingScopeReload: ConversationScope | null;
 }
 
 export class AgentHost {
@@ -409,23 +420,26 @@ export class AgentHost {
   private readonly authStorage: AuthStorage;
   private readonly modelRegistry: ModelRegistry;
   private readonly settingsManager: SettingsManager;
-  private readonly customTools: ToolDefinition[];
   private readonly allowedToolNames: string[];
 
-  private active: ActiveSession | null = null;
+  /**
+   * One entry per open conversation (one mod tab in the UI). Sessions run
+   * independently — a turn in flight for one mod doesn't block another, and
+   * a turn keeps streaming while the user is focused on a different tab.
+   */
+  private sessions = new Map<string, OpenSession>();
+  /**
+   * In-flight session constructions. Two concurrent openSession calls for the
+   * same conversation (a fast double-click, or send() racing the background
+   * open) share one construction instead of leaking a second session.
+   */
+  private constructing = new Map<string, Promise<OpenSession>>();
   /**
    * Built lazily once on first session construction and reused thereafter.
    * The strip-thinking transform is stateless; one extension instance is
    * fine across every session in the app's lifetime.
    */
   private stripThinkingExtension: Extension | null = null;
-  /**
-   * Set when an in-flight tool call (currently only scaffold_mod) updates the
-   * conversation scope. The next send() reconstructs the AgentSession against
-   * the new scope before prompting, so the user's next message hits a fresh
-   * system prompt without us having to mutate one in flight.
-   */
-  private pendingScopeReload: ConversationScope | null = null;
 
   // Background bridge monitoring (test-in-game flow). Tied to a specific
   // conversation, dropped when the user switches away. The bridge mod
@@ -495,20 +509,14 @@ export class AgentHost {
       path.join(this.agentDir, 'models.json'),
     );
     this.settingsManager = SettingsManager.create(this.cwd, this.agentDir);
-    const customAgentTools = buildCustomTools(
-      this.cwd,
-      () => this.active?.scope ?? null,
-      () => this.active?.session.model ?? null,
-    );
-    this.allowedToolNames = [
-      ...BUILTIN_TOOL_NAMES,
-      ...customAgentTools
-        .map((t) => t.name)
-        .filter((n) => !BUILTIN_TOOL_NAMES.includes(n)),
-    ];
-    this.customTools = customAgentTools.map((tool) =>
-      toolDefinitionFromAgentTool(tool),
-    );
+    // Custom tools are rebuilt per session in constructSession — their
+    // closures bind to one specific conversation's scope/model. Here we only
+    // need the tool *names* for the allowlist, so a throwaway build with
+    // no-op getters is enough.
+    const toolNames = buildCustomTools(this.cwd, '', () => null, () => null)
+      .map((t) => t.name)
+      .filter((n) => !BUILTIN_TOOL_NAMES.includes(n));
+    this.allowedToolNames = [...BUILTIN_TOOL_NAMES, ...toolNames];
   }
 
   /**
@@ -671,21 +679,25 @@ export class AgentHost {
     });
   }
 
-  /** Tear down the active session, if any. Used on app exit and on switch. */
-  private async disposeActive(): Promise<void> {
-    if (!this.active) return;
+  /**
+   * Tear down one open session. Used on tab close, chat reset, and app exit.
+   * No-op when the conversation has no open session.
+   */
+  private async disposeSession(conversationId: string): Promise<void> {
+    const entry = this.sessions.get(conversationId);
+    if (!entry) return;
+    this.sessions.delete(conversationId);
     try {
-      await this.active.session.abort();
+      await entry.session.abort();
     } catch (err) {
       console.error('AgentSession.abort failed:', err);
     }
-    this.active.unsubscribe();
+    entry.unsubscribe();
     try {
-      this.active.session.dispose();
+      entry.session.dispose();
     } catch (err) {
       console.error('AgentSession.dispose failed:', err);
     }
-    this.active = null;
   }
 
   /**
@@ -694,21 +706,23 @@ export class AgentHost {
    * empty session file is created.
    */
   /**
-   * Resolve the user's saved model selection to an actual pi-ai Model object.
-   * If the saved selection is unavailable (missing, no auth) we fall back to
-   * the first OAuth-available model, then to any built-in model. The session
-   * still constructs in the no-auth case so the UI can hydrate; send() will
-   * fail at prompt time, but the chat panel gates that path anyway.
+   * Resolve a model selection to an actual pi-ai Model object. Tries, in
+   * order: `preferred` (a conversation's own per-chat pick), then the
+   * settings default, then the first OAuth-available model, then any
+   * built-in model. Each candidate is skipped if its provider isn't authed.
+   * The session still constructs in the no-auth case so the UI can hydrate;
+   * send() will fail at prompt time, but the chat panel gates that path.
    */
-  private resolveModel(): Model<Api> | null {
-    const { model: saved } = loadSettings();
-    if (saved) {
-      const found = this.modelRegistry.find(saved.provider, saved.modelId);
+  private resolveModel(preferred?: ModelSelection | null): Model<Api> | null {
+    for (const sel of [preferred, loadSettings().model]) {
+      if (!sel) continue;
+      const found = this.modelRegistry.find(sel.provider, sel.modelId);
       if (found && this.modelRegistry.hasConfiguredAuth(found)) return found;
     }
-    // No valid saved selection — prefer the Sonnet-tier default of the first
-    // linked provider over "first model registered," so a fresh install lands
-    // on a sensible mid-tier model instead of whatever sorts first.
+    // No usable preferred/saved selection — prefer the Sonnet-tier default of
+    // the first linked provider over "first model registered," so a fresh
+    // install lands on a sensible mid-tier model instead of whatever sorts
+    // first.
     for (const provider of Object.keys(FEATURED_MODELS)) {
       if (!this.authStorage.getAuthStatus(provider).configured) continue;
       const defaultId = DEFAULT_MODEL[provider];
@@ -724,10 +738,16 @@ export class AgentHost {
 
   private async constructSession(
     convo: Conversation,
-  ): Promise<ActiveSession> {
-    const model = this.resolveModel();
+  ): Promise<OpenSession> {
+    const model = this.resolveModel(convo.model);
     if (!model) {
       throw new Error('No models registered in pi-ai — cannot construct session.');
+    }
+    // Backfill this chat's own model pick if it had none — a legacy chat, or
+    // one created before any provider was connected. Keeps the in-chat picker
+    // and the running session agreeing on what model is in use.
+    if (!convo.model) {
+      setConvModel(convo.id, { provider: model.provider, modelId: model.id });
     }
     const sessionManager = SessionManager.open(
       convo.sessionFile,
@@ -763,7 +783,22 @@ export class AgentHost {
     if (snapshotExtension) extensions.push(snapshotExtension);
     const resourceLoader = new ScopedResourceLoader(systemPrompt, extensions);
 
-    const { thinkingLevel } = loadSettings();
+    // Per-chat reasoning effort; backfilled for legacy chats like the model.
+    const thinkingLevel = convo.thinkingLevel ?? loadSettings().thinkingLevel;
+    if (convo.thinkingLevel === undefined) {
+      setConvThinkingLevel(convo.id, thinkingLevel);
+    }
+    // Per-session custom tools: each tool's closures bind to THIS
+    // conversation, so a tool call in one mod's chat can never read another
+    // mod's scope or model. `sessionRef` is filled in immediately after
+    // construction; tools only execute during prompt(), long after.
+    let sessionRef: AgentSession | null = null;
+    const customTools = buildCustomTools(
+      this.cwd,
+      convo.id,
+      () => convo.scope,
+      () => sessionRef?.model ?? null,
+    ).map((tool) => toolDefinitionFromAgentTool(tool));
     const { session } = await createAgentSession({
       cwd: this.cwd,
       agentDir: this.agentDir,
@@ -775,8 +810,9 @@ export class AgentHost {
       model,
       thinkingLevel,
       tools: this.allowedToolNames,
-      customTools: this.customTools,
+      customTools,
     });
+    sessionRef = session;
 
     const unsubscribe = session.subscribe((event) =>
       this.onSessionEvent(convo.id, event),
@@ -787,6 +823,7 @@ export class AgentHost {
       scope: convo.scope,
       session,
       unsubscribe,
+      pendingScopeReload: null,
     };
   }
 
@@ -832,7 +869,8 @@ export class AgentHost {
     conversationId: string,
     message: AgentMessage,
   ): void {
-    if (this.active?.conversationId !== conversationId) return;
+    const entry = this.sessions.get(conversationId);
+    if (!entry) return;
     if (message.role !== 'assistant') return;
     if (message.stopReason !== 'stop' && message.stopReason !== 'length') {
       return;
@@ -847,7 +885,7 @@ export class AgentHost {
     }
     if (!hasThinking) return;
 
-    const messages = this.active.session.agent.state.messages;
+    const messages = entry.session.agent.state.messages;
     for (let i = messages.length - 2; i >= 0; i--) {
       const m = messages[i];
       if (m.role !== 'user') continue;
@@ -855,7 +893,7 @@ export class AgentHost {
       break;
     }
 
-    void this.active.session
+    void entry.session
       .prompt(TRUNCATION_RECOVERY_PROMPT, { streamingBehavior: 'steer' })
       .catch((err) => {
         console.error('Failed to inject truncation recovery prompt:', err);
@@ -895,12 +933,13 @@ export class AgentHost {
     // can't swap the running session's prompt safely mid-turn, so we mark a
     // scope reload — the next send() will dispose and reconstruct against
     // the new scope.
+    const scaffoldEntry = this.sessions.get(conversationId);
     if (
       event.type === 'tool_execution_end' &&
       event.toolName === 'scaffold_mod' &&
       !event.isError &&
-      this.active?.conversationId === conversationId &&
-      this.active.scope.type === 'new'
+      scaffoldEntry &&
+      scaffoldEntry.scope.type === 'new'
     ) {
       const folder = (
         event.result?.details as { folder?: string } | undefined
@@ -917,7 +956,7 @@ export class AgentHost {
         // sticky routing re-picks here and then holds.
         setSystemPrompt(conversationId, buildSystemPrompt(nextScope));
         setActiveForMod(folder, conversationId);
-        this.pendingScopeReload = nextScope;
+        scaffoldEntry.pendingScopeReload = nextScope;
         // Tell the renderer to re-hydrate the active conversation since the
         // scope (and thus the displayed mod context) changed underneath it.
         this.sendToRenderer('modmixer:agent:scope-upgraded', {
@@ -928,54 +967,56 @@ export class AgentHost {
     }
   }
 
-  /** Public entry point used by IPC and by ourselves. */
-  async switchTo(conversationId: string): Promise<Conversation> {
+  /**
+   * Open a conversation as a live session — one mod tab. Get-or-create: if a
+   * session for this conversation is already open it's returned untouched,
+   * and every other open session keeps running. Background bridge monitoring
+   * is NOT disturbed: a test armed in one tab survives the user opening or
+   * focusing another.
+   */
+  async openSession(conversationId: string): Promise<Conversation> {
     const convo = getConversation(conversationId);
     if (!convo) {
       throw new Error(`Conversation not found: ${conversationId}`);
     }
-
-    // Switching cancels any background bridge monitoring tied to the prior
-    // chat — errors won't auto-prompt into a different scope.
-    if (
-      this.monitoringConversationId &&
-      this.monitoringConversationId !== conversationId
-    ) {
-      this.stopMonitoring();
+    if (this.sessions.has(conversationId)) return convo;
+    let pending = this.constructing.get(conversationId);
+    if (!pending) {
+      pending = this.constructSession(convo);
+      this.constructing.set(conversationId, pending);
+      try {
+        this.sessions.set(conversationId, await pending);
+      } finally {
+        this.constructing.delete(conversationId);
+      }
+    } else {
+      // Another caller is already constructing this session — wait for it.
+      await pending;
     }
-
-    if (
-      this.active?.conversationId === conversationId &&
-      !this.pendingScopeReload
-    ) {
-      return convo;
-    }
-
-    await this.disposeActive();
-    this.active = await this.constructSession(convo);
-    this.pendingScopeReload = null;
     return convo;
   }
 
-  /** Returns the live messages for the active conversation. */
-  getActiveMessages() {
-    return this.active?.session.agent.state.messages ?? [];
+  /** Tear down a session — used when the user closes a mod tab. */
+  async closeSession(conversationId: string): Promise<void> {
+    if (this.monitoringConversationId === conversationId) {
+      this.stopMonitoring();
+    }
+    await this.disposeSession(conversationId);
   }
 
-  getCurrentId(): string | null {
-    return this.active?.conversationId ?? null;
-  }
-
-  getCurrentScope(): ConversationScope | null {
-    return this.active?.scope ?? null;
+  /** Live messages for one open conversation; empty when it isn't open. */
+  getMessages(conversationId: string): AgentMessage[] {
+    return (
+      this.sessions.get(conversationId)?.session.agent.state.messages ?? []
+    );
   }
 
   /**
    * Create a new conversation entry and pre-write its session header to
    * disk. pi defers flushing until the first assistant message lands, but we
    * want a stable id ↔ session-file mapping in our index even before the
-   * first message — otherwise SessionManager.open on a later switchTo would
-   * mint a fresh id internally and our index id would diverge from the
+   * first message — otherwise SessionManager.open on a later openSession
+   * would mint a fresh id internally and our index id would diverge from the
    * eventual JSONL header.
    */
   async createConversation(
@@ -998,20 +1039,24 @@ export class AgentHost {
     fs.mkdirSync(path.dirname(sessionFile), { recursive: true });
     fs.writeFileSync(sessionFile, `${JSON.stringify(header)}\n`);
     // Snapshot the system prompt up front so it's frozen for this
-    // conversation's lifetime — see Conversation.systemPrompt.
+    // conversation's lifetime — see Conversation.systemPrompt. Stamp the
+    // current settings defaults as this chat's starting model + thinking
+    // level; from here they're the chat's own and the settings default only
+    // affects subsequently-created chats.
+    const settings = loadSettings();
     return addConversation({
       id,
       sessionFile,
       scope,
       title,
       systemPrompt: buildSystemPrompt(scope),
+      model: settings.model ?? undefined,
+      thinkingLevel: settings.thinkingLevel,
     });
   }
 
   async deleteConversation(id: string): Promise<void> {
-    if (this.active?.conversationId === id) {
-      await this.disposeActive();
-    }
+    await this.disposeSession(id);
     const sessionFile = removeConversation(id);
     if (sessionFile && fs.existsSync(sessionFile)) {
       try {
@@ -1022,19 +1067,20 @@ export class AgentHost {
     }
   }
 
-  async send(text: string): Promise<void> {
-    if (!this.active) {
-      throw new Error('No active conversation. Switch to one first.');
+  async send(conversationId: string, text: string): Promise<void> {
+    let entry = this.sessions.get(conversationId);
+    if (!entry) {
+      throw new Error(`No open session for conversation: ${conversationId}`);
     }
-    if (this.pendingScopeReload) {
-      const convo = getConversation(this.active.conversationId);
+    if (entry.pendingScopeReload) {
+      const convo = getConversation(conversationId);
       if (convo) {
-        await this.disposeActive();
-        this.active = await this.constructSession(convo);
+        await this.disposeSession(conversationId);
+        entry = await this.constructSession(convo);
+        this.sessions.set(conversationId, entry);
       }
-      this.pendingScopeReload = null;
     }
-    await this.active!.session.prompt(text, {
+    await entry.session.prompt(text, {
       streamingBehavior: 'steer',
       expandPromptTemplates: false,
     });
@@ -1045,9 +1091,10 @@ export class AgentHost {
    * and emits `agent_end`, so the renderer's existing `busy` reset still fires.
    * No-op when there's no active session or no run in flight.
    */
-  async interrupt(): Promise<void> {
-    if (!this.active) return;
-    await this.active.session.abort();
+  async interrupt(conversationId: string): Promise<void> {
+    const entry = this.sessions.get(conversationId);
+    if (!entry) return;
+    await entry.session.abort();
   }
 
   // =========================================================================
@@ -1056,13 +1103,13 @@ export class AgentHost {
 
   /**
    * User-pressed "Save". Snapshots the full state of the mod (folder +
-   * chats + active chat). Returns null when no mod-scoped chat is active
-   * — there's no folder to anchor the save to in that case.
+   * chats + active chat) for the given workspace folder.
    */
-  async commitManualSave(label: string | null): Promise<SaveRecord | null> {
-    const a = this.active;
-    if (!a || a.scope.type !== 'mod') return null;
-    return commitTurn(a.scope.modFolder, {
+  async commitManualSave(
+    folder: string,
+    label: string | null,
+  ): Promise<SaveRecord | null> {
+    return commitTurn(folder, {
       kind: 'manual',
       label: label ?? undefined,
     });
@@ -1083,19 +1130,14 @@ export class AgentHost {
     conversation: Conversation;
     messages: AgentMessage[];
   } | null> {
-    // Pi may be holding session files open for any mod-scoped chat. Drop
-    // the active session if it touches this mod before snapshots.ts
-    // rewrites the underlying JSONLs.
-    const activeWasOurs =
-      this.active &&
-      ((this.active.scope.type === 'mod' &&
-        this.active.scope.modFolder === args.folder) ||
-        // 'new'-scope active doesn't match a mod folder, but defensively
-        // dispose anyway — the snapshot may delete chats the active
-        // session points at.
-        this.active.scope.type === 'new');
-    if (activeWasOurs) {
-      await this.disposeActive();
+    // Pi may be holding session files open for any chat scoped to this mod.
+    // Drop every such session before snapshots.ts rewrites the underlying
+    // JSONLs. (Collect ids first — disposeSession mutates the map.)
+    const folderSessions = [...this.sessions.values()].filter(
+      (e) => e.scope.type === 'mod' && e.scope.modFolder === args.folder,
+    );
+    for (const entry of folderSessions) {
+      await this.disposeSession(entry.conversationId);
     }
 
     const { activeConversation } = await restoreSnapshot(
@@ -1104,51 +1146,64 @@ export class AgentHost {
     );
 
     if (!activeConversation) return null;
-    const convo = await this.switchTo(activeConversation.id);
+    const convo = await this.openSession(activeConversation.id);
     return {
       conversation: convo,
-      messages: this.getActiveMessages(),
+      messages: this.getMessages(convo.id),
     };
   }
 
-  async setModel(selection: ModelSelection): Promise<void> {
+  /**
+   * Switch one chat's model — persists the per-conversation selection and
+   * applies it to the live session if that chat is open. Other chats are
+   * untouched; the model is per-conversation, not global.
+   */
+  async setConversationModel(
+    conversationId: string,
+    selection: ModelSelection,
+  ): Promise<void> {
     const model = this.modelRegistry.find(selection.provider, selection.modelId);
     if (!model) {
       throw new Error(
         `Unknown model: ${selection.provider}/${selection.modelId}`,
       );
     }
-    if (this.active) {
-      await this.active.session.setModel(model);
-    }
+    setConvModel(conversationId, selection);
+    const entry = this.sessions.get(conversationId);
+    if (entry) await entry.session.setModel(model);
   }
 
   /**
-   * Apply the user's preferred thinking level to the active session. Pi
-   * clamps internally against the model's available levels, so passing
-   * "xhigh" to Kimi quietly becomes "high" inside the session — that's
-   * fine; the saved preference (in settings.json) is the source of truth
-   * across model switches.
+   * Switch one chat's reasoning effort. Pi clamps internally against the
+   * model's available levels, so passing "xhigh" to Kimi quietly becomes
+   * "high" inside the session — the persisted value is the user's intent,
+   * not necessarily what the next turn runs at.
    */
-  setThinkingLevel(level: ThinkingLevel): void {
-    if (this.active) {
-      this.active.session.setThinkingLevel(level);
-    }
+  setConversationThinkingLevel(
+    conversationId: string,
+    level: ThinkingLevel,
+  ): void {
+    setConvThinkingLevel(conversationId, level);
+    const entry = this.sessions.get(conversationId);
+    if (entry) entry.session.setThinkingLevel(level);
   }
 
   /**
-   * Re-bind the active session's model after credentials change (login /
-   * logout). If the saved selection is no longer valid, the next available
-   * model is used instead.
+   * Re-bind every open session's model after credentials change (login /
+   * logout / key edit). Each session re-resolves from its own conversation's
+   * pick, falling back through resolveModel's chain if that pick's provider
+   * is the one that just lost auth.
    */
   private async refreshActiveModel(): Promise<void> {
-    if (!this.active) return;
-    const model = this.resolveModel();
-    if (!model) return;
-    try {
-      await this.active.session.setModel(model);
-    } catch (err) {
-      console.error('Failed to swap session model after auth change:', err);
+    for (const entry of this.sessions.values()) {
+      const convo = getConversation(entry.conversationId);
+      const model = this.resolveModel(convo?.model);
+      if (!model) continue;
+      try {
+        await entry.session.setModel(model);
+      } catch (err) {
+        console.error('Failed to swap session model after auth change:', err);
+      }
     }
   }
 
@@ -1264,18 +1319,16 @@ export class AgentHost {
   }
 
   /**
-   * Live context-window usage for the active session, if it matches the
-   * given conversation. Returns null when no active session, the active
-   * session is for a different conversation, or pi can't compute usage
-   * (no model bound yet, fresh-after-compaction, etc.). Pi's value comes
-   * from the most recent assistant `usage` plus an estimate of any newer
+   * Live context-window usage for one open conversation. Returns null when
+   * that conversation has no open session, or pi can't compute usage (no
+   * model bound yet, fresh-after-compaction, etc.). Pi's value comes from
+   * the most recent assistant `usage` plus an estimate of any newer
    * messages, so it updates per-turn without us having to count tokens.
    */
   getContextUsage(conversationId: string): ContextUsage | null {
-    if (!this.active || this.active.conversationId !== conversationId) {
-      return null;
-    }
-    return this.active.session.getContextUsage() ?? null;
+    return (
+      this.sessions.get(conversationId)?.session.getContextUsage() ?? null
+    );
   }
 
   /**
@@ -1635,6 +1688,20 @@ export class AgentHost {
     modFolder: string;
     isolated: boolean;
   }): Promise<void> {
+    // One game, one bridge socket, one ModsConfig.xml — in-game testing is a
+    // genuine singleton. If another conversation is already monitoring a
+    // test, refuse rather than silently stealing the bridge; the second
+    // mod's run_test_cycle surfaces this as an error tool result.
+    if (
+      this.monitoringConversationId &&
+      this.monitoringConversationId !== opts.conversationId
+    ) {
+      throw new Error(
+        'Another mod is already being tested in RimWorld. Only one in-game ' +
+          'test can run at a time — finish that test (or close RimWorld) ' +
+          'before testing this mod.',
+      );
+    }
     this.stopMonitoring();
     this.monitoringConversationId = opts.conversationId;
     this.monitoringIsolated = opts.isolated;
@@ -1754,7 +1821,8 @@ export class AgentHost {
     // Don't stop monitoring — the buffer stays attached. It's edge-triggered:
     // a class already reported in this run won't prompt again, but a class
     // first seen later in the run lands as its own fresh auto-prompt.
-    if (this.active?.conversationId !== conversationId) return;
+    const entry = this.sessions.get(conversationId);
+    if (!entry) return;
 
     // Suppress the "so far so good" heartbeat now that we've actually seen
     // diagnostics. Set this BEFORE the toast/prompt so a 60s timer firing
@@ -1768,12 +1836,11 @@ export class AgentHost {
     );
 
     try {
-      const session = this.active.session;
       // session.prompt() picks the right path automatically (queues via steer
       // if a turn is already in flight, otherwise starts a new turn). The
       // triage rubric for interpreting this summary lives in the system
       // prompt — only the dynamic summary lands in the chat.
-      await session.prompt(formatErrorSummary(groups, runId), {
+      await entry.session.prompt(formatErrorSummary(groups, runId), {
         streamingBehavior: 'steer',
       });
     } catch (err) {
@@ -1783,6 +1850,8 @@ export class AgentHost {
 
   async shutdown(): Promise<void> {
     this.stopMonitoring();
-    await this.disposeActive();
+    for (const id of [...this.sessions.keys()]) {
+      await this.disposeSession(id);
+    }
   }
 }
