@@ -1,4 +1,12 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type DragEvent,
+} from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { AgentMessage, ThinkingLevel } from '@mariozechner/pi-agent-core';
 import type { Conversation } from '../agent/conversations';
@@ -6,7 +14,12 @@ import type { WorkspaceMod } from '../agent/workspace';
 import type { ModelOption } from '../agent/models';
 import type { ModelSelection } from '../agent/settings';
 import { cn } from '@/lib/cn';
-import { extractText, extractThinking, extractToolCalls } from '@/lib/agent-utils';
+import {
+  extractImages,
+  extractText,
+  extractThinking,
+  extractToolCalls,
+} from '@/lib/agent-utils';
 import { useAsyncAction } from '@/lib/use-async-action';
 import { useScrollPin } from '@/lib/use-scroll-pin';
 import {
@@ -15,8 +28,15 @@ import {
   setPanelDraft,
   setPanelModel,
   setPanelThinking,
+  addPanelAttachments,
+  removePanelAttachment,
+  clearPanelAttachments,
   markIdle,
 } from '../conversations-store';
+import type {
+  AttachmentInput,
+  PreparedAttachment,
+} from '../agent/attachments/types';
 import { Markdown } from './markdown';
 import { ModelPicker } from './model-picker';
 import { ThinkingPicker } from './thinking-picker';
@@ -120,7 +140,9 @@ export function ChatPanel({
   // when the user switches to another chat (or mod) and back. The store entry
   // is seeded when the tab opens (App). `draft` is renderer-only; a
   // model/thinking change also persists to conversations.json via IPC.
-  const { draft, model, thinkingLevel } = usePanelState(conversation.id);
+  const { draft, model, thinkingLevel, attachments } = usePanelState(
+    conversation.id,
+  );
   const changeModel = (selection: ModelSelection) => {
     setPanelModel(conversation.id, selection);
     void window.modmixer.setConversationModel(conversation.id, selection);
@@ -129,8 +151,12 @@ export function ChatPanel({
     setPanelThinking(conversation.id, level);
     void window.modmixer.setConversationThinkingLevel(conversation.id, level);
   };
-  const send = useAsyncAction((text: string) =>
-    window.modmixer.send(conversation.id, text),
+  const send = useAsyncAction((text: string, atts: PreparedAttachment[]) =>
+    window.modmixer.send(
+      conversation.id,
+      text,
+      atts.length > 0 ? atts : undefined,
+    ),
   );
   const interruptAction = useAsyncAction(() =>
     window.modmixer.interrupt(conversation.id),
@@ -172,9 +198,11 @@ export function ChatPanel({
 
   const submit = async () => {
     const text = draft.trim();
-    if (!text || busy || loading) return;
+    if ((!text && attachments.length === 0) || busy || loading) return;
+    const staged = attachments;
     setPanelDraft(conversation.id, '');
-    const result = await send.run(text);
+    clearPanelAttachments(conversation.id);
+    const result = await send.run(text, staged);
     // null = the IPC threw before any agent_end event would clear busy.
     if (result === null) markIdle(conversation.id);
   };
@@ -183,6 +211,73 @@ export function ChatPanel({
     if (!busy) return;
     await interruptAction.run();
   };
+
+  // Attachment ingestion: drag-drop, paste, and the browse button all funnel
+  // here. A File with a real path (drag/browse/Explorer-copy) is sent as a
+  // path; a pasted clipboard bitmap has no path, so its bytes go instead.
+  const ingestFiles = useCallback(
+    async (files: File[]) => {
+      if (files.length === 0) return;
+      const inputs: AttachmentInput[] = [];
+      for (const file of files) {
+        const filePath = window.modmixer.getPathForFile(file);
+        if (filePath) {
+          inputs.push({ kind: 'path', path: filePath });
+        } else {
+          inputs.push({
+            kind: 'bytes',
+            name: file.name || 'pasted-image.png',
+            mimeType: file.type || 'image/png',
+            bytes: new Uint8Array(await file.arrayBuffer()),
+          });
+        }
+      }
+      const prepared = await window.modmixer.prepareAttachments(inputs);
+      addPanelAttachments(conversation.id, prepared);
+    },
+    [conversation.id],
+  );
+
+  const [dragging, setDragging] = useState(false);
+  const onDragOver = (e: DragEvent) => {
+    if (!hasAi) return;
+    if (!Array.from(e.dataTransfer.types).includes('Files')) return;
+    e.preventDefault();
+    setDragging(true);
+  };
+  const onDragLeave = (e: DragEvent) => {
+    // A leave into a descendant isn't really leaving the panel.
+    if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+    setDragging(false);
+  };
+  const onDrop = (e: DragEvent) => {
+    setDragging(false);
+    if (!hasAi) return;
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length === 0) return;
+    e.preventDefault();
+    void ingestFiles(files);
+  };
+  const browseAttachments = async () => {
+    addPanelAttachments(conversation.id, await window.modmixer.pickAttachments());
+  };
+
+  // Warn when image attachments are staged but the active model can't see
+  // images — otherwise the agent silently can't view them (and may bluff a
+  // description). `vision === false` only; `undefined` means unknown → no warn.
+  const activeModelOption = useMemo(
+    () =>
+      availableModels.find(
+        (o) =>
+          model != null &&
+          o.provider === model.provider &&
+          o.modelId === model.modelId,
+      ),
+    [availableModels, model],
+  );
+  const imageAttachmentsBlocked =
+    activeModelOption?.vision === false &&
+    attachments.some((a) => a.isImage);
 
   // Esc cancels the in-flight turn. Skipped while typing in inputs/textareas
   // (so Esc still does its usual thing in the editor) — only fires when focus
@@ -309,7 +404,20 @@ export function ChatPanel({
   const showBalance = balance !== null && !hasUncostableTurns;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div
+      className="relative flex min-h-0 flex-1 flex-col"
+      onDragEnter={onDragOver}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+    >
+      {dragging && (
+        <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center border-2 border-dashed border-accent bg-paper/80">
+          <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-accent">
+            Drop files to attach
+          </span>
+        </div>
+      )}
       <div className="relative min-h-0 flex-1">
       <div
         ref={scrollRef}
@@ -431,9 +539,35 @@ export function ChatPanel({
         )}
         {hasAi ? (
           <div className="rounded-md border border-line bg-paper p-3 focus-within:border-ink/40">
+            {attachments.length > 0 && (
+              <div className="mb-2 flex flex-wrap gap-1.5">
+                {attachments.map((a) => (
+                  <AttachmentChip
+                    key={a.id}
+                    attachment={a}
+                    onRemove={() =>
+                      removePanelAttachment(conversation.id, a.id)
+                    }
+                  />
+                ))}
+              </div>
+            )}
+            {imageAttachmentsBlocked && (
+              <div className="mb-2 rounded border border-accent/40 bg-accent/10 px-2 py-1 text-[11px] text-accent">
+                {activeModelOption?.label ?? 'This model'} can’t see images —
+                switch to a vision-capable model or the agent won’t be able to
+                view your screenshots.
+              </div>
+            )}
             <textarea
               value={draft}
               onChange={(e) => setPanelDraft(conversation.id, e.target.value)}
+              onPaste={(e) => {
+                const files = Array.from(e.clipboardData.files);
+                if (files.length === 0) return;
+                e.preventDefault();
+                void ingestFiles(files);
+              }}
               onKeyDown={(e) => {
                 if (
                   e.key === 'Enter' &&
@@ -460,6 +594,14 @@ export function ChatPanel({
               rows={1}
             />
             <div className="mt-2 flex items-center justify-end gap-2">
+              <button
+                onClick={() => void browseAttachments()}
+                title="Attach files"
+                aria-label="Attach files"
+                className="mr-auto inline-flex items-center rounded-md border border-line p-1.5 text-subtle transition-colors hover:border-ink/40 hover:text-ink"
+              >
+                <PaperclipIcon />
+              </button>
               {busy && (
                 <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-subtle">
                   esc to stop
@@ -479,11 +621,13 @@ export function ChatPanel({
                 // types the first character.
                 <button
                   onClick={() => void submit()}
-                  aria-hidden={!draft.trim() || undefined}
-                  tabIndex={draft.trim() ? 0 : -1}
+                  aria-hidden={
+                    (!draft.trim() && attachments.length === 0) || undefined
+                  }
+                  tabIndex={draft.trim() || attachments.length > 0 ? 0 : -1}
                   className={cn(
                     'group inline-flex items-center gap-2 rounded-md bg-accent px-4 py-2 font-mono text-[11px] uppercase tracking-[0.18em] text-accent-foreground shadow-sm transition-all hover:bg-accent-soft hover:shadow-md active:translate-y-px',
-                    !draft.trim() && 'invisible',
+                    !draft.trim() && attachments.length === 0 && 'invisible',
                   )}
                 >
                   Send
@@ -551,6 +695,107 @@ function StopIcon() {
     >
       <rect x="6" y="6" width="12" height="12" rx="1" />
     </svg>
+  );
+}
+
+function PaperclipIcon() {
+  return (
+    <svg
+      aria-hidden
+      className="h-4 w-4"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M21.44 11.05 12.25 20.24a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+    </svg>
+  );
+}
+
+function FolderIcon() {
+  return (
+    <svg
+      aria-hidden
+      className="h-4 w-4"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M4 5h5l2 2h9a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z" />
+    </svg>
+  );
+}
+
+function FileIcon() {
+  return (
+    <svg
+      aria-hidden
+      className="h-4 w-4"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M14 3v5h5" />
+      <path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z" />
+    </svg>
+  );
+}
+
+function RemoveIcon() {
+  return (
+    <svg
+      aria-hidden
+      className="h-3 w-3"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+    >
+      <path d="M6 6l12 12M18 6 6 18" />
+    </svg>
+  );
+}
+
+/** A single staged attachment: image thumbnail or type icon, name, remove. */
+function AttachmentChip({
+  attachment,
+  onRemove,
+}: {
+  attachment: PreparedAttachment;
+  onRemove: () => void;
+}) {
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded border border-line bg-surface py-1 pl-1 pr-1.5 text-xs text-ink">
+      {attachment.previewDataUrl ? (
+        <img
+          src={attachment.previewDataUrl}
+          alt=""
+          className="h-6 w-6 rounded-sm object-cover"
+        />
+      ) : (
+        <span className="flex h-6 w-6 items-center justify-center text-subtle">
+          {attachment.isDirectory ? <FolderIcon /> : <FileIcon />}
+        </span>
+      )}
+      <span className="max-w-[10rem] truncate">{attachment.name}</span>
+      <button
+        onClick={onRemove}
+        aria-label={`Remove ${attachment.name}`}
+        className="text-subtle transition-colors hover:text-failed"
+      >
+        <RemoveIcon />
+      </button>
+    </span>
   );
 }
 
@@ -627,10 +872,25 @@ function MessageBubbleImpl({
   isStreaming,
 }: MessageBubbleProps) {
   if (message.role === 'user') {
+    const text = extractText(message.content);
+    const images = extractImages(message.content);
     return (
       <div className="flex justify-end">
-        <div className="max-w-[88%] whitespace-pre-wrap rounded-md bg-ink/90 px-3 py-2 text-sm text-paper">
-          {extractText(message.content)}
+        <div className="max-w-[88%] rounded-md bg-ink/90 px-3 py-2 text-sm text-paper">
+          {images.length > 0 && (
+            <div className="mb-1.5 flex flex-wrap gap-1.5">
+              {images.map((img, i) => (
+                <img
+                  // eslint-disable-next-line react/no-array-index-key
+                  key={i}
+                  src={`data:${img.mimeType};base64,${img.data}`}
+                  alt=""
+                  className="max-h-40 rounded border border-paper/20"
+                />
+              ))}
+            </div>
+          )}
+          {text && <div className="whitespace-pre-wrap">{text}</div>}
         </div>
       </div>
     );

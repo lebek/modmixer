@@ -59,6 +59,7 @@ import { registerConversationRoutes } from './main/routes/conversations.js';
 import { registerModRoutes } from './main/routes/mods.js';
 import { registerRegistryRoutes } from './main/routes/registry-routes.js';
 import { registerAssetsRoutes } from './main/routes/assets.js';
+import { registerAttachmentRoutes } from './main/routes/attachments.js';
 import { registerSnapshotsRoutes } from './main/routes/snapshots.js';
 import { registerSystemRoutes } from './main/routes/system.js';
 import {
@@ -200,6 +201,7 @@ registerConversationRoutes(routeContext);
 registerModRoutes(routeContext);
 registerRegistryRoutes(routeContext);
 registerAssetsRoutes(routeContext);
+registerAttachmentRoutes(routeContext);
 registerSnapshotsRoutes(routeContext);
 registerSystemRoutes(routeContext);
 

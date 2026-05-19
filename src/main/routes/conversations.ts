@@ -10,6 +10,7 @@ import {
   type ConversationScope,
 } from '../../agent/conversations.js';
 import type { ModelSelection } from '../../agent/settings.js';
+import type { PreparedAttachment } from '../../agent/attachments/types.js';
 import type { RouteContext } from './context.js';
 
 /**
@@ -25,9 +26,14 @@ export function registerConversationRoutes(ctx: RouteContext): void {
 
   ipc.handle(
     'modmixer:agent:send',
-    async (_evt, conversationId: string, text: string) => {
+    async (
+      _evt,
+      conversationId: string,
+      text: string,
+      attachments?: PreparedAttachment[],
+    ) => {
       requireConsent();
-      await host.send(conversationId, text);
+      await host.send(conversationId, text, attachments);
     },
   );
 

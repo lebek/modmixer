@@ -46,3 +46,21 @@ export function extractToolCalls(
 export function messageText(message: AgentMessage): string {
   return extractText((message as { content: unknown }).content);
 }
+
+/**
+ * Image content blocks on a message — used to render attachment thumbnails
+ * on a user bubble. pi stores attached images as ImageContent
+ * (`{ type:'image', data, mimeType }`) so they persist across reloads.
+ */
+export function extractImages(
+  content: unknown,
+): Array<{ data: string; mimeType: string }> {
+  if (!Array.isArray(content)) return [];
+  return content.filter(
+    (c): c is { type: 'image'; data: string; mimeType: string } =>
+      !!c &&
+      typeof c === 'object' &&
+      (c as { type?: string }).type === 'image' &&
+      typeof (c as { data?: unknown }).data === 'string',
+  );
+}

@@ -44,12 +44,18 @@ function expandHome(p: string): string {
 /**
  * Resolve a tool's path-shaped arg against the workspace cwd, then assert
  * it's inside the allowlist. Returns the canonicalized absolute path so
- * callers can pass it through to the inner tool.
+ * callers can pass it through to the inner tool. `extraRoots` carries any
+ * chat-attached files/dirs the user explicitly added this session.
  */
-function resolveAndCheck(rawPath: string, cwd: string, label: string): string {
+function resolveAndCheck(
+  rawPath: string,
+  cwd: string,
+  label: string,
+  extraRoots: readonly string[] = [],
+): string {
   const expanded = expandHome(rawPath);
   const abs = path.isAbsolute(expanded) ? expanded : path.resolve(cwd, expanded);
-  assertPathAllowed(abs, getPathPolicyRoots(), label);
+  assertPathAllowed(abs, getPathPolicyRoots(), label, extraRoots);
   return abs;
 }
 
@@ -65,11 +71,15 @@ function getStringField(params: unknown, name: string): string | null {
  * a path; each is validated before the inner tool runs. The wrapper passes
  * the original (un-canonicalized) params through to the inner tool so its
  * own resolution logic still kicks in for cwd-relative shortcuts.
+ *
+ * `getExtraRoots` is queried per call so chat attachments added mid-session
+ * widen the allowlist for read-side tools without rebuilding the session.
  */
 function wrapPathTool(
   inner: AgentTool<any>,
   cwd: string,
   pathFields: string[],
+  getExtraRoots?: () => string[],
 ): AgentTool<any> {
   return {
     ...inner,
@@ -79,10 +89,11 @@ function wrapPathTool(
       signal?: AbortSignal,
       onUpdate?: AgentToolUpdateCallback<unknown>,
     ): Promise<AgentToolResult<unknown>> {
+      const extraRoots = getExtraRoots?.() ?? [];
       for (const field of pathFields) {
         const raw = getStringField(params, field);
         if (raw === null) continue; // optional field absent
-        resolveAndCheck(raw, cwd, `${inner.name}.${field}`);
+        resolveAndCheck(raw, cwd, `${inner.name}.${field}`, extraRoots);
       }
       return inner.execute(toolCallId, params as any, signal, onUpdate);
     },
@@ -138,10 +149,16 @@ function nonVisionImageNote(model: Model<Api>): string {
 export function createGuardedReadTool(
   cwd: string,
   getActiveModel: () => Model<Api> | null,
+  getExtraRoots?: () => string[],
 ): AgentTool<any> {
   // pi's read tool's renderer accepts both `file_path` and `path` for legacy
   // compatibility with Anthropic-style tool calls — guard both.
-  const guarded = wrapPathTool(createReadTool(cwd), cwd, ['path', 'file_path']);
+  const guarded = wrapPathTool(
+    createReadTool(cwd),
+    cwd,
+    ['path', 'file_path'],
+    getExtraRoots,
+  );
   return {
     ...guarded,
     async execute(
@@ -231,15 +248,24 @@ export function createGuardedEditTool(cwd: string): AgentTool<any> {
   return wrapPathTool(createEditTool(cwd), cwd, ['path']);
 }
 
-export function createGuardedGrepTool(cwd: string): AgentTool<any> {
+export function createGuardedGrepTool(
+  cwd: string,
+  getExtraRoots?: () => string[],
+): AgentTool<any> {
   // grep takes a `path` (root) + a `pattern`; only the path needs checking.
-  return wrapPathTool(createGrepTool(cwd), cwd, ['path']);
+  return wrapPathTool(createGrepTool(cwd), cwd, ['path'], getExtraRoots);
 }
 
-export function createGuardedFindTool(cwd: string): AgentTool<any> {
-  return wrapPathTool(createFindTool(cwd), cwd, ['path']);
+export function createGuardedFindTool(
+  cwd: string,
+  getExtraRoots?: () => string[],
+): AgentTool<any> {
+  return wrapPathTool(createFindTool(cwd), cwd, ['path'], getExtraRoots);
 }
 
-export function createGuardedLsTool(cwd: string): AgentTool<any> {
-  return wrapPathTool(createLsTool(cwd), cwd, ['path']);
+export function createGuardedLsTool(
+  cwd: string,
+  getExtraRoots?: () => string[],
+): AgentTool<any> {
+  return wrapPathTool(createLsTool(cwd), cwd, ['path'], getExtraRoots);
 }

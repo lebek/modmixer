@@ -54,6 +54,14 @@ export interface Conversation {
    * see this field.
    */
   archivedAt?: number;
+  /**
+   * Absolute paths of files/directories the user attached to this chat. The
+   * files are NOT copied — only their paths are remembered, so the read-side
+   * path allowlist can be rebuilt when the session is reconstructed (tab
+   * switch) or after an app restart. Lets the agent still read or copy an
+   * attachment in a later turn instead of only the turn it arrived in.
+   */
+  attachmentPaths?: string[];
 }
 
 interface Persisted {
@@ -199,6 +207,23 @@ export function unarchiveConversation(id: string): void {
   const c = getConversation(id);
   if (!c) return;
   delete c.archivedAt;
+  persist();
+}
+
+/**
+ * Append attachment paths for a chat, de-duplicated. Persisted so the
+ * session's read-side allowlist survives reconstruction and app restart.
+ */
+export function addAttachmentPaths(id: string, paths: string[]): void {
+  if (paths.length === 0) return;
+  const c = getConversation(id);
+  if (!c) return;
+  const merged = new Set(c.attachmentPaths ?? []);
+  const before = merged.size;
+  for (const p of paths) merged.add(p);
+  if (merged.size === before) return;
+  c.attachmentPaths = [...merged];
+  // Don't bump updatedAt — bookkeeping, not a user-visible edit.
   persist();
 }
 

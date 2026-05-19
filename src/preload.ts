@@ -40,8 +40,11 @@ const api = {
     invoke('modmixer:env:clear-rimworld-install-override'),
 
   // Agent
-  send: (conversationId: string, text: string) =>
-    invoke('modmixer:agent:send', conversationId, text),
+  send: (
+    conversationId: string,
+    text: string,
+    attachments?: import('./agent/attachments/types').PreparedAttachment[],
+  ) => invoke('modmixer:agent:send', conversationId, text, attachments),
   interrupt: (conversationId: string) =>
     invoke('modmixer:agent:interrupt', conversationId),
   closeConversation: (conversationId: string) =>
@@ -150,6 +153,12 @@ const api = {
     invoke('modmixer:assets:remove', folder, relPath),
   pickAssetFile: (kind: import('./agent/assets/types').AssetKind) =>
     invoke('modmixer:assets:pick-file', kind),
+
+  // Chat attachments
+  prepareAttachments: (
+    inputs: import('./agent/attachments/types').AttachmentInput[],
+  ) => invoke('modmixer:attachments:prepare', inputs),
+  pickAttachments: () => invoke('modmixer:attachments:pick'),
   pickPreviewBg: () => invoke('modmixer:assets:pick-preview-bg'),
   setPreviewBg: (folder: string, sourceAbsPath: string) =>
     invoke('modmixer:assets:set-preview-bg', folder, sourceAbsPath),

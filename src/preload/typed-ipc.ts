@@ -28,6 +28,10 @@ import type { DefEntry } from '../agent/defs-scan';
 import type { EnableResult, DisableResult } from '../agent/game';
 import type { AssetKind, AssetScan } from '../agent/assets/types';
 import type {
+  AttachmentInput,
+  PreparedAttachment,
+} from '../agent/attachments/types';
+import type {
   BridgeMessage,
   ModsSnapshot,
   MonitorConnectionState,
@@ -130,7 +134,11 @@ export interface Channels {
   'modmixer:env:clear-rimworld-install-override': () => null;
 
   // Agent
-  'modmixer:agent:send': (conversationId: string, text: string) => void;
+  'modmixer:agent:send': (
+    conversationId: string,
+    text: string,
+    attachments?: PreparedAttachment[],
+  ) => void;
   'modmixer:agent:interrupt': (conversationId: string) => void;
   'modmixer:agent:close': (conversationId: string) => void;
   'modmixer:agent:release-idle': (conversationId: string) => void;
@@ -235,6 +243,12 @@ export interface Channels {
     relPath: string,
   ) => string | null;
   'modmixer:assets:pick-file': (kind: AssetKind) => string | null;
+
+  // Chat attachments
+  'modmixer:attachments:prepare': (
+    inputs: AttachmentInput[],
+  ) => PreparedAttachment[];
+  'modmixer:attachments:pick': () => PreparedAttachment[];
   'modmixer:assets:pick-preview-bg': () => string | null;
   'modmixer:assets:set-preview-bg': (
     folder: string,

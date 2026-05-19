@@ -4,6 +4,7 @@ import type { AgentSessionEvent } from '@mariozechner/pi-coding-agent';
 import type { AgentEventEnvelope } from './preload';
 import type { Conversation } from './agent/conversations';
 import type { ModelSelection } from './agent/settings';
+import type { PreparedAttachment } from './agent/attachments/types';
 import { extractToolCalls } from './lib/agent-utils';
 
 /**
@@ -100,6 +101,8 @@ export interface ConvoPanelState {
   draft: string;
   model: ModelSelection | null;
   thinkingLevel: ThinkingLevel;
+  /** Files staged for the next send — kept here so they survive tab switches. */
+  attachments: PreparedAttachment[];
 }
 
 const panels = new Map<string, ConvoPanelState>();
@@ -108,6 +111,7 @@ const EMPTY_PANEL: ConvoPanelState = {
   draft: '',
   model: null,
   thinkingLevel: 'medium',
+  attachments: [],
 };
 
 function notify(conversationId: string): void {
@@ -167,6 +171,7 @@ function initialPanel(convo: Conversation): ConvoPanelState {
     draft: '',
     model: convo.model ?? null,
     thinkingLevel: convo.thinkingLevel ?? 'medium',
+    attachments: [],
   };
 }
 
@@ -213,6 +218,38 @@ export function setPanelThinking(
 ): void {
   const cur = panels.get(conversationId) ?? EMPTY_PANEL;
   panels.set(conversationId, { ...cur, thinkingLevel });
+  notifyPanel(conversationId);
+}
+
+/** Append staged attachments — reads current state so rapid drops don't race. */
+export function addPanelAttachments(
+  conversationId: string,
+  items: PreparedAttachment[],
+): void {
+  if (items.length === 0) return;
+  const cur = panels.get(conversationId) ?? EMPTY_PANEL;
+  panels.set(conversationId, {
+    ...cur,
+    attachments: [...cur.attachments, ...items],
+  });
+  notifyPanel(conversationId);
+}
+
+export function removePanelAttachment(
+  conversationId: string,
+  id: string,
+): void {
+  const cur = panels.get(conversationId) ?? EMPTY_PANEL;
+  const next = cur.attachments.filter((a) => a.id !== id);
+  if (next.length === cur.attachments.length) return;
+  panels.set(conversationId, { ...cur, attachments: next });
+  notifyPanel(conversationId);
+}
+
+export function clearPanelAttachments(conversationId: string): void {
+  const cur = panels.get(conversationId);
+  if (!cur || cur.attachments.length === 0) return;
+  panels.set(conversationId, { ...cur, attachments: [] });
   notifyPanel(conversationId);
 }
 

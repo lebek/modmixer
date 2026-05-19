@@ -16,6 +16,7 @@ import {
 } from '@mariozechner/pi-coding-agent';
 import type {
   Api,
+  ImageContent,
   Model,
   OAuthAuthInfo,
   OAuthPrompt,
@@ -89,6 +90,7 @@ import {
 import { buildSystemPrompt } from './system-prompt.js';
 import type { Extension } from '@mariozechner/pi-coding-agent';
 import {
+  addAttachmentPaths,
   addConversation,
   getConversation,
   isDefaultTitle,
@@ -104,6 +106,8 @@ import {
   type ConversationScope,
 } from './conversations.js';
 import { messageText } from '../lib/agent-utils.js';
+import { readImageContentForModel } from './attachments/prepare.js';
+import type { PreparedAttachment } from './attachments/types.js';
 import type { ModelOption } from './models.js';
 import type { LocalProvider, ModelSelection } from './settings.js';
 import { randomUUID } from 'node:crypto';
@@ -128,6 +132,7 @@ function buildCustomTools(
   conversationId: string,
   getActiveScope: () => ConversationScope | null,
   getActiveModel: () => Model<Api> | null,
+  getAttachmentRoots: () => string[],
 ): AgentTool<any>[] {
   return [
     createScaffoldModTool(getActiveScope),
@@ -157,13 +162,60 @@ function buildCustomTools(
     // Override pi's path-shaped built-ins with versions that enforce the
     // allowlist. Custom tools win over built-ins by name in pi's
     // `_refreshToolRegistry`, so these shadow the defaults entirely.
-    createGuardedReadTool(cwd, getActiveModel),
+    // read/grep/find/ls also accept chat-attached files & directories the
+    // user dragged in — see `getAttachmentRoots`. write/edit deliberately do
+    // not: the agent copies attachments *into* the mod, never writes back out.
+    createGuardedReadTool(cwd, getActiveModel, getAttachmentRoots),
     createGuardedWriteTool(cwd),
     createGuardedEditTool(cwd),
-    createGuardedGrepTool(cwd),
-    createGuardedFindTool(cwd),
-    createGuardedLsTool(cwd),
+    createGuardedGrepTool(cwd, getAttachmentRoots),
+    createGuardedFindTool(cwd, getAttachmentRoots),
+    createGuardedLsTool(cwd, getAttachmentRoots),
   ];
+}
+
+/**
+ * Fold chat attachments into a prompt: register their paths on the session's
+ * read-side allowlist, append a path manifest the agent can act on, and —
+ * when the model has vision — read image files into content blocks. The
+ * files on disk are untouched; the downscaled JPEG blocks are only the
+ * model's view, so the agent still copies full-quality sources into the mod.
+ */
+async function buildAttachedPrompt(
+  entry: OpenSession,
+  text: string,
+  attachments: PreparedAttachment[] | undefined,
+): Promise<{ promptText: string; images: ImageContent[] | undefined }> {
+  if (!attachments || attachments.length === 0) {
+    return { promptText: text, images: undefined };
+  }
+  for (const a of attachments) entry.attachmentRoots.add(a.path);
+  // Persist the paths so the allowlist survives session reconstruction and
+  // app restart — the agent can act on the attachment in a later turn.
+  addAttachmentPaths(
+    entry.conversationId,
+    attachments.map((a) => a.path),
+  );
+
+  const lines = attachments.map(
+    (a) => `- ${a.path}${a.isDirectory ? '  (directory)' : ''}`,
+  );
+  const manifest =
+    '[Files attached by the user — read, inspect, or copy them into the ' +
+    'mod as the request needs:]\n' +
+    lines.join('\n');
+  const promptText = text.trim() ? `${text}\n\n${manifest}` : manifest;
+
+  const model = entry.session.model;
+  const images: ImageContent[] = [];
+  if (model && model.input.includes('image')) {
+    for (const a of attachments) {
+      if (!a.isImage || a.isDirectory) continue;
+      const img = await readImageContentForModel(a.path);
+      if (img) images.push(img);
+    }
+  }
+  return { promptText, images: images.length ? images : undefined };
 }
 
 const BUILTIN_TOOL_NAMES = ['read', 'bash', 'edit', 'write', 'grep', 'find', 'ls'];
@@ -410,6 +462,13 @@ interface OpenSession {
    * mutating one in flight.
    */
   pendingScopeReload: ConversationScope | null;
+  /**
+   * Absolute paths of files/directories the user attached to this chat.
+   * Read-side guarded tools (read/grep/find/ls) treat these as extra
+   * allowlist roots so the agent can inspect a dragged-in file or copy it
+   * into the mod. Grows as the user attaches more across the session.
+   */
+  attachmentRoots: Set<string>;
 }
 
 export class AgentHost {
@@ -519,7 +578,13 @@ export class AgentHost {
     // closures bind to one specific conversation's scope/model. Here we only
     // need the tool *names* for the allowlist, so a throwaway build with
     // no-op getters is enough.
-    const toolNames = buildCustomTools(this.cwd, '', () => null, () => null)
+    const toolNames = buildCustomTools(
+      this.cwd,
+      '',
+      () => null,
+      () => null,
+      () => [],
+    )
       .map((t) => t.name)
       .filter((n) => !BUILTIN_TOOL_NAMES.includes(n));
     this.allowedToolNames = [...BUILTIN_TOOL_NAMES, ...toolNames];
@@ -800,11 +865,17 @@ export class AgentHost {
     // mod's scope or model. `sessionRef` is filled in immediately after
     // construction; tools only execute during prompt(), long after.
     let sessionRef: AgentSession | null = null;
+    // Per-session allowlist of chat-attached files; the guarded read tools
+    // close over this getter so attachments added later in the chat are
+    // visible without rebuilding the session. Seeded from the persisted
+    // list so attachments survive reconstruction and app restart.
+    const attachmentRoots = new Set<string>(convo.attachmentPaths ?? []);
     const customTools = buildCustomTools(
       this.cwd,
       convo.id,
       () => convo.scope,
       () => sessionRef?.model ?? null,
+      () => [...attachmentRoots],
     ).map((tool) => toolDefinitionFromAgentTool(tool));
     const { session } = await createAgentSession({
       cwd: this.cwd,
@@ -831,6 +902,7 @@ export class AgentHost {
       session,
       unsubscribe,
       pendingScopeReload: null,
+      attachmentRoots,
     };
   }
 
@@ -1095,7 +1167,11 @@ export class AgentHost {
     }
   }
 
-  async send(conversationId: string, text: string): Promise<void> {
+  async send(
+    conversationId: string,
+    text: string,
+    attachments?: PreparedAttachment[],
+  ): Promise<void> {
     let entry = this.sessions.get(conversationId);
     if (!entry) {
       throw new Error(`No open session for conversation: ${conversationId}`);
@@ -1108,9 +1184,15 @@ export class AgentHost {
         this.sessions.set(conversationId, entry);
       }
     }
-    await entry.session.prompt(text, {
+    const { promptText, images } = await buildAttachedPrompt(
+      entry,
+      text,
+      attachments,
+    );
+    await entry.session.prompt(promptText, {
       streamingBehavior: 'steer',
       expandPromptTemplates: false,
+      images,
     });
   }
 
@@ -1267,6 +1349,7 @@ export class AgentHost {
           modelId: m.id,
           label: m.name,
           costTier: MODEL_COST_TIER[m.id] ?? '$$',
+          vision: m.input.includes('image'),
         });
       }
     }
@@ -1276,6 +1359,9 @@ export class AgentHost {
     // signal, and if the key is missing OpenRouter will return a clear error
     // at first prompt.
     for (const slug of this.getEffectiveOpenRouterModels()) {
+      const orModel = all.find(
+        (x) => x.provider === OPENROUTER_PROVIDER && x.id === slug,
+      );
       out.push({
         key: `${OPENROUTER_PROVIDER}/${slug}`,
         provider: OPENROUTER_PROVIDER,
@@ -1283,6 +1369,7 @@ export class AgentHost {
         modelId: slug,
         label: slug,
         recommended: isPinnedOpenRouterSlug(slug),
+        vision: orModel ? orModel.input.includes('image') : undefined,
       });
     }
     // Local OpenAI-compatible servers: one row per user-added model. Provider
@@ -1292,12 +1379,16 @@ export class AgentHost {
     for (const local of loadSettings().localProviders) {
       const name = localProviderName(local.id);
       for (const modelId of local.models) {
+        const lm = all.find(
+          (x) => x.provider === name && x.id === modelId,
+        );
         out.push({
           key: `${name}/${modelId}`,
           provider: name,
           providerLabel: local.label,
           modelId,
           label: modelId,
+          vision: lm ? lm.input.includes('image') : undefined,
         });
       }
     }

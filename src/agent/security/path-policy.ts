@@ -134,11 +134,18 @@ function isInside(parent: string, child: string): boolean {
  * subpath. The label is stitched into the error message so the agent's
  * tool-result error tells the user (and the model) which path tripped the
  * check, but not the contents of the allowlist.
+ *
+ * `extraRoots` are per-call ad-hoc allowances — files or directories the
+ * user explicitly attached to the chat. They widen the read side only (the
+ * caller decides which tools receive them) so the agent can read or copy a
+ * dragged-in file without us copying it into the workspace first. A file
+ * path as a root permits exactly that file; a directory permits its subtree.
  */
 export function assertPathAllowed(
   input: string,
   roots: PathPolicyRoots,
   label = 'path',
+  extraRoots: readonly string[] = [],
 ): string {
   const abs = canonicalize(input);
   // Patterns are forward-slash; normalize so the same denylist works on Windows.
@@ -163,6 +170,7 @@ export function assertPathAllowed(
     roots.rimworldModsDir,
     roots.playerLogDir,
     roots.indexDir,
+    ...extraRoots,
   ].filter((p): p is string => typeof p === 'string' && p.length > 0);
 
   for (const root of candidates) {

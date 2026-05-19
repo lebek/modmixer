@@ -16,4 +16,11 @@ export interface ModelOption {
   costTier?: '$' | '$$' | '$$$';
   /** Surfaced as a "★ Recommended —" prefix in the picker; sorted first. */
   recommended?: boolean;
+  /**
+   * Whether the model accepts image input. `false` means chat image
+   * attachments can't be shown to it; `undefined` means we couldn't
+   * determine it (e.g. a local server that doesn't report modalities) — the
+   * UI treats undefined as "don't warn" to avoid false alarms.
+   */
+  vision?: boolean;
 }
