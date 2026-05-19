@@ -130,6 +130,46 @@ describe('computeTestSet', () => {
     });
     assert.deepEqual(out.missing, ['notinstalled.thing']);
   });
+
+  it('co-loads companion mods and their transitive deps', () => {
+    const mods = [
+      mkMod('Ludeon.RimWorld'),
+      mkMod('Author.MyMod'),
+      mkMod('Other.Dep'),
+      mkMod('Other.Mod', {
+        modDependencies: [
+          {
+            packageId: 'Other.Dep',
+            packageIdLc: 'other.dep',
+            displayName: '',
+            steamWorkshopUrl: '',
+            downloadUrl: '',
+          },
+        ],
+      }),
+    ];
+    const out = computeTestSet({
+      snapshot: makeSnapshot({ mods, active: [] }),
+      targetPackageId: 'author.mymod',
+      companionPackageIds: ['Other.Mod'],
+    });
+    for (const id of ['author.mymod', 'other.mod', 'other.dep']) {
+      assert.ok(out.reducedActive.includes(id), `${id} should be in reduced set`);
+    }
+    assert.deepEqual(out.missingCompanions, []);
+  });
+
+  it('reports companion mods not on disk separately from deps', () => {
+    const mods = [mkMod('Ludeon.RimWorld'), mkMod('Author.MyMod')];
+    const out = computeTestSet({
+      snapshot: makeSnapshot({ mods, active: [] }),
+      targetPackageId: 'author.mymod',
+      companionPackageIds: ['NotInstalled.Companion'],
+    });
+    assert.deepEqual(out.missing, []);
+    assert.deepEqual(out.missingCompanions, ['notinstalled.companion']);
+    assert.ok(!out.reducedActive.includes('notinstalled.companion'));
+  });
 });
 
 describe('diffActiveLists', () => {

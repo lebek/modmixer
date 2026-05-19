@@ -22,16 +22,23 @@ export interface TestSetResult {
   reducedActive: string[];
   /** Lowercased packageIds of deps that aren't installed on disk. */
   missing: string[];
+  /** Lowercased packageIds of requested companion mods not installed on disk. */
+  missingCompanions: string[];
 }
 
 export function computeTestSet(args: {
   snapshot: RegistrySnapshot;
   /** Lowercased packageId of the target mod. */
   targetPackageId: string;
+  /**
+   * PackageIds of already-installed mods to load alongside the target (for
+   * compat testing). Their transitive deps are resolved like the target's.
+   */
+  companionPackageIds?: string[];
   /** Soft-rule community DB (used for autosort of the reduced set). */
   rules?: Map<string, CommunityRule>;
 }): TestSetResult {
-  const { snapshot, targetPackageId, rules } = args;
+  const { snapshot, targetPackageId, companionPackageIds, rules } = args;
   const target = targetPackageId.toLowerCase();
   const byPid = new Map<string, RegistryMod>();
   for (const m of snapshot.mods) {
@@ -48,7 +55,17 @@ export function computeTestSet(args: {
   }
 
   const missing: string[] = [];
+  const missingCompanions: string[] = [];
+  // Seed the dep walk with the target plus any companion mods. Companions
+  // that aren't installed are reported separately — they're a deliberate
+  // co-load request, not a broken dependency of the target.
   const stack: string[] = [target];
+  for (const raw of companionPackageIds ?? []) {
+    const pid = raw.toLowerCase();
+    if (pid === target) continue;
+    if (byPid.has(pid)) stack.push(pid);
+    else if (!missingCompanions.includes(pid)) missingCompanions.push(pid);
+  }
   while (stack.length > 0) {
     const pid = stack.pop()!;
     if (required.has(pid)) continue;
@@ -71,7 +88,7 @@ export function computeTestSet(args: {
     snapshot,
     rules: rules ?? new Map(),
   });
-  return { reducedActive: sorted.order, missing };
+  return { reducedActive: sorted.order, missing, missingCompanions };
 }
 
 export interface ActiveDiff {

@@ -40,6 +40,12 @@ const Params = Type.Object({
         "Default true. Launch with `-savedatafolder=<modmixer-test-dir>` so the test session reads/writes a separate ModsConfig.xml — the user's real mod list is untouched. Set false to mutate the user's real list (use only when the test needs their other mods loaded).",
     }),
   ),
+  companionMods: Type.Optional(
+    Type.Array(Type.String(), {
+      description:
+        "PackageIds of already-installed mods to load alongside the target in the isolated test session. Use this for compat testing — e.g. when the mod was built to patch or interoperate with another installed mod the user has. Their transitive dependencies are pulled in and autosorted automatically. Get packageIds from `list_installed_mods`. Ignored in non-isolated mode, where the user's real mod list already loads everything.",
+    }),
+  ),
 });
 
 interface RunTestCycleDetails {
@@ -84,7 +90,7 @@ export function createRunTestCycleTool(
     name: 'run_test_cycle',
     label: 'Run test cycle (build + launch + watch)',
     description:
-      "Macro: the only way to test a mod in-game. Handles the entire flow in one call — checks if RimWorld is running, flips dev-mode + pins palette entries in Prefs.xml, syncs the mod into RimWorld's Mods/, installs the Modmixer Bridge mod (Harmony-patched diagnostics over localhost TCP), writes an active-mod list (Core + DLCs + target + transitive deps + bridge) to a separate savedata folder by default so the user's real mod list is untouched, launches RimWorld with `-quicktest`, and arms background bridge monitoring. If RimWorld is running and quitIfRunning is unset, bails with needsQuitConfirmation=true so you can ask the user before killing their game; re-call with quitIfRunning=true once they confirm. After this returns, tell the user EXACTLY what to do in-game (they're about to alt-tab) — errors will arrive automatically as '[automated …]' messages via the standard error-triage protocol.",
+      "Macro: the only way to test a mod in-game. Handles the entire flow in one call — checks if RimWorld is running, flips dev-mode + pins palette entries in Prefs.xml, syncs the mod into RimWorld's Mods/, installs the Modmixer Bridge mod (Harmony-patched diagnostics over localhost TCP), writes an active-mod list (Core + DLCs + target + transitive deps + any companionMods + bridge) to a separate savedata folder by default so the user's real mod list is untouched, launches RimWorld with `-quicktest`, and arms background bridge monitoring. If RimWorld is running and quitIfRunning is unset, bails with needsQuitConfirmation=true so you can ask the user before killing their game; re-call with quitIfRunning=true once they confirm. After this returns, tell the user EXACTLY what to do in-game (they're about to alt-tab) — errors will arrive automatically as '[automated …]' messages via the standard error-triage protocol.",
     parameters: Params,
     async execute(_id, params): Promise<AgentToolResult<RunTestCycleDetails>> {
       const lines: string[] = [];
@@ -199,6 +205,7 @@ export function createRunTestCycleTool(
         folder: params.folder,
         quicktest: params.quicktest,
         isolated: params.isolated,
+        companionMods: params.companionMods,
       });
       if (launchResult.text) lines.push(launchResult.text);
 

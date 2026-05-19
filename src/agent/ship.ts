@@ -36,6 +36,12 @@ export interface ShipAndLaunchOptions {
   quicktest?: boolean;
   /** Default true. Launch with `-savedatafolder=<modmixer-test-dir>`. */
   isolated?: boolean;
+  /**
+   * PackageIds of already-installed mods to co-load with the target for
+   * compat testing. Isolated mode only — ignored when isolated is false
+   * (the user's real list already loads everything).
+   */
+  companionMods?: string[];
 }
 
 export interface ShipAndLaunchDetails {
@@ -49,6 +55,8 @@ export interface ShipAndLaunchDetails {
    */
   added: string[];
   missingDeps: string[];
+  /** Requested companion mods that aren't installed; empty in non-isolated mode. */
+  missingCompanions: string[];
   reordered: boolean;
   conflicts: number;
   alreadyRunning: boolean;
@@ -133,8 +141,11 @@ export async function shipAndLaunch(
     const testSet = computeTestSet({
       snapshot,
       targetPackageId: targetPid,
+      companionPackageIds: opts.companionMods,
       rules,
     });
+    const companionCount =
+      (opts.companionMods ?? []).length - testSet.missingCompanions.length;
     // Append the bridge packageId after autosort so it loads last — the
     // bridge's Harmony patches register on ModContentPack ctor, and we want
     // them to see every other mod's patches already in place when it
@@ -163,11 +174,16 @@ export async function shipAndLaunch(
       );
     }
     lines.push(
-      `Isolated test session: wrote ${activeMods.length} active mods (Core+DLCs+target+deps${bridge.available ? '+bridge' : ''}) to ${sd.configPath}. Real ModsConfig.xml is untouched.`,
+      `Isolated test session: wrote ${activeMods.length} active mods (Core+DLCs+target+deps${companionCount > 0 ? '+companions' : ''}${bridge.available ? '+bridge' : ''}) to ${sd.configPath}. Real ModsConfig.xml is untouched.`,
     );
     if (testSet.missing.length > 0) {
       lines.push(
         `Declared deps NOT installed (mod will fail to load until installed): ${testSet.missing.join(', ')}.`,
+      );
+    }
+    if (testSet.missingCompanions.length > 0) {
+      lines.push(
+        `Companion mods NOT installed (can't be co-loaded): ${testSet.missingCompanions.join(', ')}.`,
       );
     }
     lines.push(
@@ -184,6 +200,7 @@ export async function shipAndLaunch(
         alreadyEnabled,
         added: activeMods,
         missingDeps: testSet.missing,
+        missingCompanions: testSet.missingCompanions,
         reordered: false,
         conflicts: 0,
         alreadyRunning: launch.alreadyRunning,
@@ -298,6 +315,7 @@ export async function shipAndLaunch(
       alreadyEnabled,
       added,
       missingDeps: [...missingDeps],
+      missingCompanions: [],
       reordered,
       conflicts: sorted.conflicts.length,
       alreadyRunning: launch.alreadyRunning,
