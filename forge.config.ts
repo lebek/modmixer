@@ -326,6 +326,16 @@ const config: ForgeConfig = {
           target: 'main',
         },
         {
+          // Short-lived helper process that owns the Steamworks connection
+          // during a Workshop publish (see src/agent/workshop-publish-host.ts
+          // for why it can't live in the main process). Bundled as its own
+          // `main` target so it lands in .vite/build/ next to main.js, which
+          // is where PublishHost forks it from.
+          entry: 'src/agent/workshop-publish-host.ts',
+          config: 'vite.main.config.ts',
+          target: 'main',
+        },
+        {
           entry: 'src/preload.ts',
           config: 'vite.preload.config.ts',
           target: 'preload',

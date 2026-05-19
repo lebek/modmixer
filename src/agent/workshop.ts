@@ -3,16 +3,11 @@ import os from 'node:os';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import { EventEmitter } from 'node:events';
-import { app } from 'electron';
+import { app, utilityProcess, type UtilityProcess } from 'electron';
 import { getWorkspacePaths, readModAbout } from './workspace.js';
 import { STEAM_PREVIEW_LIMIT_BYTES } from './assets/preview-normalize.js';
 import { commitTurn } from './snapshots.js';
 import { track } from './telemetry.js';
-
-// steamworks.js's `init()` strips `init`, `runCallbacks`, and `restartAppIfNecessary`
-// from the binding before returning. We keep the full namespace shape here and only
-// reach into `.workshop`.
-type SteamClient = typeof import('steamworks.js/client');
 
 // RimWorld's Steam app ID. Workshop items live under this consumer/creator app.
 const RIMWORLD_APP_ID = 294100;
@@ -77,50 +72,153 @@ export function onPublishProgress(
   return () => events.off('progress', handler);
 }
 
-let cachedClient: SteamClient | null = null;
+/** Fields of steamworks.js's `UgcUpdate` that a Workshop publish sets. */
+interface WorkshopUpdateDetails {
+  changeNote?: string;
+  previewPath?: string;
+  contentPath: string;
+  title?: string;
+  description?: string;
+  tags?: string[];
+  visibility?: number;
+}
 
-/**
- * Steamworks looks for steam_appid.txt in the process cwd when the host wasn't
- * launched by Steam itself. Electron's default cwd (often a system dir) isn't
- * reliably writable, so we drop the file in userData and chdir there.
- */
-function ensureSteamAppIdFile(): void {
-  const dir = app.getPath('userData');
-  const file = path.join(dir, 'steam_appid.txt');
-  if (!fs.existsSync(file)) {
-    fs.writeFileSync(file, String(RIMWORLD_APP_ID), 'utf8');
-  }
-  if (process.cwd() !== dir) process.chdir(dir);
+interface HostMessage {
+  id?: number;
+  ok?: boolean;
+  result?: unknown;
+  error?: string;
+  progress?: { status: number; uploaded: number; total: number };
 }
 
 /**
- * Lazy-init the Steamworks client. Throws a descriptive error if Steam isn't
- * running or the SDK fails to load — the caller surfaces that in the UI.
- * We deliberately don't cache failures: the user can fix Steam state (start
- * the client, log in, etc.) and retry without restarting the app.
+ * RPC client for the Workshop publish host (src/agent/workshop-publish-host.ts).
+ *
+ * Steamworks marks RimWorld as "running" for as long as the process that
+ * called `SteamAPI_Init` holds the connection, and steamworks.js has no
+ * `SteamAPI_Shutdown`. If the main process initialized Steamworks, Steam
+ * would treat RimWorld as running for the whole Modmixer session and refuse
+ * to update the user's Workshop subscriptions. So we fork a `utilityProcess`,
+ * do the publish there, and `dispose()` it — killing the process is what
+ * tells Steam the game stopped, releasing the lock.
+ *
+ * One host is created per `publishToWorkshop` call and torn down in a
+ * `finally`, so Steam only sees RimWorld "running" during the upload itself.
  */
-function ensureSteamInit(): SteamClient {
-  if (cachedClient) return cachedClient;
-  try {
-    ensureSteamAppIdFile();
-    // In packaged builds the Forge Vite plugin doesn't ship node_modules; we
-    // route to the copy placed in Contents/Resources/ via packagerConfig.extraResource.
+class PublishHost {
+  private readonly child: UtilityProcess;
+  private readonly ready: Promise<void>;
+  private nextId = 1;
+  private readonly pending = new Map<
+    number,
+    { resolve: (v: unknown) => void; reject: (e: Error) => void }
+  >();
+  private onProgress:
+    | ((p: { status: number; uploaded: number; total: number }) => void)
+    | undefined;
+  private exited = false;
+
+  constructor() {
+    // workshop-publish-host is bundled as its own Forge Vite `main` entry, so
+    // it sits next to this code's main.js bundle in .vite/build/.
+    const script = path.join(__dirname, 'workshop-publish-host.js');
+    this.child = utilityProcess.fork(script, [], {
+      serviceName: 'modmixer-workshop-publish',
+    });
+    this.ready = new Promise<void>((resolve, reject) => {
+      this.child.once('spawn', () => resolve());
+      // If the process dies before it ever spawns, `spawn` never fires —
+      // fail `ready` instead of leaving callers awaiting it forever.
+      this.child.once('exit', () =>
+        reject(new Error('Workshop publish host failed to start')),
+      );
+    });
+    // A spawned host settles `ready` via `spawn`; the later `exit` rejection
+    // is then a no-op, but still counts as unhandled unless we swallow it.
+    this.ready.catch(() => {});
+    this.child.on('message', (msg: HostMessage) => {
+      if (msg.progress) {
+        this.onProgress?.(msg.progress);
+        return;
+      }
+      if (typeof msg.id !== 'number') return;
+      const slot = this.pending.get(msg.id);
+      if (!slot) return;
+      this.pending.delete(msg.id);
+      if (msg.ok) slot.resolve(msg.result);
+      else slot.reject(new Error(msg.error ?? 'Workshop publish host error'));
+    });
+    this.child.on('exit', () => {
+      this.exited = true;
+      const err = new Error('Workshop publish host exited unexpectedly');
+      for (const slot of this.pending.values()) slot.reject(err);
+      this.pending.clear();
+    });
+  }
+
+  private async call<T>(payload: Record<string, unknown>): Promise<T> {
+    await this.ready;
+    if (this.exited) throw new Error('Workshop publish host is not running');
+    const id = this.nextId++;
+    return new Promise<T>((resolve, reject) => {
+      this.pending.set(id, {
+        resolve: resolve as (v: unknown) => void,
+        reject,
+      });
+      this.child.postMessage({ id, ...payload });
+    });
+  }
+
+  setProgressHandler(
+    fn: (p: { status: number; uploaded: number; total: number }) => void,
+  ): void {
+    this.onProgress = fn;
+  }
+
+  /** Init Steamworks inside the host. Throws if Steam isn't reachable. */
+  async init(): Promise<void> {
+    // In packaged builds the Forge Vite plugin doesn't ship node_modules; the
+    // host loads steamworks.js from the Contents/Resources/ copy placed there
+    // via packagerConfig.extraResource. In dev, a bare specifier resolves to
+    // the project's node_modules.
     const steamworksModule = app.isPackaged
       ? path.join(process.resourcesPath, 'steamworks.js')
       : 'steamworks.js';
-    // require() lazily so app launch doesn't depend on Steam being installed.
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const steamworks = require(steamworksModule) as {
-      init: (appId?: number) => SteamClient;
-    };
-    cachedClient = steamworks.init(RIMWORLD_APP_ID);
-    return cachedClient;
-  } catch (err) {
-    console.error('[workshop] steamworks init failed:', err);
-    throw new Error(
-      'Could not connect to Steam. Make sure Steam is running and you own RimWorld, then try again.',
-      { cause: err },
-    );
+    try {
+      await this.call<void>({
+        op: 'init',
+        steamworksModule,
+        appId: RIMWORLD_APP_ID,
+        cwd: app.getPath('userData'),
+      });
+    } catch (err) {
+      console.error('[workshop] steamworks init failed:', err);
+      throw new Error(
+        'Could not connect to Steam. Make sure Steam is running and you own RimWorld, then try again.',
+        { cause: err },
+      );
+    }
+  }
+
+  createItem(): Promise<{ itemId: bigint; needsToAcceptAgreement: boolean }> {
+    return this.call({ op: 'createItem', appId: RIMWORLD_APP_ID });
+  }
+
+  updateItem(itemId: bigint, updateDetails: WorkshopUpdateDetails): Promise<void> {
+    return this.call({
+      op: 'updateItem',
+      appId: RIMWORLD_APP_ID,
+      itemId,
+      updateDetails,
+    });
+  }
+
+  /**
+   * Kill the host process. This is what releases Steam's "RimWorld is
+   * running" lock — Steam detects the process is gone. Idempotent.
+   */
+  dispose(): void {
+    if (!this.exited) this.child.kill();
   }
 }
 
@@ -290,105 +388,105 @@ export async function publishToWorkshop(folder: string): Promise<PublishResult> 
   const tags = [BASE_TAG, ...about.supportedVersions];
   const changeNote = autoChangeNote();
 
-  const ws = ensureSteamInit().workshop;
-
   const existing = await readPublishedFileId(folder);
   let needsToAcceptAgreement = false;
   let agreementUrl: string | undefined;
-
   let itemId: bigint;
-  if (existing) {
-    itemId = existing;
-  } else {
-    emit({ status: 'creating-item' });
-    const created = await ws.createItem(RIMWORLD_APP_ID);
-    itemId = created.itemId;
-    needsToAcceptAgreement = created.needsToAcceptAgreement;
-    await writePublishedFileId(folder, itemId);
-    if (needsToAcceptAgreement) {
-      agreementUrl = `steam://url/CommunityFilePage/${itemId.toString()}`;
-      emit({
-        status: 'agreement-required',
-        itemId: itemId.toString(),
-        agreementUrl,
-      });
+
+  // Steamworks runs in a forked host process, not here — see PublishHost. The
+  // host is killed in the `finally` below so Steam stops treating RimWorld as
+  // "running" the moment the publish settles.
+  const host = new PublishHost();
+  host.setProgressHandler((p) =>
+    emit({
+      status: statusFromUpdateStatus(p.status),
+      uploaded: p.uploaded,
+      total: p.total,
+      itemId: itemId.toString(),
+    }),
+  );
+
+  try {
+    await host.init();
+
+    if (existing) {
+      itemId = existing;
+    } else {
+      emit({ status: 'creating-item' });
+      const created = await host.createItem();
+      itemId = created.itemId;
+      needsToAcceptAgreement = created.needsToAcceptAgreement;
+      await writePublishedFileId(folder, itemId);
+      if (needsToAcceptAgreement) {
+        agreementUrl = `steam://url/CommunityFilePage/${itemId.toString()}`;
+        emit({
+          status: 'agreement-required',
+          itemId: itemId.toString(),
+          agreementUrl,
+        });
+      }
     }
-  }
 
-  emit({ status: 'uploading-content', itemId: itemId.toString() });
+    emit({ status: 'uploading-content', itemId: itemId.toString() });
 
-  // Stage *after* writePublishedFileId so the staged copy includes the
-  // freshly-minted About/PublishedFileId.txt for newly-created items.
-  const staged = await stageContentForPublish(modFolder);
+    // Stage *after* writePublishedFileId so the staged copy includes the
+    // freshly-minted About/PublishedFileId.txt for newly-created items.
+    const staged = await stageContentForPublish(modFolder);
 
-  // The first publish seeds the Workshop page's title, description, and tags
-  // from About.xml. On later updates we send only content/preview/changeNote
-  // and omit those fields — Steam preserves any UgcUpdate field we leave out,
-  // so a modder's Steam-side edits (BBCode description, rename, tag tweaks)
-  // survive a republish from Modmixer instead of being clobbered.
-  const updateDetails: Parameters<typeof ws.updateItemWithCallback>[1] = {
-    changeNote,
-    previewPath,
-    contentPath: staged.contentPath,
-  };
-  if (!existing) {
-    updateDetails.title = about.name;
-    updateDetails.description = about.description;
-    updateDetails.tags = tags;
-    updateDetails.visibility = VISIBILITY_PUBLIC;
-  }
+    // The first publish seeds the Workshop page's title, description, and tags
+    // from About.xml. On later updates we send only content/preview/changeNote
+    // and omit those fields — Steam preserves any UgcUpdate field we leave out,
+    // so a modder's Steam-side edits (BBCode description, rename, tag tweaks)
+    // survive a republish from Modmixer instead of being clobbered.
+    const updateDetails: WorkshopUpdateDetails = {
+      changeNote,
+      previewPath,
+      contentPath: staged.contentPath,
+    };
+    if (!existing) {
+      updateDetails.title = about.name;
+      updateDetails.description = about.description;
+      updateDetails.tags = tags;
+      updateDetails.visibility = VISIBILITY_PUBLIC;
+    }
 
-  try {
-    await new Promise<void>((resolve, reject) => {
-      ws.updateItemWithCallback(
-        itemId,
-        updateDetails,
-        RIMWORLD_APP_ID,
-        () => resolve(),
-        (err: unknown) => reject(err instanceof Error ? err : new Error(String(err))),
-        (progress: { status: number; progress: bigint; total: bigint }) => {
-          emit({
-            status: statusFromUpdateStatus(progress.status),
-            uploaded: Number(progress.progress),
-            total: Number(progress.total),
-            itemId: itemId.toString(),
-          });
-        },
-        250,
-      );
+    try {
+      await host.updateItem(itemId, updateDetails);
+    } finally {
+      await staged.cleanup();
+    }
+
+    const url = `https://steamcommunity.com/sharedfiles/filedetails/?id=${itemId.toString()}`;
+    emit({
+      status: 'done',
+      itemId: itemId.toString(),
+      url,
+      agreementUrl,
     });
+
+    track({ name: 'mod_published' });
+
+    // Mark the publish in History so the user can roll back to "the version
+    // I shipped" without having to remember which auto-save it was. force:
+    // true gives the publish its own row even when no files changed since
+    // the last save (common: agent finishes work → auto-save → publish).
+    try {
+      await commitTurn(folder, {
+        kind: 'manual',
+        label: 'Steam Publish',
+        force: true,
+      });
+    } catch (err) {
+      console.warn('[workshop] post-publish snapshot failed:', err);
+    }
+
+    return {
+      itemId: itemId.toString(),
+      url,
+      needsToAcceptAgreement,
+      agreementUrl,
+    };
   } finally {
-    await staged.cleanup();
+    host.dispose();
   }
-
-  const url = `https://steamcommunity.com/sharedfiles/filedetails/?id=${itemId.toString()}`;
-  emit({
-    status: 'done',
-    itemId: itemId.toString(),
-    url,
-    agreementUrl,
-  });
-
-  track({ name: 'mod_published' });
-
-  // Mark the publish in History so the user can roll back to "the version
-  // I shipped" without having to remember which auto-save it was. force:
-  // true gives the publish its own row even when no files changed since
-  // the last save (common: agent finishes work → auto-save → publish).
-  try {
-    await commitTurn(folder, {
-      kind: 'manual',
-      label: 'Steam Publish',
-      force: true,
-    });
-  } catch (err) {
-    console.warn('[workshop] post-publish snapshot failed:', err);
-  }
-
-  return {
-    itemId: itemId.toString(),
-    url,
-    needsToAcceptAgreement,
-    agreementUrl,
-  };
 }
