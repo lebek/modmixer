@@ -4,9 +4,14 @@ import fsp from 'node:fs/promises';
 import { getWorkspacePaths } from '../workspace.js';
 import { normalizePreviewToFile } from './preview-normalize.js';
 
-function modRoot(folder: string): string {
+/** Absolute path of a workspace mod folder — no existence check. */
+function resolveModDir(folder: string): string {
   const { workspaceDir } = getWorkspacePaths();
-  const abs = path.join(workspaceDir, folder);
+  return path.join(workspaceDir, folder);
+}
+
+function modRoot(folder: string): string {
+  const abs = resolveModDir(folder);
   if (!fs.existsSync(abs)) {
     throw new Error(`Workspace mod not found: ${folder}`);
   }
@@ -65,7 +70,11 @@ export async function readAssetDataUrl(
   folder: string,
   relPath: string,
 ): Promise<string | null> {
-  const modDir = modRoot(folder);
+  // A read tolerates a missing mod folder — return null like a missing file
+  // does. The renderer fires these from preview components that can outlive
+  // the folder (a mod deleted/renamed while a thumbnail is still mounted), and
+  // throwing here surfaced as an unhandled rejection (Sentry MODMIXERAPP-E/M/N).
+  const modDir = resolveModDir(folder);
   const abs = safeJoin(modDir, relPath);
   let buf: Buffer;
   try {

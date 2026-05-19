@@ -205,7 +205,7 @@ export function setPanelDraft(conversationId: string, draft: string): void {
 
 export function setPanelModel(
   conversationId: string,
-  model: ModelSelection,
+  model: ModelSelection | null,
 ): void {
   const cur = panels.get(conversationId) ?? EMPTY_PANEL;
   panels.set(conversationId, { ...cur, model });

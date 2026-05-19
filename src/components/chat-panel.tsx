@@ -143,9 +143,30 @@ export function ChatPanel({
   const { draft, model, thinkingLevel, attachments } = usePanelState(
     conversation.id,
   );
+  // Switching model is optimistic: the toolbar updates immediately, then we
+  // persist via IPC. If the session rejects it (e.g. the picked model's
+  // provider has no API key) we roll the toolbar back so it doesn't show a
+  // model the chat isn't actually on, and surface the reason. Previously the
+  // rejection escaped as an unhandled promise rejection — Sentry
+  // MODMIXERAPP-D/F/H/J/K.
+  const modelChange = useAsyncAction(
+    async (selection: ModelSelection, previous: ModelSelection | null) => {
+      setPanelModel(conversation.id, selection);
+      try {
+        await window.modmixer.setConversationModel(conversation.id, selection);
+      } catch (err) {
+        setPanelModel(conversation.id, previous);
+        const raw = err instanceof Error ? err.message : String(err);
+        throw new Error(
+          /no api key/i.test(raw)
+            ? "Can't switch to that model — its provider isn't connected. Link it under Connect first."
+            : raw,
+        );
+      }
+    },
+  );
   const changeModel = (selection: ModelSelection) => {
-    setPanelModel(conversation.id, selection);
-    void window.modmixer.setConversationModel(conversation.id, selection);
+    void modelChange.run(selection, model);
   };
   const changeThinking = (level: ThinkingLevel) => {
     setPanelThinking(conversation.id, level);
@@ -161,7 +182,7 @@ export function ChatPanel({
   const interruptAction = useAsyncAction(() =>
     window.modmixer.interrupt(conversation.id),
   );
-  const error = send.error ?? interruptAction.error;
+  const error = send.error ?? interruptAction.error ?? modelChange.error;
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   // The streaming assistant message is appended as the last row so it
