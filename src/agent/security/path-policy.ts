@@ -37,6 +37,13 @@ export interface PathPolicyRoots {
    * into other Electron app data via this allowance.
    */
   indexDir: string | null;
+  /**
+   * Modmixer's curated cookbook root (`<repo>/cookbook/` in dev,
+   * `Contents/Resources/cookbook/` packaged). Read-only reference shipped
+   * with the app — allowed so the agent can `read` cookbook sections with
+   * the ordinary read tool instead of needing a dedicated cookbook tool.
+   */
+  cookbookDir: string;
 }
 
 export class PathPolicyError extends Error {
@@ -170,6 +177,7 @@ export function assertPathAllowed(
     roots.rimworldModsDir,
     roots.playerLogDir,
     roots.indexDir,
+    roots.cookbookDir,
     ...extraRoots,
   ].filter((p): p is string => typeof p === 'string' && p.length > 0);
 

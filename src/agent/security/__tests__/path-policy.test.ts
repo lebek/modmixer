@@ -34,6 +34,7 @@ const ROOTS: PathPolicyRoots = {
     'Library/Logs/Ludeon Studios/RimWorld by Ludeon Studios',
   ),
   indexDir: path.join(HOME, 'Library/Application Support/Modmixer/index'),
+  cookbookDir: path.join(HOME, 'Library/Application Support/Modmixer/cookbook'),
 };
 
 describe('assertPathAllowed', () => {
@@ -54,6 +55,11 @@ describe('assertPathAllowed', () => {
 
   it('accepts a canonical DLC-pack def XML under dataDir', () => {
     const ok = path.join(ROOTS.dataDir!, 'Core/Defs/RecipeDefs/Recipes_Meals.xml');
+    assert.equal(assertPathAllowed(ok, ROOTS), ok);
+  });
+
+  it('accepts a cookbook section path', () => {
+    const ok = path.join(ROOTS.cookbookDir, 'ce-compat/ranged-weapons.md');
     assert.equal(assertPathAllowed(ok, ROOTS), ok);
   });
 

@@ -2,6 +2,7 @@ import path from 'node:path';
 import { detectRimWorldPaths } from '../paths.js';
 import { getWorkspacePaths } from '../workspace.js';
 import { getIndexPaths } from '../index/paths.js';
+import { cookbookDir } from '../cookbook.js';
 import type { PathPolicyRoots } from './path-policy.js';
 
 /**
@@ -28,6 +29,7 @@ export function getPathPolicyRoots(): PathPolicyRoots {
     rimworldModsDir: rim.modsDir,
     playerLogDir: rim.playerLog ? path.dirname(rim.playerLog) : null,
     indexDir: idx.root,
+    cookbookDir: cookbookDir(),
   };
   return cached;
 }

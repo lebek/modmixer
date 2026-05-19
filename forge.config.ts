@@ -222,6 +222,10 @@ const config: ForgeConfig = {
       'dist/steamworks.js',
       'dist/LICENSES.txt',
       'lore',
+      // Curated cookbook — read-only reference for external frameworks (CE,
+      // Harmony). Shipped as-is from the repo root; the agent reads sections
+      // with the ordinary read tool (cookbookDir is in PathPolicyRoots).
+      'cookbook',
       // In-game bridge mod (Harmony-patched diagnostics over localhost TCP).
       // Staged in generateAssets so we ship only About/ + Assemblies/, not
       // the C# source. bridge-install.ts junctions this into RimWorld's

@@ -4,6 +4,7 @@ import { detectRimWorldPaths, detectGameVersionMajorMinorSync } from './paths.js
 import { getWorkspacePaths, parseAbout } from './workspace.js';
 import { loadSettings } from './settings.js';
 import { buildIndexSync, LORE_TOPICS } from './lore.js';
+import { buildCookbookCatalogueSync } from './cookbook.js';
 import { readSchematicSync } from './schematic.js';
 import type { ConversationScope } from './conversations.js';
 
@@ -75,6 +76,28 @@ function loreBlock(modFolder: string | null): string {
     return `- ${r.topic} (${parts.join(', ')})`;
   });
   return `Modding lore index — call read_lore <topic> when you start work in one of these areas. Counts show entries per tier; mod > user > repo on conflicts. ${LORE_TOPICS.length - populated.length} topics have no entries yet (full catalogue is in read_lore / save_lore tool descriptions).
+${lines.join('\n')}`;
+}
+
+/**
+ * Catalogue of the curated cookbook — one line per section, with the
+ * absolute path the agent pastes into `read`. Unlike lore (read via the
+ * read_lore tool) the cookbook has no dedicated tool, so the path has to be
+ * in the prompt. The tree ships read-only with the app, so this is
+ * byte-stable for the conversation's lifetime (see buildSystemPrompt's
+ * invariant). Empty string when the cookbook dir is absent.
+ */
+function cookbookBlock(): string {
+  const pages = buildCookbookCatalogueSync();
+  if (pages.length === 0) return '';
+  const lines: string[] = [];
+  for (const page of pages) {
+    lines.push(`${page.page}:`);
+    for (const s of page.sections) {
+      lines.push(`  ${s.path} — ${s.title}`);
+    }
+  }
+  return `Cookbook — curated reference for external frameworks Modmixer can't infer from the mod's own code (Combat Extended, Harmony, ...). BEFORE authoring in one of these areas, \`read\` the relevant file with the ordinary read tool (absolute paths below — they are outside the workspace but the read tool is allowed to reach them). These are distilled from upstream docs and carry version-stamped gotchas; treat them like read_lore but for third-party frameworks. Each file notes which parts (e.g. balance numbers) drift and should be re-checked against the live source.
 ${lines.join('\n')}`;
 }
 
@@ -278,11 +301,12 @@ ${pathsBlock(ctx)}`;
       scopeBlock = NEW_MOD_BLOCK;
       break;
   }
-  return `${head}
-
-${scopeBlock}
-
-${loreBlock(modFolder)}
-
-${SHARED_RULES}`;
+  const cookbook = cookbookBlock();
+  return [
+    head,
+    scopeBlock,
+    loreBlock(modFolder),
+    ...(cookbook ? [cookbook] : []),
+    SHARED_RULES,
+  ].join('\n\n');
 }
