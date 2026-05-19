@@ -1,7 +1,9 @@
 import { useCallback, useSyncExternalStore } from 'react';
-import type { AgentMessage } from '@mariozechner/pi-agent-core';
+import type { AgentMessage, ThinkingLevel } from '@mariozechner/pi-agent-core';
 import type { AgentSessionEvent } from '@mariozechner/pi-coding-agent';
 import type { AgentEventEnvelope } from './preload';
+import type { Conversation } from './agent/conversations';
+import type { ModelSelection } from './agent/settings';
 import { extractToolCalls } from './lib/agent-utils';
 
 /**
@@ -81,11 +83,43 @@ const runtimes = new Map<string, ConvoRuntime>();
 const listeners = new Map<string, Set<() => void>>();
 const globalListeners = new Set<() => void>();
 
+/**
+ * Per-conversation panel state: the unsent draft message plus the chat's
+ * model / thinking selection. Deliberately separate from ConvoRuntime —
+ * runtime is rebuilt from the transcript every time an idle chat's session
+ * is freed and re-opened (see seedConversation), which would wipe these.
+ * This survives switch-away for as long as the chat's tab is open, and is
+ * cleared by dropConversation when the tab closes.
+ *
+ * `draft` is renderer-only and never persisted — by design it does not
+ * survive an app restart. `model`/`thinkingLevel` mirror conversations.json:
+ * the durable copy is written there via IPC, and this mirror just lets the
+ * pickers reflect a change without re-reading disk.
+ */
+export interface ConvoPanelState {
+  draft: string;
+  model: ModelSelection | null;
+  thinkingLevel: ThinkingLevel;
+}
+
+const panels = new Map<string, ConvoPanelState>();
+const panelListeners = new Map<string, Set<() => void>>();
+const EMPTY_PANEL: ConvoPanelState = {
+  draft: '',
+  model: null,
+  thinkingLevel: 'medium',
+};
+
 function notify(conversationId: string): void {
   const ls = listeners.get(conversationId);
   if (ls) for (const fn of [...ls]) fn();
   // The "any session busy" header indicator depends on every conversation.
   for (const fn of [...globalListeners]) fn();
+}
+
+function notifyPanel(conversationId: string): void {
+  const ls = panelListeners.get(conversationId);
+  if (ls) for (const fn of [...ls]) fn();
 }
 
 /**
@@ -120,10 +154,92 @@ export function seedConversation(
   notify(conversationId);
 }
 
-/** Forget a conversation's runtime — call when its mod tab closes. */
+/** Forget a conversation's runtime + panel state — call when its tab closes. */
 export function dropConversation(conversationId: string): void {
-  if (!runtimes.delete(conversationId)) return;
-  notify(conversationId);
+  const hadRuntime = runtimes.delete(conversationId);
+  const hadPanel = panels.delete(conversationId);
+  if (hadRuntime) notify(conversationId);
+  if (hadPanel) notifyPanel(conversationId);
+}
+
+function initialPanel(convo: Conversation): ConvoPanelState {
+  return {
+    draft: '',
+    model: convo.model ?? null,
+    thinkingLevel: convo.thinkingLevel ?? 'medium',
+  };
+}
+
+/**
+ * Initialize a chat's panel state the first time its tab opens. No-op if an
+ * entry already exists: once seeded, the in-renderer copy is the live truth,
+ * so switching back to a chat must not reset its draft or re-stale its
+ * pickers from a (possibly stale) Conversation snapshot.
+ */
+export function seedPanelState(convo: Conversation): void {
+  if (panels.has(convo.id)) return;
+  panels.set(convo.id, initialPanel(convo));
+  notifyPanel(convo.id);
+}
+
+/**
+ * Overwrite a chat's panel state unconditionally. Used by snapshot restore,
+ * which replaces the conversation — and its on-disk model/thinking — wholesale.
+ */
+export function resetPanelState(convo: Conversation): void {
+  panels.set(convo.id, initialPanel(convo));
+  notifyPanel(convo.id);
+}
+
+export function setPanelDraft(conversationId: string, draft: string): void {
+  const cur = panels.get(conversationId) ?? EMPTY_PANEL;
+  if (cur.draft === draft) return;
+  panels.set(conversationId, { ...cur, draft });
+  notifyPanel(conversationId);
+}
+
+export function setPanelModel(
+  conversationId: string,
+  model: ModelSelection,
+): void {
+  const cur = panels.get(conversationId) ?? EMPTY_PANEL;
+  panels.set(conversationId, { ...cur, model });
+  notifyPanel(conversationId);
+}
+
+export function setPanelThinking(
+  conversationId: string,
+  thinkingLevel: ThinkingLevel,
+): void {
+  const cur = panels.get(conversationId) ?? EMPTY_PANEL;
+  panels.set(conversationId, { ...cur, thinkingLevel });
+  notifyPanel(conversationId);
+}
+
+/** Subscribe a component to one conversation's panel state. */
+export function usePanelState(conversationId: string): ConvoPanelState {
+  const subscribe = useCallback(
+    (cb: () => void) => {
+      let set = panelListeners.get(conversationId);
+      if (!set) {
+        set = new Set();
+        panelListeners.set(conversationId, set);
+      }
+      set.add(cb);
+      return () => {
+        const s = panelListeners.get(conversationId);
+        if (!s) return;
+        s.delete(cb);
+        if (s.size === 0) panelListeners.delete(conversationId);
+      };
+    },
+    [conversationId],
+  );
+  const getSnapshot = useCallback(
+    () => panels.get(conversationId) ?? EMPTY_PANEL,
+    [conversationId],
+  );
+  return useSyncExternalStore(subscribe, getSnapshot);
 }
 
 /**
@@ -268,5 +384,9 @@ export function isConversationBusy(conversationId: string): boolean {
 export function isConversationEmpty(conversationId: string): boolean {
   const rt = runtimes.get(conversationId);
   if (!rt || rt.busy || rt.streaming) return false;
-  return !rt.messages.some((m) => m.role === 'user');
+  if (rt.messages.some((m) => m.role === 'user')) return false;
+  // A typed-but-unsent draft counts as "in use" — discarding the chat on the
+  // next "+ New chat" would throw away a message the user means to return to.
+  const draft = panels.get(conversationId)?.draft;
+  return !draft || draft.trim() === '';
 }

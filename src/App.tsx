@@ -20,7 +20,9 @@ import {
   isConversationBusy,
   isConversationEmpty,
   markConversationLoading,
+  resetPanelState,
   seedConversation,
+  seedPanelState,
   useAnyBusy,
   useConversationRuntime,
 } from './conversations-store';
@@ -211,6 +213,7 @@ export function App() {
       // workspace can appear immediately.
       const convo = await window.modmixer.resolveConversationForMod(folder);
       markConversationLoading(convo.id);
+      seedPanelState(convo);
       setTabs((prev) =>
         prev.some((t) => t.folder === folder)
           ? prev
@@ -268,6 +271,7 @@ export function App() {
     const oldId = tab.conversation.id;
     const convo = await window.modmixer.startFreshChatForMod(tab.folder);
     markConversationLoading(convo.id);
+    seedPanelState(convo);
     setTabs((prev) =>
       prev.map((t) =>
         t.folder === tab.folder
@@ -300,6 +304,9 @@ export function App() {
       // leave it alone. Otherwise show a loading state until its transcript
       // re-hydrates (its session may have been freed while switched away).
       if (!isConversationBusy(convo.id)) markConversationLoading(convo.id);
+      // First open of this chat seeds its panel state (draft + pickers);
+      // a switch-back is a no-op — the existing entry is the live truth.
+      seedPanelState(convo);
       await window.modmixer.setActiveConversationForMod(tab.folder, convo.id);
       setTabs((prev) =>
         prev.map((t) =>
@@ -392,6 +399,9 @@ export function App() {
         dropConversation(oldId);
       }
       seedConversation(restored.conversation.id, restored.messages);
+      // Restore swaps in the snapshot's conversation wholesale — overwrite
+      // any stale panel state (model/thinking on disk just changed too).
+      resetPanelState(restored.conversation);
       setTabs((prev) =>
         prev.map((t) =>
           t.folder === focusedFolder

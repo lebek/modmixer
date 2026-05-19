@@ -9,7 +9,14 @@ import { cn } from '@/lib/cn';
 import { extractText, extractThinking, extractToolCalls } from '@/lib/agent-utils';
 import { useAsyncAction } from '@/lib/use-async-action';
 import { useScrollPin } from '@/lib/use-scroll-pin';
-import { useConversationRuntime, markIdle } from '../conversations-store';
+import {
+  useConversationRuntime,
+  usePanelState,
+  setPanelDraft,
+  setPanelModel,
+  setPanelThinking,
+  markIdle,
+} from '../conversations-store';
 import { Markdown } from './markdown';
 import { ModelPicker } from './model-picker';
 import { ThinkingPicker } from './thinking-picker';
@@ -108,21 +115,18 @@ export function ChatPanel({
       : conversation.scope.type;
   const { messages, streaming, toolStates, busy, compacting, loading } =
     useConversationRuntime(conversation.id);
-  // Model + reasoning effort are per-chat. Seeded from the conversation (the
-  // main process backfills both on first open) and held locally so the
-  // pickers reflect a change immediately; each change also persists via IPC.
-  const [model, setModel] = useState<ModelSelection | null>(
-    conversation.model ?? null,
-  );
-  const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel>(
-    conversation.thinkingLevel ?? 'medium',
-  );
+  // Draft message + model/reasoning are per-chat and live in the conversation
+  // store, not local component state — so they survive this panel unmounting
+  // when the user switches to another chat (or mod) and back. The store entry
+  // is seeded when the tab opens (App). `draft` is renderer-only; a
+  // model/thinking change also persists to conversations.json via IPC.
+  const { draft, model, thinkingLevel } = usePanelState(conversation.id);
   const changeModel = (selection: ModelSelection) => {
-    setModel(selection);
+    setPanelModel(conversation.id, selection);
     void window.modmixer.setConversationModel(conversation.id, selection);
   };
   const changeThinking = (level: ThinkingLevel) => {
-    setThinkingLevel(level);
+    setPanelThinking(conversation.id, level);
     void window.modmixer.setConversationThinkingLevel(conversation.id, level);
   };
   const send = useAsyncAction((text: string) =>
@@ -132,7 +136,6 @@ export function ChatPanel({
     window.modmixer.interrupt(conversation.id),
   );
   const error = send.error ?? interruptAction.error;
-  const [input, setInput] = useState('');
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   // The streaming assistant message is appended as the last row so it
@@ -168,9 +171,9 @@ export function ChatPanel({
   );
 
   const submit = async () => {
-    const text = input.trim();
+    const text = draft.trim();
     if (!text || busy || loading) return;
-    setInput('');
+    setPanelDraft(conversation.id, '');
     const result = await send.run(text);
     // null = the IPC threw before any agent_end event would clear busy.
     if (result === null) markIdle(conversation.id);
@@ -429,8 +432,8 @@ export function ChatPanel({
         {hasAi ? (
           <div className="rounded-md border border-line bg-paper p-3 focus-within:border-ink/40">
             <textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
+              value={draft}
+              onChange={(e) => setPanelDraft(conversation.id, e.target.value)}
               onKeyDown={(e) => {
                 if (
                   e.key === 'Enter' &&
@@ -476,11 +479,11 @@ export function ChatPanel({
                 // types the first character.
                 <button
                   onClick={() => void submit()}
-                  aria-hidden={!input.trim() || undefined}
-                  tabIndex={input.trim() ? 0 : -1}
+                  aria-hidden={!draft.trim() || undefined}
+                  tabIndex={draft.trim() ? 0 : -1}
                   className={cn(
                     'group inline-flex items-center gap-2 rounded-md bg-accent px-4 py-2 font-mono text-[11px] uppercase tracking-[0.18em] text-accent-foreground shadow-sm transition-all hover:bg-accent-soft hover:shadow-md active:translate-y-px',
-                    !input.trim() && 'invisible',
+                    !draft.trim() && 'invisible',
                   )}
                 >
                   Send
