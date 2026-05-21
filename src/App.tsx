@@ -298,7 +298,14 @@ export function App() {
   const selectChat = useCallback(
     async (convo: Conversation) => {
       const tab = tabs.find((t) => t.folder === focusedFolder);
-      if (!tab || tab.conversation.id === convo.id) return;
+      if (!tab) return;
+      // Re-clicking the active chat from another panel (Assets, Publish,
+      // …) is the natural way back to its transcript — flip the panel and
+      // skip the heavy switch path.
+      if (tab.conversation.id === convo.id) {
+        if (tab.buildPanel !== 'chat') setTabBuildPanel(tab.folder, 'chat');
+        return;
+      }
       const oldId = tab.conversation.id;
       // A chat with a turn in flight has a live, accurate store runtime —
       // leave it alone. Otherwise show a loading state until its transcript
@@ -332,7 +339,7 @@ export function App() {
           if (!isConversationBusy(convo.id)) seedConversation(convo.id, []);
         });
     },
-    [tabs, focusedFolder],
+    [tabs, focusedFolder, setTabBuildPanel],
   );
 
   // Multi-chat "+ New chat": create a chat and switch to it. Unlike the
