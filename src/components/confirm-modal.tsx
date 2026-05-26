@@ -13,25 +13,29 @@ import type { ConfirmationRequest } from '../agent/security/confirmation-gate';
  * sounds reasonable.
  */
 export function ConfirmModal() {
-  const [request, setRequest] = useState<ConfirmationRequest | null>(null);
+  // FIFO queue. The agent fires parallel tool calls (e.g. two `bash`s in one
+  // turn); each one independently awaits its own approval. Without a queue,
+  // the second incoming request would clobber the first in state and its
+  // promise would stall forever, hanging the conversation.
+  const [queue, setQueue] = useState<ConfirmationRequest[]>([]);
   const [alwaysAllow, setAlwaysAllow] = useState(false);
+  const request = queue[0] ?? null;
 
   useEffect(() => {
     return window.modmixer.onConfirmRequest((req) => {
-      // If somehow two requests stack, queue is FIFO — just show the latest.
-      // The earlier promise stays pending until the agent host cancels it
-      // (e.g. on conversation switch or shutdown).
-      setRequest(req);
-      setAlwaysAllow(false);
+      setQueue((q) => [...q, req]);
     });
   }, []);
+
+  useEffect(() => {
+    setAlwaysAllow(false);
+  }, [request?.id]);
 
   if (!request) return null;
 
   const respond = (approved: boolean) => {
     window.modmixer.resolveConfirm(request.id, approved, approved && alwaysAllow);
-    setRequest(null);
-    setAlwaysAllow(false);
+    setQueue((q) => q.slice(1));
   };
 
   return (
