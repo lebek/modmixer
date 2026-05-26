@@ -248,7 +248,6 @@ export interface Channels {
     folder: string,
     relPath: string,
   ) => string | null;
-  'modmixer:assets:read-vanilla-data-url': (absPath: string) => string | null;
   'modmixer:assets:pick-file': (kind: AssetKind) => string | null;
 
   // Chat attachments

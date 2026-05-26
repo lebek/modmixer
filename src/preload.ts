@@ -176,8 +176,6 @@ const api = {
   getPathForFile: (file: File) => webUtils.getPathForFile(file),
   readAssetDataUrl: (folder: string, relPath: string) =>
     invoke('modmixer:assets:read-data-url', folder, relPath),
-  readVanillaAssetDataUrl: (absPath: string) =>
-    invoke('modmixer:assets:read-vanilla-data-url', absPath),
   onAssetsChanged: (
     handler: (env: import('./preload/typed-ipc').AssetsChangedEnvelope) => void,
   ) => on('modmixer:assets:changed', handler),

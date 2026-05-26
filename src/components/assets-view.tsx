@@ -161,21 +161,14 @@ function Slot({
   const [busy, setBusy] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
-  // The preview source chains: custom file (when present, not stubbed) →
-  // vanilla fallback → nothing. The renderer decides which to fetch so the
-  // main process doesn't have to re-derive precedence.
+  // Preview shows the custom file when uploaded. Vanilla-resolved slots have
+  // no previewable file (RimWorld bundles those into Unity asset archives) —
+  // they render as an empty slot with a subline hint instead.
   useEffect(() => {
     let cancelled = false;
-    const showCustom = req.status !== 'missing' && req.status !== 'invalid';
-    if (showCustom) {
+    if (req.status === 'present' || req.status === 'invalid') {
       void window.modmixer
         .readAssetDataUrl(folder, req.path)
-        .then((url) => {
-          if (!cancelled) setPreviewUrl(url);
-        });
-    } else if (req.vanilla) {
-      void window.modmixer
-        .readVanillaAssetDataUrl(req.vanilla.absPath)
         .then((url) => {
           if (!cancelled) setPreviewUrl(url);
         });
@@ -185,7 +178,7 @@ function Slot({
     return () => {
       cancelled = true;
     };
-  }, [folder, req.path, req.status, req.vanilla?.absPath]);
+  }, [folder, req.path, req.status]);
 
   const browse = async () => {
     const picked = await window.modmixer.pickAssetFile(req.kind);
@@ -265,11 +258,19 @@ function Slot({
         <h3 className="truncate text-sm font-semibold text-ink" title={req.path}>
           {humanizeAssetTitle(req)}
         </h3>
-        {'sizeHint' in req.spec && req.spec.sizeHint && (
-          <p className="mt-0.5 text-xs text-muted">{req.spec.sizeHint}</p>
-        )}
-        {req.kind === 'audio' && (
-          <p className="mt-0.5 text-xs text-muted">Ogg Vorbis</p>
+        {req.vanilla && req.status === 'missing' ? (
+          <p className="mt-0.5 text-xs text-muted">
+            uses vanilla {req.kind === 'audio' ? 'audio' : 'art'}
+          </p>
+        ) : (
+          <>
+            {'sizeHint' in req.spec && req.spec.sizeHint && (
+              <p className="mt-0.5 text-xs text-muted">{req.spec.sizeHint}</p>
+            )}
+            {req.kind === 'audio' && (
+              <p className="mt-0.5 text-xs text-muted">Ogg Vorbis</p>
+            )}
+          </>
         )}
         {req.status === 'invalid' && req.current?.issues.length ? (
           <ul className="mt-1 list-disc pl-4 text-xs text-failed">
@@ -302,28 +303,44 @@ function Slot({
 }
 
 /**
- * Title derived from the stem alone. We strip the kind-subroot prefix
- * (`Textures/`, `Sounds/`) and the extension; the trailing path segment is
- * shown verbatim with `_north/_south/_east/_west` and body-typed suffixes
- * folded into parenthesised hints so they read as "Stalker (north)" rather
- * than "Stalker — north" or the raw filename.
+ * Title for the slot card. Anchored on the def's own name (label > defName) so
+ * vanilla-pathed items still read as "vine bow" rather than "BowShort". A
+ * role suffix is appended for cases where the def has more than one slot
+ * (directional sprites, icon vs main graphic) so siblings stay
+ * distinguishable. Falls back to the path stem if no def name is available
+ * (rare — only happens when scanner couldn't recover one).
  */
 function humanizeAssetTitle(req: AssetRequirement): string {
+  const base = req.ref.label?.trim() || req.ref.defName || stemTitleFallback(req);
+  const suffix = roleSuffix(req);
+  return suffix ? `${base} ${suffix}` : base;
+}
+
+function stemTitleFallback(req: AssetRequirement): string {
   const basename =
     req.path
       .split('/')
       .pop()
       ?.replace(/\.[^.]+$/, '') ?? req.stem;
-  const dirMatch = basename.match(
-    /^(.+?)(?:_([A-Za-z]+))?_(north|south|east|west)$/i,
-  );
-  if (dirMatch) {
-    const base = dirMatch[1];
-    const body = dirMatch[2];
-    const dir = dirMatch[3].toLowerCase();
-    return body ? `${base} (${body}, ${dir})` : `${base} (${dir})`;
-  }
   return basename;
+}
+
+function roleSuffix(req: AssetRequirement): string {
+  const field = req.ref.field;
+  if (field === 'uiIconPath') return '(icon)';
+  // Graphic_Multi: field is "graphicData.texPath_north" etc.
+  const multiDir = field.match(/^graphicData\.texPath_(north|south|east|west)$/i);
+  if (multiDir) return `(${multiDir[1].toLowerCase()})`;
+  // wornGraphicPath expansions: field is "wornGraphicPath_<suffix>" where the
+  // suffix is the directional or body-typed token derived from on-disk files.
+  const worn = field.match(/^wornGraphicPath_(.+)$/);
+  if (worn) {
+    const parts = worn[1].split('_');
+    const dir = parts.pop();
+    const body = parts.length ? parts.join('_') : undefined;
+    if (dir) return body ? `(${body}, ${dir.toLowerCase()})` : `(${dir.toLowerCase()})`;
+  }
+  return '';
 }
 
 function Preview({ kind, url }: { kind: AssetKind; url: string | null }) {

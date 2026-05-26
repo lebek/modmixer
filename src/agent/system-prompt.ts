@@ -200,7 +200,11 @@ To rename or reword the mod's identity, call set_mod_metadata folder="${modFolde
 
 After every meaningful feature add or change, call update_schematic to keep the Schematic body current.
 
-When you write or edit asset paths in defs (\`<texPath>\`, \`<clipPath>\`, etc.), annotate them per the rules in read_lore assets. The asset stub system also has triage implications during testing — read_lore assets covers both.
+Assets — two rules that prevent runtime "Could not load Texture2D/AudioClip" errors:
+- **XML refs auto-detected.** \`<texPath>\`, \`<uiIconPath>\`, \`<clipPath>\`, \`<wornGraphicPath>\` under \`Defs/\` become slots automatically. Just write them. Vanilla paths (Core/DLC) are fine — modmixer detects those and skips writing a magenta-checker stub that would shadow the bundled art.
+- **C# refs must be declared.** EVERY \`ContentFinder<Texture2D>.Get(...)\` and \`ContentFinder<AudioClip>.Get(...)\` call must have its path listed in \`<mod>/.modmixer/cs-assets.json\`: \`{ "textures": ["UI/Foo"], "audio": ["Combat/Bar"] }\`. The scanner does NOT follow consts, concatenation, or method calls — if you skip the manifest entry, no slot exists, no stub gets written, and RimWorld errors at runtime. \`sync_to_game\` returns drift warnings naming any literal/manifest mismatch; reconcile them in the same turn.
+
+read_lore assets covers vanilla detection, stub triage, and the full error-triage flow.
 
 Image generation: only two tools are bundled — imagemagick, inkscape, python/PIL, sharp, and canvas are NOT available.
 - render_svg_to_png — for in-game textures (gizmo icons, ThingDef textures, UI buttons). Hand-author SVG, rasterize to PNG.

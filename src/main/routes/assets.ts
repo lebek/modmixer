@@ -7,7 +7,6 @@ import {
   getPreviewBgSource,
   readAssetDataUrl,
   readPreviewBgSourceDataUrl,
-  readVanillaAssetDataUrl,
   removeAssetFile,
   setPreviewBgSource,
   setPreviewImageFile,
@@ -98,11 +97,6 @@ export function registerAssetsRoutes(ctx: RouteContext): void {
     'modmixer:assets:read-data-url',
     (_evt, folder: string, relPath: string) =>
       readAssetDataUrl(folder, relPath),
-  );
-
-  ipc.handle(
-    'modmixer:assets:read-vanilla-data-url',
-    (_evt, absPath: string) => readVanillaAssetDataUrl(absPath),
   );
 
   ipc.handle(

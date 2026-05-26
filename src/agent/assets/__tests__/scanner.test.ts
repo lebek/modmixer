@@ -4,6 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import fsp from 'node:fs/promises';
 import { scanAssets } from '../scanner.js';
+import { clearVanillaPathIndexCache } from '../vanilla-paths.js';
 
 async function makeTmpMod(): Promise<string> {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'modmixer-scanner-'));
@@ -17,53 +18,94 @@ async function cleanup(dir: string): Promise<void> {
 }
 
 describe('scanAssets', () => {
-  it('picks up ContentFinder<Texture2D>.Get from C# files', async () => {
+  it('emits slots from the cs-assets manifest', async () => {
     const mod = await makeTmpMod();
     try {
+      await fsp.mkdir(path.join(mod, '.modmixer'), { recursive: true });
+      await fsp.writeFile(
+        path.join(mod, '.modmixer', 'cs-assets.json'),
+        JSON.stringify({
+          textures: ['UI/SmartPriorities/AutoPrioritize'],
+          audio: ['MyMod/Click'],
+        }),
+      );
+      // .cs file with a literal that matches the manifest — drift-check is silent.
       await fsp.writeFile(
         path.join(mod, 'Source', 'Gizmo.cs'),
-        `using UnityEngine;
-using Verse;
-namespace MyMod {
-  public class AutoPrioritizeButton {
-    static readonly Texture2D Icon =
-      ContentFinder<Texture2D>.Get("UI/SmartPriorities/AutoPrioritize");
-  }
+        `class AutoPrioritizeButton {
+  static readonly Texture2D Icon =
+    ContentFinder<Texture2D>.Get("UI/SmartPriorities/AutoPrioritize");
+  void Use() { ContentFinder<AudioClip>.Get("MyMod/Click"); }
 }`,
       );
       const scan = await scanAssets(mod, null, null);
-      const req = scan.requirements.find(
+      const tex = scan.requirements.find(
         (r) => r.path === 'Textures/UI/SmartPriorities/AutoPrioritize.png',
       );
-      assert.ok(req, 'expected texture requirement from ContentFinder');
-      assert.equal(req.kind, 'texture');
-      assert.equal(req.ref.defType, 'C#');
-      assert.equal(req.ref.defName, 'AutoPrioritizeButton');
-      assert.match(req.ref.field, /ContentFinder<Texture2D>/);
-      assert.equal(req.ref.sourceFile, 'Source/Gizmo.cs');
-      assert.equal(req.ref.sourceStem, 'UI/SmartPriorities/AutoPrioritize');
+      const aud = scan.requirements.find(
+        (r) => r.path === 'Sounds/MyMod/Click.ogg',
+      );
+      assert.ok(tex && aud, 'expected one slot per manifest entry');
+      assert.equal(tex.ref.defType, 'C#');
+      assert.equal(tex.ref.sourceFile, '.modmixer/cs-assets.json');
+      assert.equal(tex.ref.defName, 'AutoPrioritize');
+      assert.equal(scan.warnings.length, 0, 'no drift warnings when manifest matches code');
     } finally {
       await cleanup(mod);
     }
   });
 
-  it('picks up ContentFinder<AudioClip>.Get as an audio requirement', async () => {
+  it('drift-warns when a .cs literal is missing from the manifest', async () => {
     const mod = await makeTmpMod();
     try {
+      await fsp.mkdir(path.join(mod, '.modmixer'), { recursive: true });
+      // Manifest declares one path, code uses two.
       await fsp.writeFile(
-        path.join(mod, 'Source', 'Sound.cs'),
-        `class Foo {
-  void Bar() {
-    var clip = ContentFinder<AudioClip>.Get("MyMod/Click");
-  }
+        path.join(mod, '.modmixer', 'cs-assets.json'),
+        JSON.stringify({ textures: ['UI/Declared'], audio: [] }),
+      );
+      await fsp.writeFile(
+        path.join(mod, 'Source', 'Gizmo.cs'),
+        `class X {
+  static readonly Texture2D A = ContentFinder<Texture2D>.Get("UI/Declared");
+  static readonly Texture2D B = ContentFinder<Texture2D>.Get("UI/Undeclared");
 }`,
       );
       const scan = await scanAssets(mod, null, null);
-      const req = scan.requirements.find(
-        (r) => r.path === 'Sounds/MyMod/Click.ogg',
+      assert.equal(scan.requirements.length, 1, 'only the declared path becomes a slot');
+      assert.ok(
+        scan.warnings.some((w) => w.includes('UI/Undeclared')),
+        `expected a drift warning about UI/Undeclared, got: ${JSON.stringify(scan.warnings)}`,
       );
-      assert.ok(req, 'expected audio requirement from ContentFinder');
-      assert.equal(req.kind, 'audio');
+    } finally {
+      await cleanup(mod);
+    }
+  });
+
+  it('drift-warns when manifest declares a path no .cs literal matches', async () => {
+    const mod = await makeTmpMod();
+    try {
+      await fsp.mkdir(path.join(mod, '.modmixer'), { recursive: true });
+      await fsp.writeFile(
+        path.join(mod, '.modmixer', 'cs-assets.json'),
+        JSON.stringify({ textures: ['UI/Orphan'], audio: [] }),
+      );
+      // .cs uses a const — no literal in code matches the manifest entry by
+      // string search. Manifest still emits the slot (correct), but drift
+      // warns the agent to confirm.
+      await fsp.writeFile(
+        path.join(mod, 'Source', 'Gizmo.cs'),
+        `class X {
+  const string OrphanPath = "UI/Orphan";
+  static readonly Texture2D A = ContentFinder<Texture2D>.Get(OrphanPath);
+}`,
+      );
+      const scan = await scanAssets(mod, null, null);
+      assert.equal(scan.requirements.length, 1, 'slot still emitted from manifest');
+      assert.ok(
+        scan.warnings.some((w) => w.includes('UI/Orphan') && w.includes('declared')),
+        `expected an "orphan manifest entry" drift warning, got: ${JSON.stringify(scan.warnings)}`,
+      );
     } finally {
       await cleanup(mod);
     }
@@ -311,14 +353,27 @@ namespace MyMod {
     }
   });
 
-  it('resolves a vanilla fallback when dataDir contains the path', async () => {
+  it('detects a vanilla path by scanning vanilla def XMLs', async () => {
     const mod = await makeTmpMod();
     const dataDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'modmixer-scanner-data-'));
     try {
-      // Fake Core pack with one texture under Core/Textures/.
-      const corePngDir = path.join(dataDir, 'Core', 'Textures', 'Things', 'Item');
-      await fsp.mkdir(corePngDir, { recursive: true });
-      await fsp.writeFile(path.join(corePngDir, 'VanillaThing.png'), Buffer.alloc(0));
+      // Reset the in-process cache so this test's fake dataDir gets re-scanned.
+      clearVanillaPathIndexCache();
+      // Fake Core pack with a loose def XML that references a texture.
+      // RimWorld bundles the actual PNG into Unity archives, so we mimic only
+      // the def — the scanner builds its vanilla manifest from these XMLs.
+      const coreDefsDir = path.join(dataDir, 'Core', 'Defs', 'ThingDefs');
+      await fsp.mkdir(coreDefsDir, { recursive: true });
+      await fsp.writeFile(
+        path.join(coreDefsDir, 'VanillaThing.xml'),
+        `<?xml version="1.0" encoding="utf-8" ?>
+<Defs>
+  <ThingDef>
+    <defName>VanillaThing</defName>
+    <graphicData><texPath>Things/Item/VanillaThing</texPath></graphicData>
+  </ThingDef>
+</Defs>`,
+      );
 
       await fsp.writeFile(
         path.join(mod, 'Defs', 'Reskin.xml'),
@@ -332,12 +387,13 @@ namespace MyMod {
       );
       const scan = await scanAssets(mod, null, dataDir);
       const req = scan.requirements[0];
-      assert.ok(req.vanilla, 'expected vanilla fallback to resolve');
+      assert.ok(req.vanilla, 'expected vanilla detection to fire');
       assert.equal(req.vanilla.pack, 'Core');
-      // Stub should NOT have been written because vanilla resolves.
+      // Stub should NOT have been written because the path is vanilla.
       assert.equal(req.stubbed, undefined);
       assert.equal(req.status, 'missing');
     } finally {
+      clearVanillaPathIndexCache();
       await cleanup(mod);
       await cleanup(dataDir);
     }

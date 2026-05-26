@@ -213,6 +213,14 @@ export interface SyncModResult {
    * prior test cycle had synced one of the siblings.
    */
   removedStaleSiblings: string[];
+  /**
+   * Drift warnings from the asset scan that ran during sync — typically
+   * complaints that a `ContentFinder<T>.Get("X")` literal is missing from
+   * `.modmixer/cs-assets.json` or vice versa. Surfaced so callers (sync's
+   * tool result, run_test_cycle) can show them to the agent before the
+   * mod actually loads in-game.
+   */
+  assetWarnings: string[];
 }
 
 export async function syncModToGame(folder: string): Promise<SyncModResult> {
@@ -226,11 +234,16 @@ export async function syncModToGame(folder: string): Promise<SyncModResult> {
   }
   // Materialize asset placeholders before the link goes live so RimWorld
   // doesn't log "Could not load texture/AudioClip" for assets the user
-  // hasn't dropped in yet. scanAssets runs the stub pipeline as a side
-  // effect; the result is unused here. Bounded by a timeout so a runaway
+  // hasn't dropped in yet. We also capture the scan's drift warnings to
+  // bubble back to the agent — sync is the natural place to report them
+  // because the stub system runs here. Bounded by a timeout so a runaway
   // scanner can't hang sync indefinitely.
+  let assetWarnings: string[] = [];
   try {
-    await withTimeout('scanAssets', SCAN_ASSETS_TIMEOUT_MS, () => scanAssets(target));
+    const scan = await withTimeout('scanAssets', SCAN_ASSETS_TIMEOUT_MS, () =>
+      scanAssets(target),
+    );
+    assetWarnings = scan.warnings;
   } catch (err) {
     // non-fatal: bad XML / scanner failure / timeout shouldn't block sync.
     console.warn(`${SYNC_LOG_PREFIX} scanAssets failed (continuing):`, err);
@@ -255,7 +268,7 @@ export async function syncModToGame(folder: string): Promise<SyncModResult> {
   }
   if (await withTimeout('isSymlinkedInto', 5_000, () => isSymlinkedInto(folder, target, rimworldModsDir))) {
     console.log(`${SYNC_LOG_PREFIX} done (already active) total=${Date.now() - t0}ms`);
-    return { removedStaleSiblings };
+    return { removedStaleSiblings, assetWarnings };
   }
   if (fs.existsSync(link)) {
     throw new Error(
@@ -265,7 +278,7 @@ export async function syncModToGame(folder: string): Promise<SyncModResult> {
   const type = process.platform === 'win32' ? 'junction' : 'dir';
   await withTimeout('symlink', 5_000, () => fsp.symlink(target, link, type));
   console.log(`${SYNC_LOG_PREFIX} done total=${Date.now() - t0}ms`);
-  return { removedStaleSiblings };
+  return { removedStaleSiblings, assetWarnings };
 }
 
 /**

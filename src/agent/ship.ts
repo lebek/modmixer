@@ -30,6 +30,20 @@ function appendBridgeIfAvailable(
   return [...activeMods, BRIDGE_PACKAGE_ID];
 }
 
+/**
+ * Render asset-scan drift warnings into a single agent-facing line. Each
+ * warning is already a complete sentence from cs-manifest's drift check —
+ * we just prefix and join. Returns null when the list is empty so the
+ * caller can skip the line entirely rather than emit "Asset drift: ".
+ */
+function formatAssetWarnings(warnings: string[]): string | null {
+  if (warnings.length === 0) return null;
+  // Bullet-list shape so the agent's eye catches the multi-warning case
+  // even when the line wraps in the chat transcript.
+  const bullets = warnings.map((w) => `  • ${w}`).join('\n');
+  return `Asset drift detected during sync — reconcile before the next run:\n${bullets}`;
+}
+
 export interface ShipAndLaunchOptions {
   folder: string;
   /** Default true. Pass `-quicktest`. */
@@ -104,7 +118,7 @@ export async function shipAndLaunch(
     );
   }
 
-  const { removedStaleSiblings } = await syncModToGame(opts.folder);
+  const { removedStaleSiblings, assetWarnings } = await syncModToGame(opts.folder);
 
   const registry = getRegistry();
   await registry.start();
@@ -191,6 +205,8 @@ export async function shipAndLaunch(
         ? 'RimWorld was running again by launch time; the spawn was a no-op. Tell the user to quit and retry.'
         : `Launched RimWorld with -savedatafolder=${sd.savedataDir}${quicktest ? ' and -quicktest' : ''}.`,
     );
+    const warningLine = formatAssetWarnings(assetWarnings);
+    if (warningLine) lines.push(warningLine);
 
     return {
       text: lines.join(' '),
@@ -306,6 +322,8 @@ export async function shipAndLaunch(
       ? 'RimWorld was running again by launch time; the spawn was a no-op. Tell the user to quit and retry.'
       : `Launched RimWorld${quicktest ? ' with -quicktest (skipping menus into a generated map)' : ''}.`,
   );
+  const warningLine = formatAssetWarnings(assetWarnings);
+  if (warningLine) lines.push(warningLine);
 
   return {
     text: lines.join(' '),

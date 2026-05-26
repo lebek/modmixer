@@ -25,6 +25,15 @@ export type AssetSpec = TextureSpec | AudioSpec;
 export interface AssetReference {
   defType: string;
   defName: string;
+  /**
+   * Display name for the slot — the def's `<label>` for XML refs, or the
+   * variable name assigned the ContentFinder call for C# refs. Undefined
+   * when neither is recoverable; callers fall back to defName, then stem.
+   * Two refs with identical labels are allowed (e.g. two ContentFinder calls
+   * in the same class assigning to different field-typed members named
+   * the same — the slot is still distinguished by its on-disk path).
+   */
+  label?: string;
   /** Field path within the def, e.g. "graphicData.texPath". */
   field: string;
   /** Path relative to mod root, e.g. "Defs/ThingDefs_Items/Stalker.xml". */
@@ -60,16 +69,15 @@ export interface AssetFilePresence {
 }
 
 /**
- * Source of a vanilla-asset fallback — Core or a DLC pack. When set, the slot
- * has no custom file in the mod but RimWorld will resolve the path against
- * this base-game file at runtime. The UI previews the vanilla file; the stub
- * system skips writing a placeholder (which would otherwise shadow vanilla).
+ * Marks a slot whose path RimWorld will resolve against vanilla art at runtime.
+ * Detected by scanning loose `Data/<pack>/Defs/**\/*.xml` for matching path
+ * refs — RimWorld bundles the actual `.png`/`.ogg` into Unity asset archives,
+ * so we can't preview the file, but we can prove the path is genuinely
+ * served by Core/DLC and tell the stub system to leave it alone.
  */
 export interface VanillaSource {
-  /** Pack folder name, e.g. "Core" or "Royalty". */
+  /** Pack folder name that ships the def referencing this stem, e.g. "Core". */
   pack: string;
-  /** Absolute path to the vanilla file. */
-  absPath: string;
 }
 
 /**
@@ -119,6 +127,12 @@ export interface AssetScan {
   requirements: AssetRequirement[];
   counts: AssetCounts;
   countsByKind: Record<AssetKind, AssetCounts>;
+  /**
+   * Drift-check messages — literals in .cs that aren't in the cs-assets
+   * manifest, or manifest entries that don't appear as literals anywhere.
+   * Not blocking; surfaced for the agent to read and reconcile.
+   */
+  warnings: string[];
 }
 
 /**

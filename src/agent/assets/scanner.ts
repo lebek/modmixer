@@ -16,6 +16,14 @@ import type {
 import { materializeStubs, readStubbedPaths } from './stubs.js';
 import { detectGameVersionMajorMinorSync, detectRimWorldPaths } from '../paths.js';
 import { SKIP_DIRS } from '../fs-helpers.js';
+import { getVanillaPathIndex, lookupVanilla } from './vanilla-paths.js';
+import {
+  CS_MANIFEST_REL,
+  driftWarnings,
+  extractCsLiterals,
+  loadCsManifest,
+  type LoadedCsManifest,
+} from './cs-manifest.js';
 
 /**
  * A single raw ref site discovered in the mod's source. One ref = one slot in
@@ -30,6 +38,8 @@ interface RawRef {
   field: string;
   defType: string;
   defName: string;
+  /** Def's <label> (XML) or variable name assigned the call (C#). */
+  label?: string;
   sourceFile: string;
   /** Byte offset of the originating XML tag / C# call within the source file. */
   tokenOffset: number;
@@ -66,20 +76,24 @@ export async function scanAssets(
     const relSource = path.relative(modDir, file).split(path.sep).join('/');
     refs.push(...extractRefs(xml, relSource, contentRoots));
   }
-  for (const file of csFiles) {
-    const src = await fsp.readFile(file, 'utf8');
-    const relSource = path.relative(modDir, file).split(path.sep).join('/');
-    refs.push(...extractCsRefs(src, relSource));
+  // C# slots come from the .modmixer/cs-assets.json manifest, not by
+  // regex-scanning .cs files. The agent declares paths there because
+  // ContentFinder calls can carry consts or other indirections the scanner
+  // can't follow. We still glance at .cs literals below to flag drift.
+  const csManifest = await loadCsManifest(modDir);
+  for (const entry of csManifest.entries) {
+    refs.push(refFromCsManifestEntry(entry));
   }
 
   // Read the existing stub manifest before building requirements so paths
   // whose on-disk file is a known placeholder get treated as missing (and
   // vanilla-fallback resolution runs for them).
   const stubbedBefore = await readStubbedPaths(modDir);
+  const vanillaIndex = getVanillaPathIndex(dataDir);
   const requirements: AssetRequirement[] = [];
   for (const r of refs) {
     requirements.push(
-      await materializeRequirement(r, modDir, contentRoots, dataDir, stubbedBefore),
+      await materializeRequirement(r, modDir, contentRoots, vanillaIndex, stubbedBefore),
     );
   }
   // Sort by on-disk path, then by defName so siblings sharing a path land
@@ -110,7 +124,23 @@ export async function scanAssets(
     audio: countByStatus(requirements.filter((r) => r.kind === 'audio')),
   };
 
-  return { folder, requirements, counts, countsByKind };
+  const warnings = await computeWarnings(modDir, csFiles, csManifest);
+
+  return { folder, requirements, counts, countsByKind, warnings };
+}
+
+/**
+ * Drift backstop. Only runs when we have either a manifest or some literals
+ * in code — otherwise there's nothing to compare and silence is correct.
+ */
+async function computeWarnings(
+  modDir: string,
+  csFiles: string[],
+  manifest: LoadedCsManifest,
+): Promise<string[]> {
+  if (csFiles.length === 0 && manifest.entries.length === 0) return [];
+  const literalsByFile = await collectCsLiterals(modDir, csFiles);
+  return driftWarnings(manifest, literalsByFile);
 }
 
 /**
@@ -213,6 +243,10 @@ async function listFiles(
 
 const DEF_BLOCK_RE = /<(\w+Def)\b([^>]*)>([\s\S]*?)<\/\1>/g;
 const DEF_NAME_RE = /<defName>\s*([^<\s]+)\s*<\/defName>/;
+// <label> is the player-facing display name. Used as the slot title in the
+// asset browser when present so a vanilla path (e.g. "BowShort") still reads
+// as the modder's item name (e.g. "vine bow").
+const DEF_LABEL_RE = /<label>\s*([^<]*?)\s*<\/label>/;
 const TEX_PATH_RE = /<texPath>\s*([^<\s]+)\s*<\/texPath>/g;
 const UI_ICON_PATH_RE = /<uiIconPath>\s*([^<\s]+)\s*<\/uiIconPath>/g;
 const CLIP_PATH_RE = /<clipPath>\s*([^<\s]+)\s*<\/clipPath>/g;
@@ -234,6 +268,8 @@ function extractRefs(
     const body = m[3];
     const bodyOffset = m.index + m[0].indexOf(body);
     const defName = body.match(DEF_NAME_RE)?.[1] ?? '(unnamed)';
+    const labelRaw = body.match(DEF_LABEL_RE)?.[1]?.trim();
+    const label = labelRaw && labelRaw.length > 0 ? labelRaw : undefined;
 
     // texPath — handled separately because graphicData context changes
     // expansion (Graphic_Multi → 3 directional sprites).
@@ -244,6 +280,7 @@ function extractRefs(
         field: ref.field,
         defType,
         defName,
+        label,
         sourceFile,
         tokenOffset: ref.tokenOffset,
         tokenLength: ref.tokenLength,
@@ -261,6 +298,7 @@ function extractRefs(
         field: 'uiIconPath',
         defType,
         defName,
+        label,
         sourceFile,
         tokenOffset: bodyOffset + iconMatch.index,
         tokenLength: iconMatch[0].length,
@@ -278,6 +316,7 @@ function extractRefs(
         field: 'clipPath',
         defType,
         defName,
+        label,
         sourceFile,
         tokenOffset: bodyOffset + clipMatch.index,
         tokenLength: clipMatch[0].length,
@@ -303,6 +342,7 @@ function extractRefs(
           field: `wornGraphicPath_${stem.slice(basePath.length + 1)}`,
           defType,
           defName,
+          label,
           sourceFile,
           tokenOffset: offset,
           tokenLength: length,
@@ -353,42 +393,54 @@ function isApparelSuffix(suffix: string): boolean {
   return false;
 }
 
-const CONTENT_FINDER_RE =
-  /\bContentFinder\s*<\s*(Texture2D|AudioClip)\s*>\s*\.\s*Get\s*\(\s*"([^"\r\n]+)"\s*\)/g;
-const CS_CLASS_RE = /\bclass\s+(\w+)/g;
-
-function extractCsRefs(source: string, sourceFile: string): RawRef[] {
-  const out: RawRef[] = [];
-  let m: RegExpExecArray | null;
-  CONTENT_FINDER_RE.lastIndex = 0;
-  while ((m = CONTENT_FINDER_RE.exec(source)) !== null) {
-    const typeArg = m[1];
-    const stem = m[2];
-    const kind: AssetKind = typeArg === 'AudioClip' ? 'audio' : 'texture';
-    out.push({
-      stem,
-      kind,
-      field: `ContentFinder<${typeArg}>.Get`,
-      defType: 'C#',
-      defName: enclosingClass(source, m.index) ?? path.basename(sourceFile, '.cs'),
-      sourceFile,
-      tokenOffset: m.index,
-      tokenLength: m[0].length,
-      sourceStem: stem,
-    });
-  }
-  return out;
+/**
+ * Build a RawRef from one entry in the C# asset manifest. The "source file"
+ * is the manifest itself — the fork rewriter edits the quoted path string
+ * in place when this slot's path collides with a sibling.
+ */
+function refFromCsManifestEntry(entry: {
+  kind: AssetKind;
+  stem: string;
+  tokenOffset: number;
+  tokenLength: number;
+}): RawRef {
+  // Trailing segment of the path becomes both defName (when no label is
+  // available) and the title fallback. Keep it simple — the agent's lore
+  // already pushes them to pick descriptive stems.
+  const lastSegment = entry.stem.split('/').pop() ?? entry.stem;
+  return {
+    stem: entry.stem,
+    kind: entry.kind,
+    field: 'cs-asset',
+    defType: 'C#',
+    defName: lastSegment,
+    sourceFile: CS_MANIFEST_REL,
+    tokenOffset: entry.tokenOffset,
+    tokenLength: entry.tokenLength,
+    sourceStem: entry.stem,
+  };
 }
 
-function enclosingClass(source: string, idx: number): string | undefined {
-  CS_CLASS_RE.lastIndex = 0;
-  let last: string | undefined;
-  let m: RegExpExecArray | null;
-  while ((m = CS_CLASS_RE.exec(source)) !== null) {
-    if (m.index >= idx) break;
-    last = m[1];
+/**
+ * Walk .cs files for the literal-string subset of ContentFinder calls so we
+ * can warn about drift between code and the manifest. This is NOT a source
+ * of slots — the manifest is the only source. We're just sanity-checking
+ * that the agent's manifest matches the literals they wrote (or noting that
+ * a literal isn't tracked anywhere).
+ */
+async function collectCsLiterals(
+  modDir: string,
+  csFiles: string[],
+): Promise<Array<{ sourceFile: string; literals: ReturnType<typeof extractCsLiterals> }>> {
+  const out: Array<{ sourceFile: string; literals: ReturnType<typeof extractCsLiterals> }> = [];
+  for (const file of csFiles) {
+    const src = await fsp.readFile(file, 'utf8');
+    const literals = extractCsLiterals(src);
+    if (literals.length === 0) continue;
+    const relSource = path.relative(modDir, file).split(path.sep).join('/');
+    out.push({ sourceFile: relSource, literals });
   }
-  return last;
+  return out;
 }
 
 interface TexPathExtraction {
@@ -462,7 +514,7 @@ async function materializeRequirement(
   raw: RawRef,
   modDir: string,
   contentRoots: string[],
-  dataDir: string | null,
+  vanillaIndex: ReturnType<typeof getVanillaPathIndex>,
   stubbedPaths: Set<string>,
 ): Promise<AssetRequirement> {
   const stem = normalizeStem(raw.stem);
@@ -499,14 +551,21 @@ async function materializeRequirement(
   let status: AssetRequirement['status'] = 'missing';
   if (effective) status = effective.issues.length ? 'invalid' : 'present';
 
-  const vanilla =
-    !effective && dataDir
-      ? resolveVanilla(dataDir, raw.kind, stem)
-      : undefined;
+  // Vanilla detection: the stem comes from a vanilla def (loose XML under
+  // Data/<pack>/Defs). The actual file is bundled in Unity asset archives so
+  // we can't preview it — but knowing the path is vanilla lets the stub
+  // system skip it (no magenta-shadow-Core) and lets the UI tell the user
+  // "this resolves to vanilla art".
+  let vanilla: VanillaSource | undefined;
+  if (!effective) {
+    const pack = lookupVanilla(vanillaIndex, raw.kind, stem);
+    if (pack) vanilla = { pack };
+  }
 
   const ref: AssetReference = {
     defType: raw.defType,
     defName: raw.defName,
+    label: raw.label,
     field: raw.field,
     sourceFile: raw.sourceFile,
     tokenOffset: raw.tokenOffset,
@@ -527,37 +586,6 @@ async function materializeRequirement(
   };
 
   return requirement;
-}
-
-/**
- * Look for `<stem>.{png,ogg}` under any DLC pack in dataDir. RimWorld treats
- * its base/DLC packs as global asset roots — modders can write a `<texPath>`
- * targeting Core/Royalty/etc. art without copying the file into their mod.
- */
-function resolveVanilla(
-  dataDir: string,
-  kind: AssetKind,
-  stem: string,
-): VanillaSource | undefined {
-  if (!fs.existsSync(dataDir)) return undefined;
-  const subRoot = kind === 'audio' ? 'Sounds' : 'Textures';
-  const ext = kind === 'audio' ? '.ogg' : '.png';
-  let packs: string[];
-  try {
-    packs = fs
-      .readdirSync(dataDir, { withFileTypes: true })
-      .filter((d) => d.isDirectory())
-      .map((d) => d.name);
-  } catch {
-    return undefined;
-  }
-  for (const pack of packs) {
-    const abs = path.join(dataDir, pack, subRoot, ...stem.split('/')) + ext;
-    if (fs.existsSync(abs)) {
-      return { pack, absPath: abs };
-    }
-  }
-  return undefined;
 }
 
 /**
