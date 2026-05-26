@@ -40,6 +40,7 @@ export function AppSettingsDialog({
   const [defaultThinking, setDefaultThinking] =
     useState<ThinkingLevel>('medium');
   const [multiChat, setMultiChat] = useState(false);
+  const [communityLore, setCommunityLore] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -51,6 +52,7 @@ export function AppSettingsDialog({
       setDefaultModel(s.model);
       setDefaultThinking(s.thinkingLevel);
       setMultiChat(s.multiChat);
+      setCommunityLore(s.useCommunityLore);
       setLoaded(true);
     });
     void window.modmixer.listModels().then(setModelOptions);
@@ -86,6 +88,11 @@ export function AppSettingsDialog({
   const changeMultiChat = async (next: boolean) => {
     setMultiChat(next);
     await window.modmixer.setMultiChat(next);
+  };
+
+  const changeCommunityLore = async (next: boolean) => {
+    setCommunityLore(next);
+    await window.modmixer.setCommunityLore(next);
   };
 
   const sectionTitle =
@@ -224,6 +231,28 @@ export function AppSettingsDialog({
                       <label className="flex cursor-pointer items-start gap-2">
                         <input
                           type="checkbox"
+                          checked={communityLore}
+                          onChange={(e) =>
+                            void changeCommunityLore(e.target.checked)
+                          }
+                          className="mt-0.5"
+                        />
+                        <span className="text-sm text-ink">
+                          Share community lore
+                          <span className="mt-0.5 block text-xs text-muted">
+                            Uploads your modding lesson notes (e.g. "SoundDef
+                            volume scale is 0–100") to help other users — and
+                            pulls everyone else's lessons back so your agent
+                            gets smarter too.
+                          </span>
+                        </span>
+                      </label>
+                    </div>
+
+                    <div>
+                      <label className="flex cursor-pointer items-start gap-2">
+                        <input
+                          type="checkbox"
                           checked={analyticsOptIn}
                           onChange={(e) => setAnalyticsOptIn(e.target.checked)}
                           className="mt-0.5"
@@ -244,9 +273,7 @@ export function AppSettingsDialog({
                       <div className="flex flex-wrap items-center gap-4">
                         <button
                           type="button"
-                          onClick={() =>
-                            void window.modmixer.revealLoreDir({ tier: 'user' })
-                          }
+                          onClick={() => void window.modmixer.revealLoreDir()}
                           title="Reveal the folder where Modmixer stores cross-mod modding lessons learned during your sessions."
                           className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted/70 transition-colors hover:text-ink"
                         >

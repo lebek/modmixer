@@ -6,6 +6,7 @@ import { RimWorldStep } from './steps/rimworld';
 import { ToolsStep } from './steps/tools';
 import { IndexStep } from './steps/index';
 import { AiStep } from './steps/ai';
+import { CommunityLoreStep } from './steps/community-lore';
 import { AuthorStep } from './steps/author';
 
 /** Stable step ids — the array index in `STEPS` is what we render against. */
@@ -15,9 +16,18 @@ type StepId =
   | 'tools'
   | 'index'
   | 'ai'
+  | 'community-lore'
   | 'author';
 
-const STEPS: StepId[] = ['consent', 'rimworld', 'tools', 'index', 'ai', 'author'];
+const STEPS: StepId[] = [
+  'consent',
+  'rimworld',
+  'tools',
+  'index',
+  'ai',
+  'community-lore',
+  'author',
+];
 
 export function OnboardingFlow({ onComplete }: { onComplete: () => void }) {
   const [stepId, setStepId] = useState<StepId>('consent');
@@ -143,6 +153,15 @@ export function OnboardingFlow({ onComplete }: { onComplete: () => void }) {
     case 'ai':
       return (
         <AiStep
+          stepIndex={stepIndex}
+          total={total}
+          onContinue={goNext}
+          onBack={goBack}
+        />
+      );
+    case 'community-lore':
+      return (
+        <CommunityLoreStep
           stepIndex={stepIndex}
           total={total}
           onContinue={goNext}

@@ -1,7 +1,7 @@
 import fsp from 'node:fs/promises';
 import { shell } from 'electron';
 import { getMonitorServer } from '../../agent/monitor/server.js';
-import { modLoreDir, userLoreDir } from '../../agent/lore.js';
+import { userLoreDir } from '../../agent/lore.js';
 import {
   cancelActiveRebuild,
   getIndexSnapshot,
@@ -44,25 +44,15 @@ export function registerSystemRoutes(ctx: RouteContext): void {
     return err === '' ? null : err;
   });
 
-  // Power-user escape hatch from Settings → reveal the user-tier or mod-tier
-  // lore directory in Finder/Explorer. Returns null on success (matches
-  // shell.openPath's empty-string convention) or an error string for the
-  // renderer to surface.
-  ipc.handle(
-    'modmixer:lore:reveal',
-    async (_evt, args: { tier: 'user' | 'mod'; modFolder?: string }) => {
-      let dir: string;
-      if (args.tier === 'user') {
-        dir = userLoreDir();
-      } else {
-        if (!args.modFolder) return 'modFolder is required for mod-tier lore';
-        dir = modLoreDir(args.modFolder);
-      }
-      // Materialize the directory on first reveal so the user lands inside
-      // it instead of seeing "folder does not exist".
-      await fsp.mkdir(dir, { recursive: true });
-      const err = await shell.openPath(dir);
-      return err === '' ? null : err;
-    },
-  );
+  // Power-user escape hatch from Settings → reveal the user lore directory
+  // in Finder/Explorer. Returns null on success (matches shell.openPath's
+  // empty-string convention) or an error string for the renderer to surface.
+  ipc.handle('modmixer:lore:reveal', async () => {
+    const dir = userLoreDir();
+    // Materialize the directory on first reveal so the user lands inside
+    // it instead of seeing "folder does not exist".
+    await fsp.mkdir(dir, { recursive: true });
+    const err = await shell.openPath(dir);
+    return err === '' ? null : err;
+  });
 }

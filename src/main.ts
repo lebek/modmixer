@@ -52,6 +52,7 @@ import {
 } from './agent/index/main-bridge.js';
 import { closeIndexDb } from './agent/index/db.js';
 import { initUpdater } from './agent/updater.js';
+import { syncCommunityLore } from './agent/community-lore-sync.js';
 import type { RegistryEnvelope, RouteContext } from './main/routes/context.js';
 import { registerLifecycleRoutes } from './main/routes/lifecycle.js';
 import { registerSettingsRoutes } from './main/routes/settings.js';
@@ -297,6 +298,10 @@ app.on('ready', () => {
   // Kick off the index rebuild if the cache is stale/missing. Fire-and-
   // forget — the renderer modal will surface progress as it streams in.
   void ensureIndexAtStartup();
+  // Push local lore, pull curated community lore. No-op if the toggle is
+  // off; errors are logged and swallowed so a flaky network never blocks
+  // app launch or the agent's existing read path.
+  void syncCommunityLore();
 });
 
 // Bound at ~4s: covers a normal flush, short of "did the app freeze?".

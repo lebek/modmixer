@@ -60,10 +60,10 @@ Draft before deep-diving. Once scaffold_mod + update_schematic have run and the 
 
 Be concise. Announce the tool you're about to use in one short sentence, then run it. After a tool runs, summarize what changed in one sentence. Before any non-trivial build (a new mod, a new feature, anything where the user's intent could be read more than one way), restate the approach in 1–2 sentences and ask any clarifying question that would change the design — wait for the user before scaffolding or making large edits. Skip this step only when the request is small and unambiguous (a typo, a one-line tweak, a clearly-specified QoL change). One short check beats a wrong scaffold.`;
 
-function loreBlock(modFolder: string | null): string {
-  const rows = buildIndexSync(modFolder);
+function loreBlock(): string {
+  const rows = buildIndexSync();
   const populated = rows.filter(
-    (r) => r.counts.repo + r.counts.user + r.counts.mod > 0,
+    (r) => r.counts.repo + r.counts.user > 0,
   );
   if (populated.length === 0) {
     return `Modding lore: no entries yet across ${LORE_TOPICS.length} topics. See the read_lore / save_lore tool descriptions for the topic catalogue. Save lessons via save_lore as you discover them.`;
@@ -72,10 +72,9 @@ function loreBlock(modFolder: string | null): string {
     const parts: string[] = [];
     if (r.counts.repo) parts.push(`repo:${r.counts.repo}`);
     if (r.counts.user) parts.push(`user:${r.counts.user}`);
-    if (r.counts.mod) parts.push(`mod:${r.counts.mod}`);
     return `- ${r.topic} (${parts.join(', ')})`;
   });
-  return `Modding lore index — call read_lore <topic> when you start work in one of these areas. Counts show entries per tier; mod > user > repo on conflicts. ${LORE_TOPICS.length - populated.length} topics have no entries yet (full catalogue is in read_lore / save_lore tool descriptions).
+  return `Modding lore index — call read_lore <topic> when you start work in one of these areas. Counts show entries per tier; user > repo on conflicts. ${LORE_TOPICS.length - populated.length} topics have no entries yet (full catalogue is in read_lore / save_lore tool descriptions).
 ${lines.join('\n')}`;
 }
 
@@ -291,11 +290,9 @@ export function buildSystemPrompt(scope: ConversationScope): string {
 
 ${pathsBlock(ctx)}`;
   let scopeBlock: string;
-  let modFolder: string | null = null;
   switch (scope.type) {
     case 'mod':
       scopeBlock = modScopeBlock(scope.modFolder, ctx);
-      modFolder = scope.modFolder;
       break;
     case 'new':
       scopeBlock = NEW_MOD_BLOCK;
@@ -305,7 +302,7 @@ ${pathsBlock(ctx)}`;
   return [
     head,
     scopeBlock,
-    loreBlock(modFolder),
+    loreBlock(),
     ...(cookbook ? [cookbook] : []),
     SHARED_RULES,
   ].join('\n\n');

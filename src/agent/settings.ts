@@ -146,6 +146,21 @@ export interface Settings {
    * the current one.
    */
   multiChat: boolean;
+  /**
+   * Community lore opt-in. When on, modmixer (a) uploads the user's local
+   * lore entries to the shared backend on startup and (b) pulls the
+   * server-curated community lore back, wholesale replacing the shipped
+   * bundle as the agent's "repo" tier. Off → the agent reads the
+   * shipped bundle as before. Defaults to true; users whose settings.json
+   * predates this field inherit the default automatically.
+   */
+  useCommunityLore: boolean;
+  /**
+   * Last-pushed timestamp for the community-lore sync. ISO-8601 string.
+   * Null when the toggle has never successfully pushed. Used to skip
+   * no-op pushes when nothing has changed since the last sync.
+   */
+  loreLastPushedAt: string | null;
 }
 
 let cached: Settings | null = null;
@@ -168,6 +183,8 @@ function computeDefaults(): Settings {
     localProviders: [],
     thinkingLevel: 'xhigh',
     multiChat: false,
+    useCommunityLore: true,
+    loreLastPushedAt: null,
   };
 }
 
@@ -257,6 +274,12 @@ function normalize(raw: unknown, defaults: Settings): Settings {
 
   const multiChat = readBool(obj.multiChat);
   if (multiChat !== undefined) next.multiChat = multiChat;
+
+  const useCommunityLore = readBool(obj.useCommunityLore);
+  if (useCommunityLore !== undefined) next.useCommunityLore = useCommunityLore;
+
+  const loreLastPushedAt = readString(obj.loreLastPushedAt);
+  if (loreLastPushedAt !== undefined) next.loreLastPushedAt = loreLastPushedAt;
 
   const model = readObjectShape<ModelSelection>(obj.model, {
     provider: readString,

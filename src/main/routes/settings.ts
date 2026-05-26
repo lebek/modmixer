@@ -6,6 +6,11 @@ import {
   type ThemePreference,
 } from '../../agent/settings.js';
 import { setAnalyticsOptIn } from '../../agent/telemetry.js';
+import {
+  clearCommunityLore,
+  seedCommunityLoreFromShipped,
+} from '../../agent/lore.js';
+import { syncCommunityLore } from '../../agent/community-lore-sync.js';
 import type { RouteContext } from './context.js';
 
 /**
@@ -57,6 +62,35 @@ export function registerSettingsRoutes(ctx: RouteContext): void {
   ipc.handle(
     'modmixer:settings:set-multi-chat',
     (_evt, enabled: boolean) => saveSettings({ multiChat: enabled }),
+  );
+
+  ipc.handle(
+    'modmixer:settings:set-community-lore',
+    async (_evt, enabled: boolean) => {
+      const before = loadSettings().useCommunityLore;
+      const next = saveSettings({ useCommunityLore: enabled });
+      if (enabled && !before) {
+        // First activation: seed the cache from the shipped bundle so the
+        // agent has something to read before the first network pull lands.
+        try {
+          await seedCommunityLoreFromShipped();
+        } catch (err) {
+          console.error('[community-lore] seed failed:', err);
+        }
+        // Fire the first push/pull immediately so the user sees the latest
+        // curated entries without waiting for the next launch.
+        void syncCommunityLore();
+      } else if (!enabled && before) {
+        // Toggle going off — wipe the cache so the read path reverts to the
+        // shipped bundle with no stale crowd-sourced residue.
+        try {
+          await clearCommunityLore();
+        } catch (err) {
+          console.error('[community-lore] clear failed:', err);
+        }
+      }
+      return next;
+    },
   );
 
   ipc.handle('modmixer:models:list', () => host.listAvailableModels());

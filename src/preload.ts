@@ -73,6 +73,8 @@ const api = {
     invoke('modmixer:settings:set-thinking-level', level),
   setMultiChat: (enabled: boolean) =>
     invoke('modmixer:settings:set-multi-chat', enabled),
+  setCommunityLore: (enabled: boolean) =>
+    invoke('modmixer:settings:set-community-lore', enabled),
   listModels: () => invoke('modmixer:models:list'),
 
   // Conversations
@@ -235,8 +237,7 @@ const api = {
   openFolder: (folder: string) => invoke('modmixer:shell:open-folder', folder),
 
   // Lore (power-user reveal)
-  revealLoreDir: (args: { tier: 'user' | 'mod'; modFolder?: string }) =>
-    invoke('modmixer:lore:reveal', args),
+  revealLoreDir: () => invoke('modmixer:lore:reveal'),
 
   // Confirmation gate (sensitive agent actions)
   onConfirmRequest: (

@@ -154,6 +154,7 @@ export interface Channels {
   'modmixer:settings:set-theme': (theme: ThemePreference) => Settings;
   'modmixer:settings:set-thinking-level': (level: ThinkingLevel) => Settings;
   'modmixer:settings:set-multi-chat': (enabled: boolean) => Settings;
+  'modmixer:settings:set-community-lore': (enabled: boolean) => Settings;
   'modmixer:models:list': () => ModelOption[];
 
   // Conversations
@@ -307,10 +308,7 @@ export interface Channels {
   'modmixer:shell:open-folder': (folder: string) => string | null;
 
   // Lore reveal (power-user)
-  'modmixer:lore:reveal': (args: {
-    tier: 'user' | 'mod';
-    modFolder?: string;
-  }) => string | null;
+  'modmixer:lore:reveal': () => string | null;
 
   // Index
   'modmixer:index:get-snapshot': () => IndexSnapshot;

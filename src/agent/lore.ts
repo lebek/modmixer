@@ -2,15 +2,14 @@ import { app } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
-import { getWorkspacePaths } from './workspace.js';
+import { loadSettings } from './settings.js';
 
 /**
- * Modmixer Lore is a three-tier knowledge base for transferable
- * RimWorld-modding lessons the agent consults while working.
+ * Modmixer Lore is a knowledge base for transferable RimWorld-modding
+ * lessons the agent consults while working.
  *
  *   tier "repo"  — ships with modmixer (read-only at runtime)
  *   tier "user"  — per-installation, cross-mod (engine-level lessons)
- *   tier "mod"   — per-mod (mod-specific quirks)
  *
  * Topics are flat: `sounds`, `weather`, `harmony`, `defs`, `build`,
  * `test-loop`, `assets`, `misc`. One markdown file per topic per tier.
@@ -19,12 +18,12 @@ import { getWorkspacePaths } from './workspace.js';
  * with an `## ` H2 hook line — that hook is what the agent matches on
  * when deciding whether to update an existing entry vs append a new one.
  *
- * Precedence when the same topic+hook exists in multiple tiers: mod
- * wins over user wins over repo. Callers get all three back; the most
- * specific tier should be preferred when they disagree.
+ * Precedence when the same topic+hook exists in both tiers: user wins
+ * over repo. Callers get both back; the more specific tier should be
+ * preferred when they disagree.
  */
 
-export type LoreTier = 'repo' | 'user' | 'mod';
+export type LoreTier = 'repo' | 'user';
 
 /**
  * Topic taxonomy. Locked: the agent cannot create new topics, only write
@@ -154,14 +153,13 @@ export interface LoreTopicFile {
 }
 
 /**
- * Repo lore lives at the modmixer install root in dev (`<repo>/lore/`)
- * and inside `Contents/Resources/lore/` in packaged builds. The forge
- * config's `extraResource` ships the directory.
+ * Lore shipped inside the app bundle. Lives at `<repo>/lore/` in dev and
+ * `Contents/Resources/lore/` in packaged builds (forge `extraResource`).
  *
  * Only call this from the main process — `app.isPackaged` and
  * `app.getAppPath()` aren't available elsewhere.
  */
-export function repoLoreDir(): string {
+export function shippedLoreDir(): string {
   if (app.isPackaged) {
     return path.join(process.resourcesPath, 'lore');
   }
@@ -170,36 +168,43 @@ export function repoLoreDir(): string {
   return path.join(app.getAppPath(), 'lore');
 }
 
+/**
+ * Local cache of crowd-sourced community lore. Populated on startup when
+ * the community-lore toggle is on (push user lore, pull curated entries).
+ * Empty until the first activation; deleted when the toggle goes back off.
+ */
+export function communityLoreDir(): string {
+  return path.join(app.getPath('userData'), 'community-lore');
+}
+
 export function userLoreDir(): string {
   return path.join(app.getPath('userData'), 'lore');
 }
 
-export function modLoreDir(folder: string): string {
-  const { workspaceDir } = getWorkspacePaths();
-  return path.join(workspaceDir, folder, '.modmixer', 'lore');
+/**
+ * What the `repo` tier reads at runtime. With community lore enabled,
+ * the shipped bundle is wholesale ignored in favor of the local
+ * community-lore cache — it's a strict swap, not a merge, because the
+ * server-curated lore is expected to subsume the shipped bootstrap.
+ */
+export function baseLoreDir(): string {
+  return loadSettings().useCommunityLore ? communityLoreDir() : shippedLoreDir();
 }
 
-function tierDir(tier: LoreTier, modFolder: string | null): string {
+function tierDir(tier: LoreTier): string {
   switch (tier) {
     case 'repo':
-      return repoLoreDir();
+      return baseLoreDir();
     case 'user':
       return userLoreDir();
-    case 'mod':
-      if (!modFolder) throw new Error('mod-tier lore requires a mod folder');
-      return modLoreDir(modFolder);
   }
 }
 
-export function topicFile(
-  tier: LoreTier,
-  topic: LoreTopic,
-  modFolder: string | null = null,
-): LoreTopicFile {
+export function topicFile(tier: LoreTier, topic: LoreTopic): LoreTopicFile {
   return {
     tier,
     topic,
-    path: path.join(tierDir(tier, modFolder), `${topic}.md`),
+    path: path.join(tierDir(tier), `${topic}.md`),
   };
 }
 
@@ -243,9 +248,8 @@ function splitEntries(md: string, tier: LoreTier, topic: LoreTopic): LoreEntry[]
 async function readTopicEntries(
   tier: LoreTier,
   topic: LoreTopic,
-  modFolder: string | null,
 ): Promise<LoreEntry[]> {
-  const { path: file } = topicFile(tier, topic, modFolder);
+  const { path: file } = topicFile(tier, topic);
   if (!fs.existsSync(file)) return [];
   try {
     const md = await fsp.readFile(file, 'utf8');
@@ -256,19 +260,14 @@ async function readTopicEntries(
 }
 
 /**
- * Read a single topic across all relevant tiers. Tier order is
- * repo → user → mod, mirroring precedence (later tier wins).
- * `modFolder` may be null when the agent is not scoped to a mod;
- * the mod tier is then skipped.
+ * Read a single topic across both tiers. Tier order is repo → user,
+ * mirroring precedence (later tier wins).
  */
-export async function readTopic(
-  topic: LoreTopic,
-  modFolder: string | null,
-): Promise<LoreEntry[]> {
-  const tiers: LoreTier[] = modFolder ? ['repo', 'user', 'mod'] : ['repo', 'user'];
+export async function readTopic(topic: LoreTopic): Promise<LoreEntry[]> {
+  const tiers: LoreTier[] = ['repo', 'user'];
   const out: LoreEntry[] = [];
   for (const tier of tiers) {
-    out.push(...(await readTopicEntries(tier, topic, modFolder)));
+    out.push(...(await readTopicEntries(tier, topic)));
   }
   return out;
 }
@@ -284,13 +283,13 @@ export interface LoreIndexRow {
  * `buildSystemPrompt`) that need to render the index inside non-async
  * code paths. Reads the same files as the async version.
  */
-export function buildIndexSync(modFolder: string | null): LoreIndexRow[] {
+export function buildIndexSync(): LoreIndexRow[] {
   const rows: LoreIndexRow[] = [];
-  const tiers: LoreTier[] = modFolder ? ['repo', 'user', 'mod'] : ['repo', 'user'];
+  const tiers: LoreTier[] = ['repo', 'user'];
   for (const topic of LORE_TOPICS) {
-    const counts: Record<LoreTier, number> = { repo: 0, user: 0, mod: 0 };
+    const counts: Record<LoreTier, number> = { repo: 0, user: 0 };
     for (const tier of tiers) {
-      const { path: file } = topicFile(tier, topic, modFolder);
+      const { path: file } = topicFile(tier, topic);
       if (!fs.existsSync(file)) continue;
       try {
         const md = fs.readFileSync(file, 'utf8');
@@ -308,47 +307,36 @@ export function buildIndexSync(modFolder: string | null): LoreIndexRow[] {
  * Cheap index of how many entries each tier has per topic. Used to
  * render the lore block in the system prompt without dumping content.
  */
-export async function buildIndex(modFolder: string | null): Promise<LoreIndexRow[]> {
+export async function buildIndex(): Promise<LoreIndexRow[]> {
   const rows: LoreIndexRow[] = [];
   for (const topic of LORE_TOPICS) {
-    const counts: Record<LoreTier, number> = { repo: 0, user: 0, mod: 0 };
-    counts.repo = (await readTopicEntries('repo', topic, modFolder)).length;
-    counts.user = (await readTopicEntries('user', topic, modFolder)).length;
-    if (modFolder) {
-      counts.mod = (await readTopicEntries('mod', topic, modFolder)).length;
-    }
+    const counts: Record<LoreTier, number> = { repo: 0, user: 0 };
+    counts.repo = (await readTopicEntries('repo', topic)).length;
+    counts.user = (await readTopicEntries('user', topic)).length;
     rows.push({ topic, counts });
   }
   return rows;
 }
 
 export interface SaveLoreInput {
-  tier: 'user' | 'mod';
   topic: LoreTopic;
   hook: string;
   markdown: string;
-  modFolder?: string;
 }
 
 /**
- * Append-or-update an entry in a writable tier. Repo lore is read-only
- * at runtime — only `user` and `mod` are accepted here.
+ * Append-or-update an entry in the user tier. Repo lore is read-only
+ * at runtime — only `user` is writable.
  *
  * Matching is by exact hook line (case-insensitive trim). If a match
  * exists, that entry is replaced; otherwise the new entry is appended
  * to the topic file (creating the file if needed).
- *
- * The agent is responsible for picking the right tier — engine-level
- * lessons go to `user`, mod-specific quirks go to `mod`.
  */
 export async function saveEntry(input: SaveLoreInput): Promise<{
   file: string;
   action: 'created' | 'updated' | 'appended';
 }> {
-  const { tier, topic, hook, modFolder } = input;
-  if (tier === 'mod' && !modFolder) {
-    throw new Error('mod-tier lore requires modFolder.');
-  }
+  const { topic, hook } = input;
   const cleanedHook = hook.trim();
   if (!cleanedHook) throw new Error('hook is required.');
 
@@ -358,7 +346,7 @@ export async function saveEntry(input: SaveLoreInput): Promise<{
     `## ${cleanedHook}\n\n${trimmedBody}\n\n` +
     `<sub>updated ${stamp}</sub>\n`;
 
-  const { path: file } = topicFile(tier, topic, modFolder ?? null);
+  const { path: file } = topicFile('user', topic);
   await fsp.mkdir(path.dirname(file), { recursive: true });
 
   let existing = '';
@@ -401,4 +389,77 @@ export async function saveEntry(input: SaveLoreInput): Promise<{
 
   await fsp.writeFile(file, next, 'utf8');
   return { file, action };
+}
+
+/**
+ * Copy every shipped lore file into `communityLoreDir()` so the first
+ * activation of the community-lore toggle has content to read from
+ * immediately — the shipped bundle is treated as "community lore at
+ * release time". Idempotent: skips topics that already have a file in
+ * the cache so we never clobber a freshly pulled snapshot if the user
+ * toggles off-then-on after a sync.
+ */
+export async function seedCommunityLoreFromShipped(): Promise<void> {
+  const src = shippedLoreDir();
+  const dst = communityLoreDir();
+  await fsp.mkdir(dst, { recursive: true });
+  for (const topic of LORE_TOPICS) {
+    const srcFile = path.join(src, `${topic}.md`);
+    const dstFile = path.join(dst, `${topic}.md`);
+    if (!fs.existsSync(srcFile)) continue;
+    if (fs.existsSync(dstFile)) continue;
+    await fsp.copyFile(srcFile, dstFile);
+  }
+}
+
+/**
+ * Wipe the community-lore cache. Used when the toggle goes back off so
+ * the agent reverts to the shipped bundle with no stale crowd-sourced
+ * residue. Safe if the directory doesn't exist.
+ */
+export async function clearCommunityLore(): Promise<void> {
+  const dir = communityLoreDir();
+  await fsp.rm(dir, { recursive: true, force: true });
+}
+
+/**
+ * Snapshot of every user-tier entry across all topics. Used to build
+ * the payload for the community-lore push. Each entry retains its topic
+ * and hook so the server-side row layout is straightforward.
+ */
+export async function readAllUserEntries(): Promise<LoreEntry[]> {
+  const out: LoreEntry[] = [];
+  for (const topic of LORE_TOPICS) {
+    out.push(...(await readTopicEntries('user', topic)));
+  }
+  return out;
+}
+
+/**
+ * Replace the community-lore cache with the supplied snapshot. Each
+ * input entry contributes one block (`## hook` + body) inside its
+ * topic file. Topics with no entries are left untouched so a partial
+ * server snapshot still leaves the previous cache intact for unseen
+ * topics — but in practice the pull is a full rebuild so this rarely
+ * matters.
+ */
+export async function writeCommunityLore(
+  entries: Array<{ topic: LoreTopic; hook: string; markdown: string }>,
+): Promise<void> {
+  const dir = communityLoreDir();
+  await fsp.mkdir(dir, { recursive: true });
+  const grouped = new Map<LoreTopic, string[]>();
+  for (const e of entries) {
+    const trimmed = e.markdown.trim();
+    const block = trimmed.startsWith('## ')
+      ? trimmed
+      : `## ${e.hook.trim()}\n\n${trimmed}`;
+    const list = grouped.get(e.topic) ?? [];
+    list.push(block);
+    grouped.set(e.topic, list);
+  }
+  for (const [topic, blocks] of grouped) {
+    const file = path.join(dir, `${topic}.md`);
+    await fsp.writeFile(file, blocks.join('\n\n') + '\n', 'utf8');
+  }
 }
