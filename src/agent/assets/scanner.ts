@@ -11,11 +11,18 @@ import type {
   AssetRequirement,
   AssetScan,
   AssetSpec,
+  VanillaSource,
 } from './types.js';
 import { materializeStubs, readStubbedPaths } from './stubs.js';
-import { detectGameVersionMajorMinorSync } from '../paths.js';
+import { detectGameVersionMajorMinorSync, detectRimWorldPaths } from '../paths.js';
 import { SKIP_DIRS } from '../fs-helpers.js';
 
+/**
+ * A single raw ref site discovered in the mod's source. One ref = one slot in
+ * the UI; we never group across (defType, defName, field, sourceFile, offset).
+ * Two defs pointing at the same texPath produce two RawRefs and two slots; the
+ * upload IPC auto-forks on demand.
+ */
 interface RawRef {
   /** Stem under the kind's root, e.g. "Things/Item/Stalker" for texPath, no ext. */
   stem: string;
@@ -24,12 +31,22 @@ interface RawRef {
   defType: string;
   defName: string;
   sourceFile: string;
-  note?: string;
+  /** Byte offset of the originating XML tag / C# call within the source file. */
+  tokenOffset: number;
+  tokenLength: number;
+  /** The path as written in the token — same as stem for plain refs, BASE for Graphic_Multi / wornGraphicPath expansions. */
+  sourceStem: string;
 }
 
 export async function scanAssets(
   modDir: string,
   gameVersion: string | null = detectGameVersionMajorMinorSync(),
+  /**
+   * Base-game install Data/ folder. Optional so unit tests can omit it; the
+   * production caller (assets IPC) passes detectRimWorldPaths().dataDir so the
+   * scanner can resolve vanilla fallbacks.
+   */
+  dataDir: string | null = detectRimWorldPaths().dataDir,
 ): Promise<AssetScan> {
   const folder = path.basename(modDir);
   const contentRoots = resolveContentRoots(modDir, gameVersion);
@@ -55,32 +72,34 @@ export async function scanAssets(
     refs.push(...extractCsRefs(src, relSource));
   }
 
-  const grouped = groupRefs(refs);
+  // Read the existing stub manifest before building requirements so paths
+  // whose on-disk file is a known placeholder get treated as missing (and
+  // vanilla-fallback resolution runs for them).
+  const stubbedBefore = await readStubbedPaths(modDir);
   const requirements: AssetRequirement[] = [];
-  for (const group of grouped.values()) {
-    requirements.push(await materializeRequirement(group, modDir, contentRoots));
+  for (const r of refs) {
+    requirements.push(
+      await materializeRequirement(r, modDir, contentRoots, dataDir, stubbedBefore),
+    );
   }
-  requirements.sort((a, b) => a.path.localeCompare(b.path));
+  // Sort by on-disk path, then by defName so siblings sharing a path land
+  // together in the UI.
+  requirements.sort((a, b) => {
+    const p = a.path.localeCompare(b.path);
+    if (p !== 0) return p;
+    return a.ref.defName.localeCompare(b.ref.defName);
+  });
 
-  // Re-flag stubbed files as missing so the UI shows them as empty.
-  const stubbedPaths = await readStubbedPaths(modDir);
-  for (const req of requirements) {
-    if (stubbedPaths.has(req.path)) {
-      req.status = 'missing';
-      req.stubbed = true;
-      req.current = undefined;
-    }
-  }
-
-  // Materialize placeholders for anything still missing so RimWorld stops
-  // logging "Could not load texture/AudioClip" while the player works on
-  // the real asset.
+  // Materialize placeholders for anything still missing — but only when the
+  // path has no vanilla fallback. Stubbing over a vanilla path would shadow
+  // Core/DLC art at runtime. Clean up orphan stubs as a side effect.
   await materializeStubs(modDir, requirements);
-  // Flag the just-stubbed entries so consumers can render them correctly.
+  const stubbedAfter = await readStubbedPaths(modDir);
   for (const req of requirements) {
-    if (req.status === 'missing' && !req.stubbed) {
-      // materializeStubs wrote a file at this path, so it is now stubbed.
+    if (stubbedAfter.has(req.path)) {
       req.stubbed = true;
+    } else {
+      req.stubbed = undefined;
     }
   }
 
@@ -99,10 +118,6 @@ export async function scanAssets(
  * game version. Mirrors RimWorld's mod loading: an explicit LoadFolders.xml
  * wins; otherwise we fall back to the conventional versioned-subfolder /
  * Common / mod-root layout.
- *
- * Returned paths are absolute and ordered as they appear in LoadFolders.xml
- * (or by convention priority when LoadFolders is absent). The first entry is
- * where new placeholder files get written.
  */
 function resolveContentRoots(modDir: string, gameVersion: string | null): string[] {
   const fromLoadFolders = readLoadFolders(modDir, gameVersion);
@@ -127,7 +142,6 @@ function readLoadFolders(modDir: string, gameVersion: string | null): string[] |
   } catch {
     return null;
   }
-  // Match each <v1.6>...</v1.6> style version block.
   const blockRe = /<v(\d+(?:\.\d+)?)\b[^>]*>([\s\S]*?)<\/v\1>/gi;
   const blocks = new Map<string, string>();
   let m: RegExpExecArray | null;
@@ -218,10 +232,12 @@ function extractRefs(
   while ((m = DEF_BLOCK_RE.exec(xml)) !== null) {
     const defType = m[1];
     const body = m[3];
+    const bodyOffset = m.index + m[0].indexOf(body);
     const defName = body.match(DEF_NAME_RE)?.[1] ?? '(unnamed)';
 
-    // texPath. Field name is "graphicData.texPath" if inside <graphicData>...</graphicData>.
-    for (const ref of extractTexPathRefs(body)) {
+    // texPath — handled separately because graphicData context changes
+    // expansion (Graphic_Multi → 3 directional sprites).
+    for (const ref of extractTexPathRefs(body, bodyOffset)) {
       out.push({
         stem: ref.stem,
         kind: 'texture',
@@ -229,7 +245,9 @@ function extractRefs(
         defType,
         defName,
         sourceFile,
-        note: ref.note,
+        tokenOffset: ref.tokenOffset,
+        tokenLength: ref.tokenLength,
+        sourceStem: ref.sourceStem,
       });
     }
 
@@ -244,12 +262,13 @@ function extractRefs(
         defType,
         defName,
         sourceFile,
-        note: nearbyComment(body, iconMatch.index, iconMatch.index + iconMatch[0].length),
+        tokenOffset: bodyOffset + iconMatch.index,
+        tokenLength: iconMatch[0].length,
+        sourceStem: iconMatch[1],
       });
     }
 
-    // clipPath — only meaningful inside SoundDef-flavored defs, but we capture
-    // wherever it appears since RimWorld treats them consistently as Sounds/<stem>.ogg.
+    // clipPath — meaningful inside SoundDef-flavored defs.
     let clipMatch: RegExpExecArray | null;
     CLIP_PATH_RE.lastIndex = 0;
     while ((clipMatch = CLIP_PATH_RE.exec(body)) !== null) {
@@ -260,22 +279,23 @@ function extractRefs(
         defType,
         defName,
         sourceFile,
-        note: nearbyComment(body, clipMatch.index, clipMatch.index + clipMatch[0].length),
+        tokenOffset: bodyOffset + clipMatch.index,
+        tokenLength: clipMatch[0].length,
+        sourceStem: clipMatch[1],
       });
     }
 
-    // wornGraphicPath — apparel sprites worn on pawns. The actual file pattern
-    // depends on the apparel layer: body-conforming layers (OnSkin/Middle/etc.)
-    // need <base>_<BodyType>_<dir>.png variants; non-body layers (Overhead/etc.)
-    // just need plain <base>_<dir>.png. We can't determine the layer reliably
-    // from the def alone, so we look at the on-disk reality: emit refs for
-    // existing matching files. If the directory is empty (fresh scaffold), fall
-    // back to plain directional so the agent has something to fill in.
+    // wornGraphicPath — apparel sprites worn on pawns. One `<wornGraphicPath>`
+    // tag expands to 3 directional refs (and possibly body-typed siblings if
+    // those files exist on disk). All expansions share the same tokenOffset
+    // and sourceStem — a fork rewrite touches the single source tag and moves
+    // every expansion with it.
     let wornMatch: RegExpExecArray | null;
     WORN_GRAPHIC_PATH_RE.lastIndex = 0;
     while ((wornMatch = WORN_GRAPHIC_PATH_RE.exec(body)) !== null) {
-      const note = nearbyComment(body, wornMatch.index, wornMatch.index + wornMatch[0].length);
       const basePath = wornMatch[1];
+      const offset = bodyOffset + wornMatch.index;
+      const length = wornMatch[0].length;
       for (const stem of expandWornGraphicPath(basePath, contentRoots)) {
         out.push({
           stem,
@@ -284,7 +304,9 @@ function extractRefs(
           defType,
           defName,
           sourceFile,
-          note,
+          tokenOffset: offset,
+          tokenLength: length,
+          sourceStem: basePath,
         });
       }
     }
@@ -296,8 +318,7 @@ function extractRefs(
  * Decide which apparel sprite files this wornGraphicPath should resolve to.
  * Looks at the on-disk parent dir; if files matching `<base>_..._<dir>.png` (or
  * plain `<base>_<dir>.png`) exist, emit refs for those. Otherwise fall back to
- * the conservative directional triple — that covers fresh scaffolds with no
- * artwork yet, and avoids inventing per-body-type stems we can't verify.
+ * the conservative directional triple.
  */
 function expandWornGraphicPath(basePath: string, contentRoots: string[]): string[] {
   const segments = basePath.split('/').filter(Boolean);
@@ -327,15 +348,13 @@ function expandWornGraphicPath(basePath: string, contentRoots: string[]): string
 }
 
 function isApparelSuffix(suffix: string): boolean {
-  // Plain directional: north / south / east
   if (/^(north|south|east)$/i.test(suffix)) return true;
-  // Body-typed directional: <BodyType>_<dir>, e.g. Male_north, Hulk_east.
   if (/^[A-Za-z][A-Za-z0-9]*_(north|south|east)$/i.test(suffix)) return true;
   return false;
 }
 
 const CONTENT_FINDER_RE =
-  /\bContentFinder\s*<\s*(Texture2D|AudioClip)\s*>\s*\.\s*Get\s*\(\s*"([^"\r\n]+)"/g;
+  /\bContentFinder\s*<\s*(Texture2D|AudioClip)\s*>\s*\.\s*Get\s*\(\s*"([^"\r\n]+)"\s*\)/g;
 const CS_CLASS_RE = /\bclass\s+(\w+)/g;
 
 function extractCsRefs(source: string, sourceFile: string): RawRef[] {
@@ -353,7 +372,9 @@ function extractCsRefs(source: string, sourceFile: string): RawRef[] {
       defType: 'C#',
       defName: enclosingClass(source, m.index) ?? path.basename(sourceFile, '.cs'),
       sourceFile,
-      note: nearbyCsComment(source, m.index),
+      tokenOffset: m.index,
+      tokenLength: m[0].length,
+      sourceStem: stem,
     });
   }
   return out;
@@ -370,66 +391,16 @@ function enclosingClass(source: string, idx: number): string | undefined {
   return last;
 }
 
-// Walk back from `idx`'s line looking for a `// ...` comment that describes
-// this call. Skips intermediate code lines (e.g. `static readonly Texture2D Icon =`
-// preceding the ContentFinder call on the next line) up to a small lookback
-// budget so we don't grab unrelated distant comments.
-const COMMENT_LOOKBACK_LINES = 4;
-function nearbyCsComment(source: string, idx: number): string | undefined {
-  let lineEnd = source.lastIndexOf('\n', idx - 1);
-  for (let i = 0; i < COMMENT_LOOKBACK_LINES; i++) {
-    if (lineEnd <= 0) return undefined;
-    const lineStart = source.lastIndexOf('\n', lineEnd - 1) + 1;
-    const line = source.slice(lineStart, lineEnd).trim();
-    if (line.startsWith('//')) {
-      const text = line.replace(/^\/+\s*/, '').trim();
-      return text || undefined;
-    }
-    if (!line) return undefined; // blank line — stop, comment isn't attached
-    lineEnd = lineStart - 1;
-  }
-  return undefined;
+interface TexPathExtraction {
+  stem: string;
+  field: string;
+  tokenOffset: number;
+  tokenLength: number;
+  sourceStem: string;
 }
 
-/**
- * Look for an XML comment immediately before or after a tag span — the only
- * separation allowed is whitespace. Used to attach human descriptions to asset
- * path references like:
- *
- *   <!-- Soft thumping ambient loop, plays during anomaly events -->
- *   <clipPath>Anomaly/Ambient</clipPath>
- */
-function nearbyComment(body: string, tagStart: number, tagEnd: number): string | undefined {
-  // Look backwards: skip whitespace, then expect `-->` ending a comment.
-  let i = tagStart - 1;
-  while (i >= 0 && /\s/.test(body[i])) i--;
-  if (i >= 2 && body.slice(i - 2, i + 1) === '-->') {
-    const closeEnd = i + 1;
-    const openIdx = body.lastIndexOf('<!--', closeEnd - 3);
-    if (openIdx !== -1) {
-      const inner = body.slice(openIdx + 4, closeEnd - 3).trim();
-      if (inner) return inner;
-    }
-  }
-  // Look forwards: skip whitespace, then expect `<!--`.
-  let j = tagEnd;
-  while (j < body.length && /\s/.test(body[j])) j++;
-  if (body.startsWith('<!--', j)) {
-    const closeIdx = body.indexOf('-->', j + 4);
-    if (closeIdx !== -1) {
-      const inner = body.slice(j + 4, closeIdx).trim();
-      if (inner) return inner;
-    }
-  }
-  return undefined;
-}
-
-function extractTexPathRefs(
-  body: string,
-): { stem: string; field: string; note?: string }[] {
-  const out: { stem: string; field: string; note?: string }[] = [];
-  // Find <graphicData>…</graphicData> blocks first, mark their texPaths, then
-  // look for any remaining texPath in the body.
+function extractTexPathRefs(body: string, bodyOffset: number): TexPathExtraction[] {
+  const out: TexPathExtraction[] = [];
   const graphicSpans: Array<[number, number]> = [];
   const graphicRe = /<graphicData>([\s\S]*?)<\/graphicData>/g;
   let g: RegExpExecArray | null;
@@ -437,33 +408,36 @@ function extractTexPathRefs(
     graphicSpans.push([g.index, g.index + g[0].length]);
     const inner = g[1];
     const innerOffset = g.index + '<graphicData>'.length;
-    // graphicClass controls how RimWorld interprets texPath. Default is
-    // Graphic_Single (one PNG at the path). Graphic_Multi means the path is a
-    // base and the actual files are _north/_south/_east. Anything else
-    // (Random, Mote, Linked, …) we don't try to enumerate.
     const cls = inner.match(/<graphicClass>\s*([^<\s]+)\s*<\/graphicClass>/)?.[1];
     const isMulti = cls === 'Graphic_Multi';
     let t: RegExpExecArray | null;
     const texRe = /<texPath>\s*([^<\s]+)\s*<\/texPath>/g;
     while ((t = texRe.exec(inner)) !== null) {
-      const absStart = innerOffset + t.index;
-      const absEnd = absStart + t[0].length;
-      const note = nearbyComment(body, absStart, absEnd);
+      const tokenOffset = bodyOffset + innerOffset + t.index;
+      const tokenLength = t[0].length;
       const base = t[1];
       if (isMulti) {
         for (const dir of DIRECTIONS) {
           out.push({
             stem: `${base}${dir}`,
             field: `graphicData.texPath${dir}`,
-            note,
+            tokenOffset,
+            tokenLength,
+            sourceStem: base,
           });
         }
       } else {
-        out.push({ stem: base, field: 'graphicData.texPath', note });
+        out.push({
+          stem: base,
+          field: 'graphicData.texPath',
+          tokenOffset,
+          tokenLength,
+          sourceStem: base,
+        });
       }
     }
   }
-  // Any texPath outside graphicData blocks.
+  // texPath outside graphicData blocks.
   let m: RegExpExecArray | null;
   TEX_PATH_RE.lastIndex = 0;
   while ((m = TEX_PATH_RE.exec(body)) !== null) {
@@ -472,36 +446,12 @@ function extractTexPathRefs(
     out.push({
       stem: m[1],
       field: 'texPath',
-      note: nearbyComment(body, m.index, m.index + m[0].length),
+      tokenOffset: bodyOffset + m.index,
+      tokenLength: m[0].length,
+      sourceStem: m[1],
     });
   }
   return out;
-}
-
-interface RefGroup {
-  kind: AssetKind;
-  stem: string;
-  refs: AssetReference[];
-}
-
-function groupRefs(refs: RawRef[]): Map<string, RefGroup> {
-  const map = new Map<string, RefGroup>();
-  for (const r of refs) {
-    const key = `${r.kind}::${normalizeStem(r.stem)}`;
-    let g = map.get(key);
-    if (!g) {
-      g = { kind: r.kind, stem: normalizeStem(r.stem), refs: [] };
-      map.set(key, g);
-    }
-    g.refs.push({
-      defType: r.defType,
-      defName: r.defName,
-      field: r.field,
-      sourceFile: r.sourceFile,
-      note: r.note,
-    });
-  }
-  return map;
 }
 
 function normalizeStem(stem: string): string {
@@ -509,57 +459,105 @@ function normalizeStem(stem: string): string {
 }
 
 async function materializeRequirement(
-  group: RefGroup,
+  raw: RawRef,
   modDir: string,
   contentRoots: string[],
+  dataDir: string | null,
+  stubbedPaths: Set<string>,
 ): Promise<AssetRequirement> {
-  const spec = specFor(group.kind, group.refs);
-  const ext = group.kind === 'audio' ? '.ogg' : '.png';
-  const subRoot = group.kind === 'audio' ? 'Sounds' : 'Textures';
-  const within = `${subRoot}/${group.stem}${ext}`;
+  const stem = normalizeStem(raw.stem);
+  const spec = specFor(raw.kind, raw.field);
+  const ext = raw.kind === 'audio' ? '.ogg' : '.png';
+  const subRoot = raw.kind === 'audio' ? 'Sounds' : 'Textures';
+  const within = `${subRoot}/${stem}${ext}`;
   const { relPath, absPath } = resolveAssetLocation(modDir, contentRoots, within);
-  const id = createHash('sha1').update(`${group.kind}::${relPath}`).digest('hex').slice(0, 16);
 
-  const presence = await probeFile(absPath, relPath, group.kind);
+  // id encodes everything that uniquely identifies a slot — including the
+  // token offset so two refs from the same XML tag (Graphic_Multi expansion)
+  // remain distinct cards while sharing the on-disk file.
+  const id = createHash('sha1')
+    .update(
+      [
+        raw.kind,
+        relPath,
+        raw.sourceFile,
+        raw.defType,
+        raw.defName,
+        raw.field,
+        raw.tokenOffset,
+      ].join('::'),
+    )
+    .digest('hex')
+    .slice(0, 16);
+
+  const presence = await probeFile(absPath, relPath, raw.kind);
+  // A file that matches a known stub-manifest hash is conceptually missing —
+  // hide it from the UI as a real present file and let vanilla resolution run.
+  const isStub = !!presence && stubbedPaths.has(relPath);
+  const effective = isStub ? null : presence;
+
   let status: AssetRequirement['status'] = 'missing';
-  if (presence) {
-    status = presence.issues.length ? 'invalid' : 'present';
-  }
+  if (effective) status = effective.issues.length ? 'invalid' : 'present';
 
-  const seen = new Set<string>();
-  const notes: string[] = [];
-  for (const r of group.refs) {
-    if (!r.note) continue;
-    const trimmed = r.note.replace(/\s+/g, ' ').trim();
-    if (!trimmed || seen.has(trimmed)) continue;
-    seen.add(trimmed);
-    notes.push(trimmed);
-  }
+  const vanilla =
+    !effective && dataDir
+      ? resolveVanilla(dataDir, raw.kind, stem)
+      : undefined;
+
+  const ref: AssetReference = {
+    defType: raw.defType,
+    defName: raw.defName,
+    field: raw.field,
+    sourceFile: raw.sourceFile,
+    tokenOffset: raw.tokenOffset,
+    tokenLength: raw.tokenLength,
+    sourceStem: raw.sourceStem,
+  };
 
   const requirement: AssetRequirement = {
     id,
-    kind: group.kind,
+    kind: raw.kind,
     path: relPath,
-    stem: group.stem,
+    stem,
     spec,
-    referencedBy: group.refs,
-    notes,
+    ref,
     status,
-    current: presence ?? undefined,
+    current: effective ?? undefined,
+    vanilla,
   };
 
-  if (group.kind === 'texture' && (spec as { acceptsMask: boolean }).acceptsMask) {
-    const maskWithin = `${subRoot}/${group.stem}_m.png`;
-    const maskLoc = resolveAssetLocation(modDir, contentRoots, maskWithin);
-    const maskPresence = await probeFile(maskLoc.absPath, maskLoc.relPath, 'texture');
-    requirement.mask = {
-      path: maskLoc.relPath,
-      status: maskPresence ? 'present' : 'missing',
-      current: maskPresence ?? undefined,
-    };
-  }
-
   return requirement;
+}
+
+/**
+ * Look for `<stem>.{png,ogg}` under any DLC pack in dataDir. RimWorld treats
+ * its base/DLC packs as global asset roots — modders can write a `<texPath>`
+ * targeting Core/Royalty/etc. art without copying the file into their mod.
+ */
+function resolveVanilla(
+  dataDir: string,
+  kind: AssetKind,
+  stem: string,
+): VanillaSource | undefined {
+  if (!fs.existsSync(dataDir)) return undefined;
+  const subRoot = kind === 'audio' ? 'Sounds' : 'Textures';
+  const ext = kind === 'audio' ? '.ogg' : '.png';
+  let packs: string[];
+  try {
+    packs = fs
+      .readdirSync(dataDir, { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+      .map((d) => d.name);
+  } catch {
+    return undefined;
+  }
+  for (const pack of packs) {
+    const abs = path.join(dataDir, pack, subRoot, ...stem.split('/')) + ext;
+    if (fs.existsSync(abs)) {
+      return { pack, absPath: abs };
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -586,45 +584,20 @@ function toModRelative(modDir: string, abs: string): string {
   return path.relative(modDir, abs).split(path.sep).join('/');
 }
 
-function specFor(kind: AssetKind, refs: AssetReference[]): AssetSpec {
+function specFor(kind: AssetKind, _field: string): AssetSpec {
   if (kind === 'audio') {
-    return {
-      kind: 'audio',
-      format: 'ogg',
-      description: 'Ogg Vorbis audio clip referenced by a SoundDef. Mono is preferred for in-game positional sound.',
-    };
+    return { kind: 'audio', format: 'ogg' };
   }
   if (kind === 'icon') {
     return {
       kind: 'icon',
       format: 'png',
-      acceptsMask: false,
-      description: 'PNG icon shown in inventory and UI. Square is recommended.',
       sizeHint: '64×64 PNG, transparent background',
     };
-  }
-  // texture
-  const usedInGraphicData = refs.some((r) => r.field.startsWith('graphicData.texPath'));
-  const usedAsApparel = refs.some((r) => r.field.startsWith('wornGraphicPath'));
-  const usedFromCs = refs.some((r) => r.field.startsWith('ContentFinder<'));
-  let description: string;
-  if (usedAsApparel) {
-    description =
-      'Directional apparel sprite worn on pawns. _west.png is auto-mirrored from _east.png if absent.';
-  } else if (usedInGraphicData) {
-    description =
-      'PNG sprite rendered in-world via graphicData. Power-of-two dimensions preferred.';
-  } else if (usedFromCs) {
-    description =
-      'PNG loaded from C# code (gizmo, designator, MainTabWindow icon, etc.).';
-  } else {
-    description = 'PNG sprite. Power-of-two dimensions preferred.';
   }
   return {
     kind: 'texture',
     format: 'png',
-    acceptsMask: usedInGraphicData || usedAsApparel,
-    description,
     sizeHint: '64×64 / 128×128 / 256×256 PNG with transparency',
   };
 }
@@ -649,7 +622,6 @@ async function probeFile(
   try {
     const fh = await fsp.open(absPath, 'r');
     try {
-      // Read first 32 bytes for sniffing — enough for PNG IHDR and Ogg magic.
       const head = Buffer.alloc(32);
       await fh.read(head, 0, 32, 0);
       buf = head;

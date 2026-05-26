@@ -26,7 +26,7 @@ import type {
 import type { SchematicData } from '../agent/schematic';
 import type { DefEntry } from '../agent/defs-scan';
 import type { EnableResult, DisableResult } from '../agent/game';
-import type { AssetKind, AssetScan } from '../agent/assets/types';
+import type { AssetKind, AssetScan, AssetSlotRef } from '../agent/assets/types';
 import type {
   AttachmentInput,
   PreparedAttachment,
@@ -233,6 +233,11 @@ export interface Channels {
     destRelPath: string,
     sourceAbsPath: string,
   ) => AssetScan;
+  'modmixer:assets:add-slot': (
+    folder: string,
+    slot: AssetSlotRef,
+    sourceAbsPath: string,
+  ) => AssetScan;
   'modmixer:assets:set-preview-image': (
     folder: string,
     sourceAbsPath: string,
@@ -242,6 +247,7 @@ export interface Channels {
     folder: string,
     relPath: string,
   ) => string | null;
+  'modmixer:assets:read-vanilla-data-url': (absPath: string) => string | null;
   'modmixer:assets:pick-file': (kind: AssetKind) => string | null;
 
   // Chat attachments

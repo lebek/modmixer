@@ -103,7 +103,7 @@ export const LORE_TOPIC_HINTS: Record<LoreTopic, string> = {
   // Presentation
   ui: 'Widgets, Listing_Standard, Window subclasses, ITab, Gizmo, Inspector tab, MainTab.',
   sounds: 'SoundDef shape, SubSoundDef, sustainers, OneShot, FMOD/Unity audio quirks, .ogg encoding.',
-  textures: 'PNG/_m mask conventions, texPath resolution, GraphicData, atlasing, shaders.',
+  textures: 'PNG conventions, texPath resolution, GraphicData, atlasing, shaders.',
   animation: 'Sprite swaps, PawnRenderer, AnimationDef, smooth interpolation, body/apparel layering.',
   // Game subsystems
   pawns: 'Pawn generation, kinds, traits, skills, hediffs, needs, body parts, stats, age/biology.',

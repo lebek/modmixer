@@ -4,7 +4,6 @@ import path from 'node:path';
 import os from 'node:os';
 import fsp from 'node:fs/promises';
 import { scanAssets } from '../scanner.js';
-import type { TextureSpec } from '../types.js';
 
 async function makeTmpMod(): Promise<string> {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'modmixer-scanner-'));
@@ -27,23 +26,22 @@ describe('scanAssets', () => {
 using Verse;
 namespace MyMod {
   public class AutoPrioritizeButton {
-    // Gizmo icon for the auto-prioritize button
     static readonly Texture2D Icon =
       ContentFinder<Texture2D>.Get("UI/SmartPriorities/AutoPrioritize");
   }
 }`,
       );
-      const scan = await scanAssets(mod);
+      const scan = await scanAssets(mod, null, null);
       const req = scan.requirements.find(
         (r) => r.path === 'Textures/UI/SmartPriorities/AutoPrioritize.png',
       );
       assert.ok(req, 'expected texture requirement from ContentFinder');
       assert.equal(req.kind, 'texture');
-      assert.equal(req.referencedBy[0].defType, 'C#');
-      assert.equal(req.referencedBy[0].defName, 'AutoPrioritizeButton');
-      assert.match(req.referencedBy[0].field, /ContentFinder<Texture2D>/);
-      assert.equal(req.referencedBy[0].sourceFile, 'Source/Gizmo.cs');
-      assert.equal(req.notes[0], 'Gizmo icon for the auto-prioritize button');
+      assert.equal(req.ref.defType, 'C#');
+      assert.equal(req.ref.defName, 'AutoPrioritizeButton');
+      assert.match(req.ref.field, /ContentFinder<Texture2D>/);
+      assert.equal(req.ref.sourceFile, 'Source/Gizmo.cs');
+      assert.equal(req.ref.sourceStem, 'UI/SmartPriorities/AutoPrioritize');
     } finally {
       await cleanup(mod);
     }
@@ -60,7 +58,7 @@ namespace MyMod {
   }
 }`,
       );
-      const scan = await scanAssets(mod);
+      const scan = await scanAssets(mod, null, null);
       const req = scan.requirements.find(
         (r) => r.path === 'Sounds/MyMod/Click.ogg',
       );
@@ -81,24 +79,24 @@ namespace MyMod {
   <ThingDef ParentName="ApparelBase">
     <defName>MyParka</defName>
     <apparel>
-      <!-- Long fur parka, directional sprites -->
       <wornGraphicPath>Things/Pawn/MyParka/MyParka</wornGraphicPath>
     </apparel>
   </ThingDef>
 </Defs>`,
       );
-      const scan = await scanAssets(mod);
+      const scan = await scanAssets(mod, null, null);
       const paths = scan.requirements.map((r) => r.path).sort();
       assert.deepEqual(paths, [
         'Textures/Things/Pawn/MyParka/MyParka_east.png',
         'Textures/Things/Pawn/MyParka/MyParka_north.png',
         'Textures/Things/Pawn/MyParka/MyParka_south.png',
       ]);
-      const req = scan.requirements[0];
-      const spec = req.spec as TextureSpec;
-      assert.equal(spec.acceptsMask, true);
-      assert.match(spec.description, /apparel/i);
-      assert.equal(req.notes[0], 'Long fur parka, directional sprites');
+      // All three directional refs share the same sourceStem (the base path
+      // the modder wrote) — fork rewrites need that base to find the right
+      // text to replace.
+      for (const r of scan.requirements) {
+        assert.equal(r.ref.sourceStem, 'Things/Pawn/MyParka/MyParka');
+      }
     } finally {
       await cleanup(mod);
     }
@@ -107,8 +105,6 @@ namespace MyMod {
   it('honors LoadFolders.xml and resolves assets across content roots', async () => {
     const mod = await fsp.mkdtemp(path.join(os.tmpdir(), 'modmixer-scanner-lf-'));
     try {
-      // Layout: defs live under Common/Defs (per LoadFolders), one texture sits
-      // at the mod root and another sits under Common/. Both should resolve.
       await fsp.writeFile(
         path.join(mod, 'LoadFolders.xml'),
         `<?xml version="1.0" encoding="utf-8"?>
@@ -134,7 +130,6 @@ namespace MyMod {
   </ThingDef>
 </Defs>`,
       );
-      // Real PNG (8-byte signature + IHDR + IEND is enough for the sniffer).
       const pngBytes = Buffer.from([
         0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
         0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52,
@@ -156,7 +151,7 @@ namespace MyMod {
         pngBytes,
       );
 
-      const scan = await scanAssets(mod, '1.6');
+      const scan = await scanAssets(mod, '1.6', null);
       const byPath = new Map(scan.requirements.map((r) => [r.path, r]));
       const mango = byPath.get('Textures/Carnival/Item/Mango.png');
       const drum = byPath.get('Common/Textures/Carnival/Item/Drum.png');
@@ -185,14 +180,13 @@ namespace MyMod {
   </ThingDef>
 </Defs>`,
       );
-      const scan = await scanAssets(mod);
+      const scan = await scanAssets(mod, null, null);
       const paths = scan.requirements.map((r) => r.path).sort();
       assert.deepEqual(paths, [
         'Textures/Apparel/FeatheredHeaddress/FeatheredHeaddress_east.png',
         'Textures/Apparel/FeatheredHeaddress/FeatheredHeaddress_north.png',
         'Textures/Apparel/FeatheredHeaddress/FeatheredHeaddress_south.png',
       ]);
-      // No phantom <base>.png ref — RimWorld would never load it.
       assert.ok(
         !paths.includes('Textures/Apparel/FeatheredHeaddress/FeatheredHeaddress.png'),
       );
@@ -220,7 +214,6 @@ namespace MyMod {
   </ThingDef>
 </Defs>`,
       );
-      // Drop body-typed files on disk: Male/Female × north/south/east.
       const dir = path.join(mod, 'Textures', 'Apparel', 'CarnivalBodysuit');
       await fsp.mkdir(dir, { recursive: true });
       const png = Buffer.from([
@@ -229,7 +222,6 @@ namespace MyMod {
         0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0,
         0x1f, 0x15, 0xc4, 0x89,
       ]);
-      // The Graphic_Single icon at the base path.
       await fsp.writeFile(path.join(dir, 'CarnivalBodysuit.png'), png);
       for (const body of ['Male', 'Female']) {
         for (const dirSuffix of ['north', 'south', 'east']) {
@@ -239,10 +231,8 @@ namespace MyMod {
           );
         }
       }
-      const scan = await scanAssets(mod);
+      const scan = await scanAssets(mod, null, null);
       const paths = scan.requirements.map((r) => r.path).sort();
-      // We should have the icon plus the 6 body-typed worn sprites — no phantom
-      // plain `_north/_south/_east` paths the def never asked for.
       assert.deepEqual(paths, [
         'Textures/Apparel/CarnivalBodysuit/CarnivalBodysuit.png',
         'Textures/Apparel/CarnivalBodysuit/CarnivalBodysuit_Female_east.png',
@@ -278,7 +268,7 @@ namespace MyMod {
   </SoundDef>
 </Defs>`,
       );
-      const scan = await scanAssets(mod);
+      const scan = await scanAssets(mod, null, null);
       const paths = scan.requirements.map((r) => r.path).sort();
       assert.deepEqual(paths, [
         'Sounds/MyMod/Boom.ogg',
@@ -287,6 +277,69 @@ namespace MyMod {
       ]);
     } finally {
       await cleanup(mod);
+    }
+  });
+
+  it('emits separate slots per def when two defs reference the same path', async () => {
+    const mod = await makeTmpMod();
+    try {
+      await fsp.writeFile(
+        path.join(mod, 'Defs', 'Things.xml'),
+        `<?xml version="1.0" encoding="utf-8" ?>
+<Defs>
+  <ThingDef>
+    <defName>Sword</defName>
+    <graphicData><texPath>Things/Item/Blade</texPath></graphicData>
+  </ThingDef>
+  <ThingDef>
+    <defName>Dagger</defName>
+    <graphicData><texPath>Things/Item/Blade</texPath></graphicData>
+  </ThingDef>
+</Defs>`,
+      );
+      const scan = await scanAssets(mod, null, null);
+      const sharing = scan.requirements.filter(
+        (r) => r.path === 'Textures/Things/Item/Blade.png',
+      );
+      assert.equal(sharing.length, 2, 'expected one slot per def, not a single grouped slot');
+      const defNames = sharing.map((r) => r.ref.defName).sort();
+      assert.deepEqual(defNames, ['Dagger', 'Sword']);
+      // Distinct ids per slot — token offsets differ.
+      assert.notEqual(sharing[0].id, sharing[1].id);
+    } finally {
+      await cleanup(mod);
+    }
+  });
+
+  it('resolves a vanilla fallback when dataDir contains the path', async () => {
+    const mod = await makeTmpMod();
+    const dataDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'modmixer-scanner-data-'));
+    try {
+      // Fake Core pack with one texture under Core/Textures/.
+      const corePngDir = path.join(dataDir, 'Core', 'Textures', 'Things', 'Item');
+      await fsp.mkdir(corePngDir, { recursive: true });
+      await fsp.writeFile(path.join(corePngDir, 'VanillaThing.png'), Buffer.alloc(0));
+
+      await fsp.writeFile(
+        path.join(mod, 'Defs', 'Reskin.xml'),
+        `<?xml version="1.0" encoding="utf-8" ?>
+<Defs>
+  <ThingDef>
+    <defName>Reskin</defName>
+    <graphicData><texPath>Things/Item/VanillaThing</texPath></graphicData>
+  </ThingDef>
+</Defs>`,
+      );
+      const scan = await scanAssets(mod, null, dataDir);
+      const req = scan.requirements[0];
+      assert.ok(req.vanilla, 'expected vanilla fallback to resolve');
+      assert.equal(req.vanilla.pack, 'Core');
+      // Stub should NOT have been written because vanilla resolves.
+      assert.equal(req.stubbed, undefined);
+      assert.equal(req.status, 'missing');
+    } finally {
+      await cleanup(mod);
+      await cleanup(dataDir);
     }
   });
 });

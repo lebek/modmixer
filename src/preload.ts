@@ -147,6 +147,11 @@ const api = {
   scanAssets: (folder: string) => invoke('modmixer:assets:scan', folder),
   addAsset: (folder: string, destRelPath: string, sourceAbsPath: string) =>
     invoke('modmixer:assets:add', folder, destRelPath, sourceAbsPath),
+  addSlotFile: (
+    folder: string,
+    slot: import('./agent/assets/types').AssetSlotRef,
+    sourceAbsPath: string,
+  ) => invoke('modmixer:assets:add-slot', folder, slot, sourceAbsPath),
   setPreviewImage: (folder: string, sourceAbsPath: string) =>
     invoke('modmixer:assets:set-preview-image', folder, sourceAbsPath),
   removeAsset: (folder: string, relPath: string) =>
@@ -169,6 +174,8 @@ const api = {
   getPathForFile: (file: File) => webUtils.getPathForFile(file),
   readAssetDataUrl: (folder: string, relPath: string) =>
     invoke('modmixer:assets:read-data-url', folder, relPath),
+  readVanillaAssetDataUrl: (absPath: string) =>
+    invoke('modmixer:assets:read-vanilla-data-url', absPath),
   onAssetsChanged: (
     handler: (env: import('./preload/typed-ipc').AssetsChangedEnvelope) => void,
   ) => on('modmixer:assets:changed', handler),

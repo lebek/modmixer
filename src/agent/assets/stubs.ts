@@ -150,6 +150,9 @@ export async function materializeStubs(
 
   for (const req of requirements) {
     if (req.status !== 'missing') continue;
+    // Skip paths that resolve to a vanilla Core/DLC asset — writing a stub
+    // here would shadow the base-game file at runtime (mods load after Core).
+    if (req.vanilla) continue;
     const buf = bufferForKind(req.kind);
     const hash = sha256(buf);
     const abs = path.join(modDir, ...req.path.split('/'));

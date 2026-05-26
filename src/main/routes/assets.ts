@@ -7,12 +7,14 @@ import {
   getPreviewBgSource,
   readAssetDataUrl,
   readPreviewBgSourceDataUrl,
+  readVanillaAssetDataUrl,
   removeAssetFile,
   setPreviewBgSource,
   setPreviewImageFile,
 } from '../../agent/assets/store.js';
+import { writeSlotFile } from '../../agent/assets/fork.js';
 import { ensureWatching } from '../../agent/assets/watcher.js';
-import type { AssetKind } from '../../agent/assets/types.js';
+import type { AssetKind, AssetSlotRef } from '../../agent/assets/types.js';
 import {
   getWorkspaceMod,
   getWorkspacePaths,
@@ -50,6 +52,30 @@ export function registerAssetsRoutes(ctx: RouteContext): void {
     },
   );
 
+  /**
+   * Slot-aware upload. Unlike `assets:add` (which copies into a fixed path —
+   * used for preview/about images), this routes through the fork logic: if
+   * the target slot's path is shared with other consumers, the slot's source
+   * token gets rewritten to a unique stem and the file lands at the new
+   * path, leaving siblings untouched.
+   */
+  ipc.handle(
+    'modmixer:assets:add-slot',
+    async (
+      _evt,
+      folder: string,
+      slot: AssetSlotRef,
+      sourceAbsPath: string,
+    ) => {
+      const { workspaceDir } = getWorkspacePaths();
+      const modDir = path.join(workspaceDir, folder);
+      // Scan first so the fork logic can see all current consumers of the path.
+      const pre = await scanAssets(modDir);
+      await writeSlotFile(modDir, slot, sourceAbsPath, pre.requirements);
+      return scanAssets(modDir);
+    },
+  );
+
   ipc.handle(
     'modmixer:assets:set-preview-image',
     async (_evt, folder: string, sourceAbsPath: string) => {
@@ -72,6 +98,11 @@ export function registerAssetsRoutes(ctx: RouteContext): void {
     'modmixer:assets:read-data-url',
     (_evt, folder: string, relPath: string) =>
       readAssetDataUrl(folder, relPath),
+  );
+
+  ipc.handle(
+    'modmixer:assets:read-vanilla-data-url',
+    (_evt, absPath: string) => readVanillaAssetDataUrl(absPath),
   );
 
   ipc.handle(

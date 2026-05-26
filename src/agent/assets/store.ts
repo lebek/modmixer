@@ -2,6 +2,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import { getWorkspacePaths } from '../workspace.js';
+import { detectRimWorldPaths } from '../paths.js';
 import { normalizePreviewToFile } from './preview-normalize.js';
 
 /** Absolute path of a workspace mod folder — no existence check. */
@@ -89,6 +90,41 @@ export async function readAssetDataUrl(
 
 export function modAbsPath(folder: string): string {
   return modRoot(folder);
+}
+
+/**
+ * Read a vanilla (Core/DLC) asset as a data URL for inline UI preview. Refuses
+ * any path that doesn't live under the detected RimWorld dataDir — the
+ * renderer hands us the absPath the scanner already validated, but we
+ * re-check here so a compromised renderer can't read arbitrary files.
+ */
+export async function readVanillaAssetDataUrl(
+  absPath: string,
+): Promise<string | null> {
+  const { dataDir } = detectRimWorldPaths();
+  if (!dataDir) return null;
+  const normalized = path.resolve(absPath);
+  const rootResolved = path.resolve(dataDir);
+  if (
+    normalized !== rootResolved &&
+    !normalized.startsWith(rootResolved + path.sep)
+  ) {
+    return null;
+  }
+  let buf: Buffer;
+  try {
+    buf = await fsp.readFile(normalized);
+  } catch {
+    return null;
+  }
+  const ext = path.extname(normalized).toLowerCase();
+  const mime =
+    ext === '.png'
+      ? 'image/png'
+      : ext === '.ogg'
+        ? 'audio/ogg'
+        : 'application/octet-stream';
+  return `data:${mime};base64,${buf.toString('base64')}`;
 }
 
 /**

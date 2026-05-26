@@ -4,7 +4,6 @@ import type {
   AssetKind,
   AssetRequirement,
   AssetScan,
-  TextureSpec,
 } from '../agent/assets/types';
 import { cn } from '@/lib/cn';
 import { appAlert, appConfirm } from './app-dialog';
@@ -53,11 +52,7 @@ export function AssetsView({ mod }: { mod: WorkspaceMod }) {
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex items-center gap-1 border-b border-line px-5 py-2">
         {KIND_ORDER.map((k) => {
-          const items = requirementsByKind[k];
-          const counts = scan?.countsByKind[k];
-          const label = KIND_LABEL[k];
-          const total = items.length;
-          const done = counts ? counts.present : 0;
+          const total = requirementsByKind[k].length;
           return (
             <button
               key={k}
@@ -69,10 +64,8 @@ export function AssetsView({ mod }: { mod: WorkspaceMod }) {
                   : 'text-muted hover:bg-raised/60 hover:text-ink',
               )}
             >
-              {label}
-              <span className="ml-2 text-[10px] opacity-70">
-                {done}/{total}
-              </span>
+              {KIND_LABEL[k]}
+              <span className="ml-2 text-[10px] opacity-70">{total}</span>
             </button>
           );
         })}
@@ -115,73 +108,22 @@ function KindPane({
     );
   }
   if (requirements.length === 0) {
+    const tagHint =
+      kind === 'audio' ? '<clipPath>' : kind === 'icon' ? '<uiIconPath>' : '<texPath>';
     return (
       <div className="rounded-md border border-line bg-paper/70 px-4 py-6 text-sm text-muted">
         No {KIND_LABEL[kind].toLowerCase()} are referenced by this mod's defs yet.
-        Add a def with a {kind === 'audio' ? '<clipPath>' : kind === 'icon' ? '<uiIconPath>' : '<texPath>'} entry
-        and it will appear here.
+        Add a def with a {tagHint} entry and it will appear here.
       </div>
     );
   }
 
-  const missing = requirements.filter((r) => r.status === 'missing');
-  const invalid = requirements.filter((r) => r.status === 'invalid');
-  const present = requirements.filter((r) => r.status === 'present');
-
   return (
-    <div className="space-y-6">
-      <Section title={`Missing (${missing.length})`} accent>
-        {missing.map((r) => (
-          <Card key={r.id} folder={folder} req={r} onChanged={onChanged} />
-        ))}
-        {missing.length === 0 && (
-          <p className="text-xs text-subtle">Nothing missing here.</p>
-        )}
-      </Section>
-
-      {invalid.length > 0 && (
-        <Section title={`Invalid (${invalid.length})`} warn>
-          {invalid.map((r) => (
-            <Card key={r.id} folder={folder} req={r} onChanged={onChanged} />
-          ))}
-        </Section>
-      )}
-
-      <Section title={`Present (${present.length})`}>
-        {present.map((r) => (
-          <Card key={r.id} folder={folder} req={r} onChanged={onChanged} />
-        ))}
-        {present.length === 0 && (
-          <p className="text-xs text-subtle">No assets in place yet.</p>
-        )}
-      </Section>
+    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+      {requirements.map((r) => (
+        <Card key={r.id} folder={folder} req={r} onChanged={onChanged} />
+      ))}
     </div>
-  );
-}
-
-function Section({
-  title,
-  children,
-  accent,
-  warn,
-}: {
-  title: string;
-  children: React.ReactNode;
-  accent?: boolean;
-  warn?: boolean;
-}) {
-  return (
-    <section>
-      <h2
-        className={cn(
-          'mb-2 font-mono text-[11px] uppercase tracking-[0.18em]',
-          accent ? 'text-accent' : warn ? 'text-failed' : 'text-muted',
-        )}
-      >
-        {title}
-      </h2>
-      <div className="space-y-3">{children}</div>
-    </section>
   );
 }
 
@@ -194,233 +136,76 @@ function Card({
   req: AssetRequirement;
   onChanged: () => void;
 }) {
-  const headline = req.notes[0] ?? req.spec.description;
-  const acceptsMask =
-    req.kind === 'texture' && (req.spec as TextureSpec).acceptsMask && req.mask;
-  const maskPresent = req.mask?.status === 'present';
-  const showSpecInDetails = req.notes.length > 0;
-
   return (
     <div
       className={cn(
-        'rounded-md border bg-paper/70 p-4',
-        req.status === 'invalid'
-          ? 'border-failed/40'
-          : req.status === 'missing'
-            ? 'border-line'
-            : 'border-ready/30',
+        'rounded-md border bg-paper/70 p-3',
+        req.status === 'invalid' ? 'border-failed/40' : 'border-line',
       )}
     >
-      <div className="min-w-0">
-        <div className="flex items-center gap-2">
-          <h3 className="truncate text-sm font-semibold text-ink">
-            {humanizeAssetTitle(req)}
-          </h3>
-          <StatusPill status={req.status} />
-          {req.stubbed && (
-            <span
-              title="modmixer wrote a placeholder here so RimWorld won't error. Drop your real file in to replace it."
-              className="inline-flex items-center rounded-full border border-line bg-surface px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.18em] text-subtle"
-            >
-              placeholder
-            </span>
-          )}
-        </div>
-        <p className="mt-1 text-sm text-ink">{headline}</p>
-        {'sizeHint' in req.spec && req.spec.sizeHint && (
-          <p className="mt-1 text-xs text-muted">{req.spec.sizeHint}</p>
-        )}
-      </div>
-
-      <div className="mt-3 space-y-2">
-        <DropSlot
-          folder={folder}
-          relPath={req.path}
-          kind={req.kind}
-          present={req.status === 'present' || req.status === 'invalid'}
-          issues={req.current?.issues ?? []}
-          meta={req.current?.meta}
-          onChanged={onChanged}
-          label="Main file"
-        />
-        {acceptsMask && req.mask && maskPresent && (
-          <DropSlot
-            folder={folder}
-            relPath={req.mask.path}
-            kind="texture"
-            present={true}
-            issues={req.mask.current?.issues ?? []}
-            meta={req.mask.current?.meta}
-            onChanged={onChanged}
-            label="Team-color mask"
-            optional
-          />
-        )}
-        {acceptsMask && req.mask && !maskPresent && (
-          <details className="group">
-            <summary className="flex cursor-pointer items-center gap-2 text-xs text-subtle marker:hidden hover:text-ink">
-              <span className="font-mono text-[10px] transition-transform group-open:rotate-90">
-                ›
-              </span>
-              add team-color mask
-              <span className="text-[10px] text-subtle">(optional)</span>
-            </summary>
-            <div className="mt-2">
-              <DropSlot
-                folder={folder}
-                relPath={req.mask.path}
-                kind="texture"
-                present={false}
-                issues={[]}
-                onChanged={onChanged}
-                label="Team-color mask"
-                optional
-                hint="Only used if you want team-color tinting (apparel, faction items)."
-              />
-            </div>
-          </details>
-        )}
-      </div>
-
-      <details className="group mt-3 border-t border-line pt-2">
-        <summary className="flex cursor-pointer items-center gap-2 font-mono text-[10px] uppercase tracking-[0.18em] text-muted marker:hidden hover:text-ink">
-          <span className="transition-transform group-open:rotate-90">›</span>
-          Details
-        </summary>
-        <div className="mt-2 space-y-2 pl-4">
-          <div>
-            <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-subtle">
-              Path
-            </div>
-            <code className="block break-all font-mono text-[11px] text-muted">
-              {req.path}
-            </code>
-          </div>
-          {req.notes.length === 0 && (
-            <p className="text-xs italic text-subtle">
-              No description in the def — ask modmixer to annotate this reference.
-            </p>
-          )}
-          {showSpecInDetails && (
-            <p className="text-xs text-muted">{req.spec.description}</p>
-          )}
-          {req.notes.slice(1).map((n, i) => (
-            <p key={i} className="text-xs text-muted">
-              {n}
-            </p>
-          ))}
-          <ReferencedBy req={req} />
-        </div>
-      </details>
+      <Slot folder={folder} req={req} onChanged={onChanged} />
     </div>
   );
 }
 
-function humanizeAssetTitle(req: AssetRequirement): string {
-  const basename = req.path.split('/').pop()?.replace(/\.[^.]+$/, '') ?? req.path;
-  const parts = basename.split('_').filter(Boolean);
-  if (parts.length === 0) return basename;
-  const head = parts[0].replace(/([a-z0-9])([A-Z])/g, '$1 $2');
-  if (parts.length === 1) return head;
-  const tail = parts.slice(1).map((p) => p.toLowerCase()).join(', ');
-  return `${head} — ${tail}`;
-}
-
-function StatusPill({ status }: { status: AssetRequirement['status'] }) {
-  const label =
-    status === 'present' ? 'present' : status === 'invalid' ? 'invalid' : 'missing';
-  const cls =
-    status === 'present'
-      ? 'border-ready/40 bg-ready/10 text-ready'
-      : status === 'invalid'
-        ? 'border-failed/40 bg-failed/10 text-failed'
-        : 'border-line bg-surface text-muted';
-  return (
-    <span
-      className={cn(
-        'inline-flex items-center rounded-full border px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.18em]',
-        cls,
-      )}
-    >
-      {label}
-    </span>
-  );
-}
-
-function ReferencedBy({ req }: { req: AssetRequirement }) {
-  if (req.referencedBy.length === 0) return null;
-  return (
-    <div className="mt-2 space-y-1 text-[11px] text-subtle">
-      <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted">
-        Required by
-      </div>
-      {req.referencedBy.slice(0, 4).map((r, i) => (
-        <div key={i}>
-          <div className="truncate font-mono text-[10px]">
-            <span className="text-ink/70">{r.defType}</span>.
-            <span className="text-ink">{r.defName}</span>
-            <span className="ml-1 text-subtle">· {r.field}</span>
-            <span className="ml-1 text-subtle">· {r.sourceFile}</span>
-          </div>
-          {r.note && (
-            <div className="pl-3 text-[11px] text-muted">↳ {r.note}</div>
-          )}
-        </div>
-      ))}
-      {req.referencedBy.length > 4 && (
-        <div className="font-mono text-[10px]">
-          +{req.referencedBy.length - 4} more
-        </div>
-      )}
-    </div>
-  );
-}
-
-function DropSlot({
+function Slot({
   folder,
-  relPath,
-  kind,
-  present,
-  issues,
-  meta,
+  req,
   onChanged,
-  label,
-  optional,
-  hint,
 }: {
   folder: string;
-  relPath: string;
-  kind: AssetKind;
-  present: boolean;
-  issues: string[];
-  meta?: { width?: number; height?: number; size: number; detectedFormat?: string };
+  req: AssetRequirement;
   onChanged: () => void;
-  label: string;
-  optional?: boolean;
-  hint?: string;
 }) {
   const [dragOver, setDragOver] = useState(false);
   const [busy, setBusy] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
+  // The preview source chains: custom file (when present, not stubbed) →
+  // vanilla fallback → nothing. The renderer decides which to fetch so the
+  // main process doesn't have to re-derive precedence.
   useEffect(() => {
     let cancelled = false;
-    if (!present) {
+    const showCustom = req.status !== 'missing' && req.status !== 'invalid';
+    if (showCustom) {
+      void window.modmixer
+        .readAssetDataUrl(folder, req.path)
+        .then((url) => {
+          if (!cancelled) setPreviewUrl(url);
+        });
+    } else if (req.vanilla) {
+      void window.modmixer
+        .readVanillaAssetDataUrl(req.vanilla.absPath)
+        .then((url) => {
+          if (!cancelled) setPreviewUrl(url);
+        });
+    } else {
       setPreviewUrl(null);
-      return;
     }
-    void window.modmixer.readAssetDataUrl(folder, relPath).then((url) => {
-      if (!cancelled) setPreviewUrl(url);
-    });
     return () => {
       cancelled = true;
     };
-  }, [folder, relPath, present]);
+  }, [folder, req.path, req.status, req.vanilla?.absPath]);
+
+  const browse = async () => {
+    const picked = await window.modmixer.pickAssetFile(req.kind);
+    if (!picked) return;
+    await submit(picked);
+  };
 
   const submit = async (sourcePath: string) => {
     setBusy(true);
     try {
-      await window.modmixer.addAsset(folder, relPath, sourcePath);
+      await window.modmixer.addSlotFile(
+        folder,
+        {
+          kind: req.kind,
+          path: req.path,
+          sourceFile: req.ref.sourceFile,
+          tokenOffset: req.ref.tokenOffset,
+        },
+        sourcePath,
+      );
       onChanged();
     } catch (err) {
       console.error(err);
@@ -430,20 +215,15 @@ function DropSlot({
     }
   };
 
-  const browse = async () => {
-    const picked = await window.modmixer.pickAssetFile(kind);
-    if (picked) await submit(picked);
-  };
-
   const remove = async () => {
-    const ok = await appConfirm(`Remove ${relPath}?`, {
+    const ok = await appConfirm('Remove this asset?', {
       okLabel: 'Remove',
       tone: 'danger',
     });
     if (!ok) return;
     setBusy(true);
     try {
-      await window.modmixer.removeAsset(folder, relPath);
+      await window.modmixer.removeAsset(folder, req.path);
       onChanged();
     } finally {
       setBusy(false);
@@ -463,6 +243,8 @@ function DropSlot({
     void submit(p);
   };
 
+  const userOwnsFile = req.status === 'present' || req.status === 'invalid';
+
   return (
     <div
       onDragOver={(e) => {
@@ -472,75 +254,76 @@ function DropSlot({
       onDragLeave={() => setDragOver(false)}
       onDrop={onDrop}
       className={cn(
-        'rounded-md border p-3 transition-colors',
-        optional ? 'border-dashed' : 'border-solid',
+        'flex items-start gap-3 rounded-md border border-dashed p-3 transition-colors',
         dragOver
           ? 'border-accent bg-accent/5'
-          : present
-            ? 'border-line bg-surface/40'
-            : 'border-line bg-surface/20',
-        optional && !present && 'opacity-75',
+          : 'border-line/60 bg-surface/30',
       )}
     >
-      <div className="mb-2 flex items-center justify-between">
-        <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted">
-          {label}
-          {optional && (
-            <span className="ml-2 text-[9px] text-subtle">optional</span>
-          )}
-        </div>
-        {present && (
-          <button
-            onClick={remove}
-            disabled={busy}
-            className="font-mono text-[10px] uppercase tracking-[0.18em] text-subtle transition-colors hover:text-failed disabled:opacity-40"
-          >
-            remove
-          </button>
+      <Preview kind={req.kind} url={previewUrl} />
+      <div className="min-w-0 flex-1">
+        <h3 className="truncate text-sm font-semibold text-ink" title={req.path}>
+          {humanizeAssetTitle(req)}
+        </h3>
+        {'sizeHint' in req.spec && req.spec.sizeHint && (
+          <p className="mt-0.5 text-xs text-muted">{req.spec.sizeHint}</p>
         )}
-      </div>
-
-      {present ? (
-        <div className="flex items-center gap-3">
-          <Preview kind={kind} url={previewUrl} />
-          <div className="min-w-0 text-xs">
-            {meta?.width && meta?.height && (
-              <div className="font-mono text-ink">
-                {meta.width} × {meta.height}
-              </div>
-            )}
-            <div className="font-mono text-[10px] text-subtle">
-              {formatSize(meta?.size ?? 0)}
-              {meta?.detectedFormat && ` · ${meta.detectedFormat}`}
-            </div>
-            {issues.length > 0 && (
-              <ul className="mt-1 list-disc pl-4 text-failed">
-                {issues.map((i, idx) => (
-                  <li key={idx}>{i}</li>
-                ))}
-              </ul>
-            )}
-          </div>
-        </div>
-      ) : (
-        <div className="flex flex-col items-start gap-2">
-          {hint && <p className="text-[11px] leading-snug text-muted">{hint}</p>}
-          <p className="text-xs text-muted">
-            {dragOver
-              ? 'Release to add file'
-              : `Drag a ${kind === 'audio' ? '.ogg' : '.png'} here or:`}
-          </p>
+        {req.kind === 'audio' && (
+          <p className="mt-0.5 text-xs text-muted">Ogg Vorbis</p>
+        )}
+        {req.status === 'invalid' && req.current?.issues.length ? (
+          <ul className="mt-1 list-disc pl-4 text-xs text-failed">
+            {req.current.issues.map((i, idx) => (
+              <li key={idx}>{i}</li>
+            ))}
+          </ul>
+        ) : null}
+        <div className="mt-2 flex items-center gap-2">
           <button
             onClick={browse}
             disabled={busy}
             className="rounded-md border border-line bg-paper px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-muted transition-colors hover:border-ink/30 hover:text-ink disabled:opacity-40"
           >
-            browse
+            {userOwnsFile ? 'replace' : 'browse'}
           </button>
+          {userOwnsFile && (
+            <button
+              onClick={remove}
+              disabled={busy}
+              className="font-mono text-[10px] uppercase tracking-[0.18em] text-subtle transition-colors hover:text-failed disabled:opacity-40"
+            >
+              remove
+            </button>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
+}
+
+/**
+ * Title derived from the stem alone. We strip the kind-subroot prefix
+ * (`Textures/`, `Sounds/`) and the extension; the trailing path segment is
+ * shown verbatim with `_north/_south/_east/_west` and body-typed suffixes
+ * folded into parenthesised hints so they read as "Stalker (north)" rather
+ * than "Stalker — north" or the raw filename.
+ */
+function humanizeAssetTitle(req: AssetRequirement): string {
+  const basename =
+    req.path
+      .split('/')
+      .pop()
+      ?.replace(/\.[^.]+$/, '') ?? req.stem;
+  const dirMatch = basename.match(
+    /^(.+?)(?:_([A-Za-z]+))?_(north|south|east|west)$/i,
+  );
+  if (dirMatch) {
+    const base = dirMatch[1];
+    const body = dirMatch[2];
+    const dir = dirMatch[3].toLowerCase();
+    return body ? `${base} (${body}, ${dir})` : `${base} (${dir})`;
+  }
+  return basename;
 }
 
 function Preview({ kind, url }: { kind: AssetKind; url: string | null }) {
@@ -550,7 +333,7 @@ function Preview({ kind, url }: { kind: AssetKind; url: string | null }) {
         {url ? (
           <AudioPreview url={url} />
         ) : (
-          <span className="font-mono text-[10px] text-subtle">…</span>
+          <span className="font-mono text-[10px] text-subtle">·</span>
         )}
       </div>
     );
@@ -562,7 +345,7 @@ function Preview({ kind, url }: { kind: AssetKind; url: string | null }) {
       {url ? (
         <img src={url} alt="preview" className="max-h-full max-w-full object-contain" />
       ) : (
-        <span className="font-mono text-[10px] text-subtle">…</span>
+        <span className="font-mono text-[10px] text-subtle">·</span>
       )}
     </div>
   );
@@ -596,10 +379,4 @@ function AudioPreview({ url }: { url: string }) {
       />
     </button>
   );
-}
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
