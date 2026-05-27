@@ -1,0 +1,7 @@
+## Suppress the error-log popup during the patch phase (Prefs.devMode doesn't gate it)
+
+RimWorld's `Log.Error` opens the dev-log window when `!PlayDataLoader.Loaded || Prefs.DevMode`. During `LoadAllActiveMods` (patch phase), `PlayDataLoader.Loaded` is still false, so **the log window auto-opens regardless of dev-mode setting**. Turning off `<devMode>` in Prefs.xml does NOT silence patch-time errors from third-party mods.
+
+To suppress just the patch-phase popup (while keeping runtime gameplay errors visible), flip `LudeonTK.EditWindow_Log.canAutoOpen` (private static bool) to false from your `Mod` subclass constructor — that runs during mod instantiation, BEFORE patches apply — then flip it back to true at the end of your `StaticConstructorOnStartup` block, which runs AFTER patches but BEFORE gameplay. Since the field is private, use `HarmonyLib.Traverse.Create(typeof(LudeonTK.EditWindow_Log)).Field("canAutoOpen").SetValue(false)`.
+
+*Why it's tricky:* `Prefs.openLogOnWarnings` only gates warnings — errors aren't toggleable from Prefs, and the "Auto-open is ON/OFF" button in the log window writes to a static field that resets every game start. The vanilla check `if (!PlayDataLoader.Loaded || Prefs.DevMode)` is the giveaway: read `Verse/Log.cs:Log.Error`. The popup is bypassable by setting `canAutoOpen=false` early enough, but only if you do it before the first offending `Log.Error` fires during `LoadAllActiveMods`.

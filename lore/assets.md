@@ -55,6 +55,38 @@ Empty/truncated `.ogg` files produce `FMOD error: Unsupported file or audio form
 
 *Why it's tricky:* "silent placeholder" ≠ "valid empty Vorbis stream". FMOD parses the header at load and rejects truncated files; the error noise then pollutes every test session and obscures real errors.
 
+## When a new WorldObjectDef expandingIconTexture path 404s, use a known Core path or your own bundled icon
+
+`<expandingIconTexture>` is NOT one of the def fields modmixer's scanner watches (the watched set is `texPath`, `uiIconPath`, `wornGraphicPath`, `clipPath`). That means a mistyped or DLC-only path will NOT be auto-stubbed and NOT participate in vanilla-fallback resolution — it just 404s every frame the world map is rendered, climbing into the thousands per second.
+
+Also: vanilla `World/WorldObjects/Sites/GenericSite` exists as a `<siteTexture>` value (SitePartDef), NOT as an `<expandingIconTexture>` value. The two field-types use different texture root layouts even when the path looks parallel. Copying a `siteTexture` path into an `expandingIconTexture` slot fails silently in XML, then floods the log at runtime.
+
+Core-only paths that always exist (no DLC required):
+- `World/WorldObjects/Expanding/Ambush`
+- `World/WorldObjects/Expanding/Camp`
+- `World/WorldObjects/Expanding/Caravan`
+- `World/WorldObjects/Expanding/DestroyedSettlement`
+- `World/WorldObjects/Expanding/JourneyDestination`
+- `World/WorldObjects/Expanding/PeaceTalks`
+- `World/WorldObjects/Expanding/RoutePlannerWaypoint`
+- `World/WorldObjects/Expanding/TravelingShuttle`
+- `World/WorldObjects/Expanding/TravelingTransportPods`
+- `World/WorldObjects/Expanding/Sites/{Ambush,DownedRefugee,ItemStash,Manhunters,Outpost,PreciousLump,Prisoner,SleepingPawns,Turrets}`
+
+Or just point at a texture you ship yourself (e.g. `UI/YourMod/SomeIcon.png` → `<expandingIconTexture>UI/YourMod/SomeIcon</expandingIconTexture>`). Since the scanner doesn't watch this field, you can't rely on auto-stubbing — but a real shipped PNG works on a stock install with zero DLCs.
+
+*Why it's tricky:* the "Sites" subdirectory under `siteTexture` and the "Sites" subdirectory under `expandingIconTexture` look like the same vanilla namespace but aren't — they're separate path roots. Many specific paths exist in both, but `GenericSite` exists only in `siteTexture`. Copying a vanilla `siteTexture` path into `expandingIconTexture` parses fine; the only signal of failure is the runtime "Could not load Texture2D" error, fired thousands of times per frame because the WorldObjectDef.ExpandingIconTexture getter retries on every render.
+
+## MainButtonDef iconPath is NOT auto-stubbed — must ship the PNG yourself
+
+The modmixer asset scanner watches `<texPath>`, `<uiIconPath>`, `<wornGraphicPath>`, and `<clipPath>` in Defs/ XML — but NOT `<iconPath>` on MainButtonDef. A missing MainButton texture therefore fires `Could not load Texture2D at '...'` once per frame (the bottom bar renders every frame), flooding the log to the "max messages" cap in seconds.
+
+Symptom: error like `Could not load Texture2D at 'UI/MainButtons/MyButton' in any active mod or in base resources.` with `×NNNNN` count climbing fast.
+
+Fix: manually create the PNG at the path the def references (e.g. via `render_svg_to_png` for a placeholder). 64×64 white silhouette on transparent works as a stand-in.
+
+*Why it's tricky:* the lore says "asset-load errors are SUSPICIOUS, not expected" because the stub system covers most slots. MainButtonDef's `iconPath` slips through the scanner because the slot name is unique to that def-type. Don't assume a missing-texture error is a pipeline bug without first checking whether the path is on a def-type the scanner watches.
+
 ## Placeholders are auto-stubbed at sync — asset-load errors are SUSPICIOUS, not expected
 
 `sync_to_game` runs the asset scanner, which writes a magenta-checker PNG or a valid silent OGG at every referenced asset path the user hasn't filled in AND that doesn't resolve to a vanilla file. The mod loads cleanly even with incomplete assets, and the test-in-game flow works on a half-finished mod.

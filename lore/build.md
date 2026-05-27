@@ -42,6 +42,77 @@ When you call `Widgets.ButtonText` (or anything taking a `TextAnchor?` overload)
 
 *Why it's tricky:* most mods only reference `UnityEngine.CoreModule`. Code compiles fine until you actually invoke the overload that pulls in `TextAnchor`, then CS0012 fires.
 
+## Add `UnityEngine.IMGUIModule.dll` reference when using `GUI` / `GUIContent` (Widgets.Label needs it)
+
+If your mod uses any `GUI.*` (like `GUI.color = ...`) or even calls `Widgets.Label(rect, string)` from a MainTabWindow / Window, you'll hit `CS0012: The type 'GUIContent' is defined in an assembly that is not referenced. You must add a reference to assembly 'UnityEngine.IMGUIModule'`. The vanilla `Widgets.Label` overload allocates a `GUIContent` internally so it transitively pulls in IMGUI.
+
+Fix — add to the csproj:
+
+```xml
+<Reference Include="UnityEngine.IMGUIModule">
+  <HintPath>$(RimWorldRoot)\..\UnityEngine.IMGUIModule.dll</HintPath>
+  <Private>false</Private>
+</Reference>
+```
+
+*Why it's tricky:* `UnityEngine.dll` and `UnityEngine.CoreModule.dll` are not enough. Unity split IMGUI into its own assembly; the type appears in your stack only via referenced overloads, so the error fires even when *you* never name `GUI` or `GUIContent`.
+
+## Referencing a mod DLL built against a higher TFM — set ResolveAssemblyReferenceIgnoreTargetFrameworkAttributeVersionMismatch
+
+Some installed mods (e.g. RimTalk) ship `net4.8`-targeted DLLs. If your mod's csproj is `net4.7.2` (the RimWorld convention) and you `<Reference>` that DLL, MSBuild's ref-assembly check throws MSB3274/MSB3275 ("could not be resolved because it was built against a higher framework") and silently drops the reference — every type from it becomes CS0246 even though the file path is correct.
+
+Fix in the csproj `<PropertyGroup>`:
+
+```xml
+<ResolveAssemblyReferenceIgnoreTargetFrameworkAttributeVersionMismatch>true</ResolveAssemblyReferenceIgnoreTargetFrameworkAttributeVersionMismatch>
+<NoWarn>MSB3274;MSB3275</NoWarn>
+```
+
+This forces MSBuild to honor the reference. Safe at runtime because Unity Mono is the same regardless of which net4.x TFM the DLL was authored against — `net4.7.2` and `net4.8` produce IL-compatible assemblies and the Mono runtime in RimWorld supports both API surfaces.
+
+*Why it's tricky:* the CS0246 errors point at your code, not at MSBuild's framework check. The cause is buried in the build log as a *warning* (MSB3274), not an error, and looks innocuous. You can chase missing `using` directives and assembly-paths for a long time before realising the reference simply isn't being included.
+
+## MapComponent.FinalizeInit runs on a background thread during map generation — do NOT call Unity graphics APIs there
+
+`MapComponent.FinalizeInit()` is called from `Map.FinalizeInit()` which runs inside `LongEventHandler.RunEventFromAnotherThread` during map generation. This means it executes on a background thread, NOT the Unity main thread.
+
+**Any Unity graphics API call from FinalizeInit will cause a native crash:** `new Texture2D(...)`, `new Material(...)`, `Shader.Find(...)`, `GameObject.AddComponent(...)`, etc. The crash signature is `Texture2D:Internal_CreateImpl` in the stack trace with `LongEventHandler:RunEventFromAnotherThread` further up.
+
+**Fix:** defer all Unity API calls to `MapComponentUpdate()` or `MapComponentDraw()` (both run on the main thread). Use a `bool graphicsInitialized` flag for lazy one-shot init:
+
+```csharp
+public override void FinalizeInit()
+{
+    // Pure data setup only — safe on any thread
+    field = new MyDataStructure();
+}
+
+public override void MapComponentUpdate()
+{
+    if (!graphicsInitialized)
+        TryInitGraphics(); // Texture2D, Material, Shader.Find here
+    // ...
+}
+```
+
+*Why it's tricky:* the crash is a native Unity crash (`Got a UNKNOWN while executing native code`), not a clean C# exception. The stack trace shows `Mono JIT Code` mixed with `UnityPlayer` native frames, and the crash handler logs it as a `unityplayer.dll` crash. Easy to misattribute to GPU drivers or Unity bugs when it's actually a threading violation.
+
+## Mod constructor runs on a background thread via LongEventHandler — do NOT call Unity graphics APIs (Shader.Find, new Material, Texture2D, etc.) there
+
+The Mod constructor (`Mod(ModContentPack)`) is called from `LoadedModManager.CreateModClasses()` which runs inside `PlayDataLoader.DoPlayLoad()` → `LongEventHandler.RunEventFromAnotherThread`. This means the Mod constructor executes on a background thread, NOT the Unity main thread.
+
+Any Unity graphics API call from the constructor will cause a native Unity crash:
+- `Shader.Find(...)` → crash in `ResourcesAPIInternal:FindShaderByName`
+- `new Material(...)`
+- `new Texture2D(...)`
+- `GameObject.AddComponent(...)`
+
+The crash stack trace signature: `LongEventHandler:RunEventFromAnotherThread → PlayDataLoader:DoPlayLoad → LoadedModManager:CreateModClasses → Mod.ctor` with a native crash in `UnityEngine.ResourcesAPIInternal:FindShaderByName` or similar.
+
+Fix: defer all Unity API calls to the first render frame (`Camera.onPostRender`), `MapComponentUpdate()`, or `MapComponentDraw()` — all of which run on the main thread. Use a lazy-init flag pattern.
+
+*Why it's tricky:* it's a native Unity crash (`ERROR: SymGetSymFromAddr64` in UnityPlayer), not a managed exception. The managed stack trace shows `Mono JIT Code` mixed with `UnityPlayer` native frames. Nothing in the log says "called off main thread" — you have to spot `RunEventFromAnotherThread` in the trace.
+
 ## To inspect a 1.x RimWorld type, use `decompile_dll`, never bash-invoke `ilspycmd`
 
 The in-app `decompile_dll` tool runs ilspycmd through a path-policy guard. Bash-invoking `ilspycmd` triggers a permission prompt AND current upstream packages have a broken `DotnetToolSettings.xml` that fails `dotnet tool install`.

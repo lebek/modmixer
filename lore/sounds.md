@@ -39,3 +39,27 @@ Do NOT use `MaintenanceType.PerTick` unless you call `.Maintain()` on the sustai
 Add `using Verse.Sound;` to use `PlayOneShotOnCamera`, `TrySpawnSustainer`, etc. The static `SoundStarter` class is in that namespace.
 
 *Why it's tricky:* `SoundDef` itself lives in `Verse`, so `using Verse;` looks sufficient and the methods just appear missing.
+
+## TrySpawnSustainer requires SoundDef.sustain=true — pre-flight check or you spam the log every tick
+
+`SoundDef.TrySpawnSustainer(SoundInfo)` only works on defs with `<sustain>True</sustain>` in their XML. Calling it on a one-shot def (`PsychicSootheGlobal`, `PsychicPulseGlobal`, `LetterArrive_*`, all combat/impact sounds, etc.) fires `Log.Error("Tried to spawn a sustainer from non-sustainer sound X.")` and returns null — NOT a thrown exception, so a `try/catch` around the call doesn't help.
+
+If you also Maintain() the (null) sustainer in a per-tick path, the error fires every tick — 60/s, 600+ in 10 seconds.
+
+Pattern:
+```csharp
+if (snd != null && snd.sustain)
+{
+    sustainer = snd.TrySpawnSustainer(SoundInfo.InMap(pawn, MaintenanceType.PerTick));
+}
+```
+And cache "I tried" with a bool latch so a missing/wrong def doesn't retry on every tick either.
+
+Vanilla sustainer SoundDefs (confirmed, base-game, no DLC needed) — list in `Defs/Core/SoundDefs/Building_Sustainers_Ambiences.xml`:
+- `CrashedShipPart_Ambience` — evil drone, perfect for ominous boss vibes
+- `GeothermalPlant_Ambience` — low industrial hum
+- `WindTurbine_Ambience` / `WaterMill_Ambience` — gentler hums
+- `Television_Ambience` — domestic-noise drone
+- `WoodFiredGenerator_Ambience` / `ChemfuelFiredGenerator_Ambience` — combustion hums
+
+*Why it's tricky:* the name doesn't tell you. `PsychicSootheGlobal` SOUNDS like a sustained-feel global hum (and is — when played as a one-shot it has a long tail). But its def has no `<sustain>True</sustain>`, so the engine refuses to drive it as a Sustainer. Always check the def XML, don't go by the name.
