@@ -143,7 +143,32 @@ export interface LoreEntry {
   topic: LoreTopic;
   /** ISO date this entry was last written. Repo entries pull this from frontmatter. */
   updatedAt?: string;
+  /**
+   * Identifier of the model active when this entry was last written, in
+   * `provider:modelId` form (e.g. `anthropic:claude-opus-4-7`). Parsed
+   * from the trailing `<sub>` footer. Undefined for repo-tier entries
+   * (no footer) and for user entries written before this stamp existed.
+   */
+  clientModel?: string;
 }
+
+/**
+ * Format `settings.model` as a `provider:modelId` stamp. Null when no
+ * model is selected (first launch before model picker has been touched).
+ */
+function activeModelTag(): string | null {
+  const { model } = loadSettings();
+  return model ? `${model.provider}:${model.modelId}` : null;
+}
+
+/**
+ * Matches the auto-generated footer `saveEntry` writes:
+ *   <sub>updated YYYY-MM-DD</sub>
+ *   <sub>updated YYYY-MM-DD · provider:modelId</sub>
+ * Capturing groups: 1 = date, 2 = model tag (may be undefined).
+ */
+const SUB_FOOTER_RE =
+  /<sub>updated (\d{4}-\d{2}-\d{2})(?: · ([^<]+?))?<\/sub>\s*$/;
 
 export interface LoreTopicFile {
   tier: LoreTier;
@@ -214,6 +239,23 @@ export function topicFile(tier: LoreTier, topic: LoreTopic): LoreTopicFile {
  * shouldn't be authoring preamble, but hand-written repo files may
  * legitimately have an intro paragraph.
  */
+function finalizeEntry(
+  current: { hook: string; lines: string[] },
+  tier: LoreTier,
+  topic: LoreTopic,
+): LoreEntry {
+  const markdown = current.lines.join('\n').trimEnd();
+  const m = markdown.match(SUB_FOOTER_RE);
+  return {
+    hook: current.hook,
+    markdown,
+    tier,
+    topic,
+    updatedAt: m?.[1],
+    clientModel: m?.[2]?.trim() || undefined,
+  };
+}
+
 function splitEntries(md: string, tier: LoreTier, topic: LoreTopic): LoreEntry[] {
   const lines = md.split('\n');
   const entries: LoreEntry[] = [];
@@ -221,27 +263,13 @@ function splitEntries(md: string, tier: LoreTier, topic: LoreTopic): LoreEntry[]
   for (const line of lines) {
     const m = line.match(/^##\s+(.+?)\s*$/);
     if (m) {
-      if (current) {
-        entries.push({
-          hook: current.hook,
-          markdown: current.lines.join('\n').trimEnd(),
-          tier,
-          topic,
-        });
-      }
+      if (current) entries.push(finalizeEntry(current, tier, topic));
       current = { hook: m[1].trim(), lines: [line] };
     } else if (current) {
       current.lines.push(line);
     }
   }
-  if (current) {
-    entries.push({
-      hook: current.hook,
-      markdown: current.lines.join('\n').trimEnd(),
-      tier,
-      topic,
-    });
-  }
+  if (current) entries.push(finalizeEntry(current, tier, topic));
   return entries;
 }
 
@@ -342,9 +370,11 @@ export async function saveEntry(input: SaveLoreInput): Promise<{
 
   const trimmedBody = input.markdown.trim();
   const stamp = new Date().toISOString().slice(0, 10);
-  const entryBlock =
-    `## ${cleanedHook}\n\n${trimmedBody}\n\n` +
-    `<sub>updated ${stamp}</sub>\n`;
+  const modelTag = activeModelTag();
+  const footer = modelTag
+    ? `<sub>updated ${stamp} · ${modelTag}</sub>`
+    : `<sub>updated ${stamp}</sub>`;
+  const entryBlock = `## ${cleanedHook}\n\n${trimmedBody}\n\n${footer}\n`;
 
   const { path: file } = topicFile('user', topic);
   await fsp.mkdir(path.dirname(file), { recursive: true });

@@ -38,6 +38,11 @@ async function pushUserLore(deviceId: string): Promise<number> {
     topic: e.topic,
     hook: e.hook,
     markdown: e.markdown,
+    // Per-entry authoring attribution, parsed from the `<sub>` footer
+    // `saveEntry` writes. Null for entries authored before the stamp
+    // existed — those have to be re-verified from scratch by the
+    // lore-review skill.
+    client_model: e.clientModel ?? null,
   }));
   const res = await fetch(`${SUPABASE_URL}/rest/v1/lore_submissions`, {
     method: 'POST',
