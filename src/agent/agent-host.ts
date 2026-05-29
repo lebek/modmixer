@@ -302,9 +302,18 @@ function providerLabel(provider: string): string {
  * OAuth providers (claude-3-haiku from 2024, gpt-4-turbo, etc.) — most aren't
  * what someone picking "an AI to write RimWorld mods" wants. The picker shows
  * only the IDs listed here. Update when new flagships ship.
+ *
+ * `claude-opus-4-8` isn't in our pinned pi-ai catalog yet (newest built-in is
+ * 4-7), so it's bridged in via BRIDGE_MODELS / seedBridgeModels() below. Drop
+ * that bridge once pi-ai ships the built-in entry.
  */
 const FEATURED_MODELS: Record<string, string[]> = {
-  anthropic: ['claude-opus-4-7', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
+  anthropic: [
+    'claude-opus-4-8',
+    'claude-opus-4-7',
+    'claude-sonnet-4-6',
+    'claude-haiku-4-5',
+  ],
   'openai-codex': ['gpt-5.5', 'gpt-5.4', 'gpt-5.3-codex'],
   'github-copilot': [
     'claude-opus-4.7',
@@ -347,6 +356,7 @@ const DEFAULT_MODEL: Record<string, string> = {
  */
 const MODEL_COST_TIER: Record<string, '$' | '$$' | '$$$'> = {
   // Anthropic
+  'claude-opus-4-8': '$$$',
   'claude-opus-4-7': '$$$',
   'claude-sonnet-4-6': '$$',
   'claude-haiku-4-5': '$',
@@ -364,6 +374,77 @@ const MODEL_COST_TIER: Record<string, '$' | '$$' | '$$$'> = {
   'gemini-2.5-pro': '$$',
   'gemini-2.5-flash': '$',
 };
+
+/**
+ * Models we surface before pi-ai's catalog ships a built-in entry for them.
+ * ModelRegistry merges custom models from models.json by provider+id (custom
+ * wins, built-ins otherwise preserved), so seeding here adds the model without
+ * touching Anthropic's built-in models or its Pro/Max OAuth wiring — which a
+ * `registerProvider('anthropic', …)` call would wipe (full replacement).
+ *
+ * Specs verified against Anthropic's docs (May 2026): claude-opus-4-8 matches
+ * 4.7 — 1M-token context (no beta header), 128k max output, adaptive thinking,
+ * vision, $5/$25 per Mtok with 90% cache-read / 1.25x cache-write. `api` and
+ * `baseUrl` are omitted: for a built-in provider, parseModels() inherits them
+ * from the provider's built-in defaults (anthropic-messages, api.anthropic.com).
+ *
+ * Remove an entry once the pinned pi-ai release includes it as a built-in.
+ */
+const BRIDGE_MODELS: Record<string, Array<Record<string, unknown>>> = {
+  anthropic: [
+    {
+      id: 'claude-opus-4-8',
+      name: 'Claude Opus 4.8',
+      reasoning: true,
+      input: ['text', 'image'],
+      cost: { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
+      contextWindow: 1_000_000,
+      maxTokens: 128_000,
+    },
+  ],
+};
+
+/**
+ * Idempotently merge BRIDGE_MODELS into the user's models.json so the registry
+ * picks them up on load/refresh. Only adds entries that are missing by
+ * provider+id — never edits or removes anything the user (or pi's /models) put
+ * there. Bad JSON is left untouched so we don't clobber user data; the registry
+ * surfaces parse errors of its own accord.
+ */
+function seedBridgeModels(modelsJsonPath: string): void {
+  try {
+    let config: {
+      providers?: Record<string, { models?: Array<{ id?: string }> }>;
+    } = {};
+    if (fs.existsSync(modelsJsonPath)) {
+      try {
+        config = JSON.parse(fs.readFileSync(modelsJsonPath, 'utf8'));
+      } catch {
+        // Malformed file — leave it for the user/registry to surface, don't
+        // overwrite their content.
+        return;
+      }
+    }
+    const providers = (config.providers ??= {});
+    let changed = false;
+    for (const [provider, models] of Object.entries(BRIDGE_MODELS)) {
+      const entry = (providers[provider] ??= {});
+      const list = (entry.models ??= []);
+      for (const model of models) {
+        if (!list.some((m) => m.id === model.id)) {
+          list.push(model as { id?: string });
+          changed = true;
+        }
+      }
+    }
+    if (changed) {
+      fs.mkdirSync(path.dirname(modelsJsonPath), { recursive: true });
+      fs.writeFileSync(modelsJsonPath, JSON.stringify(config, null, 2));
+    }
+  } catch (err) {
+    console.error('seedBridgeModels failed:', err);
+  }
+}
 
 export interface OpenRouterConfig {
   /** True when an API key is persisted in encrypted AuthStorage. */
@@ -569,10 +650,9 @@ export class AgentHost {
         path.join(this.agentDir, 'auth.json'),
       ),
     );
-    this.modelRegistry = ModelRegistry.create(
-      this.authStorage,
-      path.join(this.agentDir, 'models.json'),
-    );
+    const modelsJsonPath = path.join(this.agentDir, 'models.json');
+    seedBridgeModels(modelsJsonPath);
+    this.modelRegistry = ModelRegistry.create(this.authStorage, modelsJsonPath);
     this.settingsManager = SettingsManager.create(this.cwd, this.agentDir);
     // Custom tools are rebuilt per session in constructSession — their
     // closures bind to one specific conversation's scope/model. Here we only
