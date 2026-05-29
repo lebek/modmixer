@@ -200,7 +200,7 @@ async function main() {
   // skips the create entirely — they just upload assets to it. Final
   // edit-step at the end of this script flips draft → published.
   section(`pre-creating draft release ${tag}`);
-  run('gh', [
+  const created = tryCapture('gh', [
     'release',
     'create',
     tag,
@@ -212,6 +212,32 @@ async function main() {
     '--notes-file',
     notesFile,
   ]);
+  if (!created.ok) {
+    // The tag push above already triggered the workflow, whose PublisherGithub
+    // may have created the release first — `gh release create` then fails with
+    // 422 already_exists. That's harmless: the release exists either way, CI
+    // uploads assets to it, and the publish step below sets notes + flips it
+    // live. Only abort if the release genuinely isn't there.
+    const exists = tryCapture('gh', [
+      'release',
+      'view',
+      tag,
+      '--repo',
+      REPO,
+      '--json',
+      'tagName',
+    ]);
+    if (exists.ok) {
+      console.log(
+        `release ${tag} already exists (CI publisher won the race) — continuing.`,
+      );
+    } else {
+      console.error(
+        `error: failed to create release ${tag} and it does not exist:\n${created.stderr}`,
+      );
+      process.exit(1);
+    }
+  }
 
   // ---- find + watch the workflow run ----
   section('finding workflow run');
