@@ -127,7 +127,11 @@ const TRUNCATION_RECOVERY_PROMPT =
  * bash tool is constructed with a cwd, so it lives inside the host instead
  * of at module scope.
  */
-function buildCustomTools(
+// Exported so the headless verification harness (scripts/harness/) can build
+// the EXACT same tool set the live app uses, then wrap the side-effecting
+// ones with stubs. Keep this the single source of truth for the tool list —
+// the harness reuses it rather than maintaining a parallel copy that drifts.
+export function buildCustomTools(
   cwd: string,
   conversationId: string,
   getActiveScope: () => ConversationScope | null,
@@ -509,7 +513,7 @@ function getDefaultSessionDir(cwd: string, agentDir: string): string {
 }
 
 /** Inlined from pi-coding-agent (also not re-exported in 0.70.6). */
-function toolDefinitionFromAgentTool(
+export function toolDefinitionFromAgentTool(
   tool: AgentTool<any>,
 ): ToolDefinition<any, unknown> {
   return {

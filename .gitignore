@@ -109,3 +109,6 @@ bin/
 obj/
 *.pdb
 .tmp/
+
+# headless verification harness build output
+scripts/harness/.out/
