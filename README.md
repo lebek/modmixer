@@ -28,150 +28,96 @@ It's also useful if you do write code — the agent does the boring parts
 (scaffolding, def-graph lookups, log triage) so you can focus on the
 interesting design decisions.
 
-## Also a mod manager
+## Getting started
 
-Even if you never ask the agent to build anything, Modmixer works as a
-standalone mod manager. Browse your Workshop and local mods side-by-side,
-toggle active/inactive, autosort load order, and enable a mod with its
-dependencies in one click.
+1. Install Modmixer from [modmixer.com](https://modmixer.com).
+2. Run Modmixer. It walks you through setup, including connecting an AI
+   model. Modmixer needs a model such as ChatGPT or Claude to build your
+   mods. See [Choosing an AI Provider](https://modmixer.com/docs).
+3. Once you're set up, read on.
 
-## Status
+## Building your first mod
 
-Early. Expect rough edges. Issues and PRs welcome.
+### Create a new project
 
-## Install
+1. Launch Modmixer
+2. From the Home screen click "+ New Mod"
 
-Pre-built releases (Windows, macOS, Linux) live at
-<https://github.com/lebek/modmixer/releases>.
+Once your new project opens, Modmixer starts the conversation.
 
-## Build from source
+### Chat with Modmixer
 
-Requires Node.js 22+ and npm. (The test runner relies on Node's built-in
-glob support in `--test`, added in 22.)
+Chat is the heart of Modmixer. Building a mod is a lot like talking to
+ChatGPT, except Modmixer can also write code and control RimWorld to help
+you build and test mods.
 
-```sh
-git clone --recurse-submodules https://github.com/lebek/modmixer.git
-cd modmixer
-npm ci
-npm start
-```
+When you first create a mod, Modmixer will ask you "What's your mod idea?".
+Your answer to this can be something simple, like "Add a new type of sword
+to RimWorld". Modmixer will ask questions about your idea until it has
+enough detail to turn it into a working mod. It will usually present a plan
+for you to approve before moving forward. Read it carefully and check you're
+happy with everything before saying yes. The next step takes a few minutes,
+so it's better to get the plan right from the start.
 
-The `vendor/pi-mono` submodule provides the agent runtime
-([badlogic/pi-mono](https://github.com/badlogic/pi-mono)). If you cloned
-without `--recurse-submodules`, run `git submodule update --init` first.
+### Watch Modmixer build your mod
 
-Other useful scripts:
+After you approve the plan, Modmixer gets to work building your mod! Usually
+this takes a few minutes. During this time you'll see a message in the chat
+every time Modmixer reads a file or writes some code. All of this is
+automatic and you don't need to do anything. It's ok if these messages look
+a bit confusing. You'll start to understand what they mean as you get more
+experienced with Modmixer.
 
-```sh
-npm run lint        # eslint
-npm run typecheck   # tsc --noEmit
-npm test            # tsx test runner
-npm run package     # build an unsigned local app bundle
-npm run make        # build platform installers (.dmg, .exe, .deb, ...)
-```
+Just like a person, sometimes Modmixer makes a mistake, and you'll see it
+try to recover. This is a normal part of the process and nothing to worry
+about.
 
-### ilspycmd (dev only)
+Eventually Modmixer will finish, and ask if you're ready to test. When you
+say "yes", it will automatically launch RimWorld, with your new mod
+installed. It's time to test!
 
-The agent's C# index decompiles RimWorld's assemblies on first run so
-tools like `search_source` and `read_csharp_symbol` can answer Verse-API
-questions. The packaged release bundles a vendored ilspycmd binary, so
-**end users running a pre-built installer don't need to do anything**.
+### Test your mod
 
-When running from source (`npm start`), you need ilspycmd on PATH.
-Install it once per machine:
+Testing is the most important part of building a mod. Modmixer can write
+code, it can fix bugs, it can even launch your mod in RimWorld, but it can't
+test it. Only you can check the mod does what it's supposed to. When you're
+testing you might find:
 
-1. Install the .NET 8 SDK
-   ([download](https://dotnet.microsoft.com/download), or
-   `winget install Microsoft.DotNet.SDK.8` on Windows,
-   `brew install --cask dotnet-sdk` on macOS).
-2. Install ilspycmd as a global dotnet tool:
+- It doesn't do exactly what you imagined
+- It works but you have an idea to make it even better
+- It has a bug
+- RimWorld is running slower
 
-   ```sh
-   dotnet tool install -g ilspycmd --version 9.1.0.7988
-   ```
+Come back to the Modmixer chat and explain the issue or what you want to
+change. Just like before, Modmixer will work for a few minutes to make
+changes, and eventually ask you to retest.
 
-   Pin to `9.1.0.7988` — the current `10.x` packages on nuget ship a
-   broken `DotnetToolSettings.xml` and won't install.
+Modmixer also monitors RimWorld for errors while you're testing. It does
+this using a special "Modmixer Bridge" mod (so don't be concerned if you see
+this in the modlist). When Modmixer detects an error, it will send you a
+notification and start fixing it automatically. When it's done it will ask
+if it can relaunch RimWorld for you.
 
-If ilspycmd isn't found at startup, the index modal surfaces an error
-and the agent's C# tools won't work; the rest of the app (def search,
-scaffolding without C#, log triage) still functions.
+### Keep building
 
-## Architecture
+At this point you've built a mod with chat, tested it, and made changes.
+This is how you'll spend the vast majority of your time in Modmixer. As you
+get more experienced you'll learn how to talk to Modmixer to get even better
+results.
 
-- `src/main.ts` — Electron main process, IPC, window lifecycle.
-- `src/agent/` — agent host, tool implementations, Workshop integration,
-  Player.log watcher, mod scaffolding, settings, telemetry.
-- `src/components/` — React renderer (chat panel, build view, def graph,
-  monitor, settings).
-- `vendor/modmixer-bridge/` — small RimWorld mod (C#, HarmonyLib) that
-  streams diagnostics to the app over localhost TCP. Built separately and
-  shipped as a Workshop mod.
+When you're ready to share your mod on Steam Workshop, head over to
+[Publishing Your Mod](https://modmixer.com/docs).
 
-## Telemetry & privacy
+## Learn more
 
-Modmixer can send a small amount of anonymous usage data and crash reports.
-This section documents exactly what.
+Full documentation lives at [modmixer.com/docs](https://modmixer.com/docs),
+including:
 
-**You can disable both at any time** in Settings → "Help improve modmixer".
-Toggling takes effect immediately, no relaunch required.
-
-### What is sent
-
-- **Product analytics** (PostHog), when opted in. Three events, no
-  payloads: `app_started`, `mod_created`, `mod_published`. Your app
-  version and OS are attached once as profile properties — not on every
-  event.
-- **Crash reports** (Sentry), when a build-time DSN is configured. Stack
-  traces, breadcrumbs, and error messages are passed through a scrubber
-  that replaces home directory paths (`/Users/<name>`, `C:\Users\<name>`,
-  `/home/<name>`) with `/<user>` so your Steam id and username don't
-  leak. Scrubbing is best-effort — see "Caveats" below.
-
-### What is *not* sent
-
-- Prompt text, model output, full file contents, or any user-authored
-  code.
-- Email, account info, OAuth tokens.
-- IP address is not stored on the event (`sendDefaultPii: false` plus an
-  explicit drop). Sentry's servers necessarily see the source IP of the
-  HTTPS request itself — that's standard Sentry behaviour, not data
-  Modmixer attaches.
-- Per-event app version and OS — those are attached once as profile
-  properties on PostHog, not on every event.
-
-### Caveats
-
-Crash reports are necessarily messy. Scrubbing covers the common
-PII-shaped patterns but can't guarantee zero leakage:
-
-- A mod folder name embedded in a thrown error (e.g. `failed to parse
-  Defs/MyMod/Things.xml`) will appear in Sentry. The folder name is
-  yours, not the user's, and is usually already public on Workshop.
-- A bug in third-party code may put unexpected strings in stack frames
-  or breadcrumb payloads that the scrubber doesn't recognize.
-
-If this is a concern, leave crash reports off in Settings.
-
-### Self-built / forks
-
-If you build Modmixer yourself without setting `SENTRY_DSN` and `POSTHOG_KEY`
-at build time, both clients short-circuit and no network calls are made.
-
-Source of truth: [`src/agent/telemetry.ts`](src/agent/telemetry.ts) and
-[`src/agent/sentry.ts`](src/agent/sentry.ts).
-
-## OAuth tokens
-
-Modmixer can sign you in to AI providers (Anthropic, OpenAI, Google) via
-OAuth. Tokens are stored encrypted on disk using Electron `safeStorage`,
-which is backed by:
-
-- macOS — Keychain
-- Windows — DPAPI
-- Linux — libsecret (kwallet / gnome-keyring)
-
-See [`src/agent/security/secure-auth-storage.ts`](src/agent/security/secure-auth-storage.ts).
+- Choosing an AI provider
+- Adding images & sounds
+- Publishing your mod
+- Adding dependencies & mod compatibility
+- Pro tips and FAQ
 
 ## License
 
