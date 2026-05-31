@@ -81,8 +81,36 @@ Stream the script's output so the user sees build progress.
 ## 6. Report
 
 When the script finishes:
-- **Success**: print the final release URL the script logged.
-- **Failure**: tell the user which step failed (preflight / build / notes edit) and link the relevant URL. Don't try to fix it automatically — the user decides whether to revert, retry, or hand-edit the release.
+- **Success**: print the final release URL the script logged, then produce the Discord announcement (step 7).
+- **Failure**: tell the user which step failed (preflight / build / notes edit) and link the relevant URL. Don't try to fix it automatically — the user decides whether to revert, retry, or hand-edit the release. Skip step 7.
+
+## 7. Discord announcement (on success)
+
+Always end a successful release with a copy-paste Discord post. Render it inside a fenced code block so the user can copy the raw text in one go.
+
+Derive it from the curated release notes (step 3), condensed for a chat audience:
+
+````
+```
+**Modmixer v<X.Y.Z> is out**
+
+**Added**
+- ...
+
+**Changed**
+- ...
+
+**Fixed**
+- ...
+```
+````
+
+Rules:
+- Always write the brand as **Modmixer** (never "ModMixer").
+- Use Discord markdown: `**bold**` section headers, `-` bullets. Only include sections that have content.
+- Tighten the prose further than the changelog — one short line per bullet, friendly tone. Collapse minor bullets if the list runs long.
+- No emojis unless the user asks for them.
+- No download link.
 
 ## Notes on edge cases
 
