@@ -73,6 +73,8 @@ const api = {
     invoke('modmixer:settings:set-thinking-level', level),
   setMultiChat: (enabled: boolean) =>
     invoke('modmixer:settings:set-multi-chat', enabled),
+  setAutoLaunch: (enabled: boolean) =>
+    invoke('modmixer:settings:set-auto-launch', enabled),
   setCommunityLore: (enabled: boolean) =>
     invoke('modmixer:settings:set-community-lore', enabled),
   listModels: () => invoke('modmixer:models:list'),

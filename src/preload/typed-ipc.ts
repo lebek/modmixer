@@ -155,6 +155,7 @@ export interface Channels {
   'modmixer:settings:set-thinking-level': (level: ThinkingLevel) => Settings;
   'modmixer:settings:set-multi-chat': (enabled: boolean) => Settings;
   'modmixer:settings:set-community-lore': (enabled: boolean) => Settings;
+  'modmixer:settings:set-auto-launch': (enabled: boolean) => Settings;
   'modmixer:models:list': () => ModelOption[];
 
   // Conversations

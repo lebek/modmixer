@@ -22,12 +22,6 @@ const Params = Type.Object({
         'When true (default), the debug action palette opens on game load. Set to false for UI mods or passive effects with no palette trigger.',
     }),
   ),
-  quitIfRunning: Type.Optional(
-    Type.Boolean({
-      description:
-        "When true, force-quit any running RimWorld process before launching. Default false: if RimWorld is running, the macro returns early so the agent can ask the user (they may have unsaved progress). Re-call with quitIfRunning=true after explicit user confirmation.",
-    }),
-  ),
   quicktest: Type.Optional(
     Type.Boolean({
       description:
@@ -49,8 +43,6 @@ const Params = Type.Object({
 });
 
 interface RunTestCycleDetails {
-  /** True when the macro had to bail because RimWorld was running and quitIfRunning was not set. */
-  needsQuitConfirmation: boolean;
   /** Whether the running RimWorld was force-quit and whether it actually exited. */
   quit: { wasRunning: boolean; killed: boolean; exited: boolean } | null;
   /** Prefs.xml mutation result; null when Prefs.xml doesn't exist yet. */
@@ -71,11 +63,11 @@ interface RunTestCycleDetails {
  * is-running → quit? → prepare-prefs → ship → launch → watch chain so the
  * agent doesn't have to orchestrate it turn-by-turn.
  *
- * Quit guarding: if RimWorld is running, the macro bails with
- * needsQuitConfirmation=true UNLESS the caller passed quitIfRunning=true.
- * The agent is expected to ask the user before destroying their unsaved
- * game progress; a "yes" round-trip + retry with quitIfRunning=true keeps
- * that consent boundary explicit.
+ * Quit handling: if RimWorld is already running, the macro force-quits it
+ * and relaunches — no confirmation. Modmixer users are mod-testing, so there
+ * is no save worth preserving; asking would just add friction. Whether a
+ * launch happens at all is governed upstream by the user's launch-mode
+ * setting (baked into the system prompt), not here.
  *
  * Built per conversation: `conversationId` is captured so the background
  * bridge monitor this arms is bound to the chat that launched the test,
@@ -90,33 +82,18 @@ export function createRunTestCycleTool(
     name: 'run_test_cycle',
     label: 'Run test cycle (build + launch + watch)',
     description:
-      "Macro: the only way to test a mod in-game. Handles the entire flow in one call — checks if RimWorld is running, flips dev-mode + pins palette entries in Prefs.xml, syncs the mod into RimWorld's Mods/, installs the Modmixer Bridge mod (Harmony-patched diagnostics over localhost TCP), writes an active-mod list (Core + DLCs + target + transitive deps + any companionMods + bridge) to a separate savedata folder by default so the user's real mod list is untouched, launches RimWorld with `-quicktest`, and arms background bridge monitoring. If RimWorld is running and quitIfRunning is unset, bails with needsQuitConfirmation=true so you can ask the user before killing their game; re-call with quitIfRunning=true once they confirm. After this returns, tell the user EXACTLY what to do in-game (they're about to alt-tab) — errors will arrive automatically as '[automated …]' messages via the standard error-triage protocol.",
+      "Macro: the only way to test a mod in-game. Handles the entire flow in one call — flips dev-mode + pins palette entries in Prefs.xml, syncs the mod into RimWorld's Mods/, installs the Modmixer Bridge mod (Harmony-patched diagnostics over localhost TCP), writes an active-mod list (Core + DLCs + target + transitive deps + any companionMods + bridge) to a separate savedata folder by default so the user's real mod list is untouched, launches RimWorld with `-quicktest`, and arms background bridge monitoring. If RimWorld is already running it's force-quit and relaunched automatically — never ask about unsaved progress (Modmixer users are mod-testing; saves don't matter). After this returns, tell the user EXACTLY what to do in-game (they're about to alt-tab) — errors will arrive automatically as '[automated …]' messages via the standard error-triage protocol.",
     parameters: Params,
     async execute(_id, params): Promise<AgentToolResult<RunTestCycleDetails>> {
       const lines: string[] = [];
 
-      // 1. RimWorld-running guard. If running and the user hasn't authorized a
-      //    quit, bail with a clear message so the agent asks first instead of
-      //    silently destroying the user's session.
+      // 1. RimWorld-running guard. Always force-quit a running instance before
+      //    relaunching — no confirmation. Modmixer users are mod-testing, so
+      //    there's no save worth preserving. (Whether we launch at all is
+      //    gated upstream by the user's launch-mode setting, not here.) The
+      //    two early returns below are genuine failures, not consent.
       let quitResult: RunTestCycleDetails['quit'] = null;
       if (await isRimWorldRunning()) {
-        if (!params.quitIfRunning) {
-          return {
-            content: [
-              {
-                type: 'text',
-                text: 'RimWorld is currently running. Ask the user whether to quit it (they may have unsaved progress), then re-call run_test_cycle with quitIfRunning=true.',
-              },
-            ],
-            details: {
-              needsQuitConfirmation: true,
-              quit: null,
-              prefs: null,
-              launch: null,
-              watching: false,
-            },
-          };
-        }
         const { killed, exited } = await quitRimWorld();
         quitResult = { wasRunning: true, killed, exited };
         if (!killed) {
@@ -128,7 +105,6 @@ export function createRunTestCycleTool(
               },
             ],
             details: {
-              needsQuitConfirmation: false,
               quit: quitResult,
               prefs: null,
               launch: null,
@@ -145,7 +121,6 @@ export function createRunTestCycleTool(
               },
             ],
             details: {
-              needsQuitConfirmation: false,
               quit: quitResult,
               prefs: null,
               launch: null,
@@ -226,7 +201,6 @@ export function createRunTestCycleTool(
       return {
         content: [{ type: 'text', text: lines.join(' ') }],
         details: {
-          needsQuitConfirmation: false,
           quit: quitResult,
           prefs: {
             skipped: prefs.skipped,

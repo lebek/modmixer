@@ -2,6 +2,7 @@ import { Type } from 'typebox';
 import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
 import { writeSchematic } from '../schematic.js';
 import { emitModChanged } from '../mod-events.js';
+import { launchModeHint } from '../launch-mode.js';
 
 const Params = Type.Object({
   folder: Type.String({
@@ -53,7 +54,7 @@ export const updateSchematicTool: AgentTool<typeof Params, UpdateSchematicDetail
       content: [
         {
           type: 'text',
-          text: `Updated schematic for ${folder} (${fields.join(', ')}). The Schematic panel reflects this now.`,
+          text: `Updated schematic for ${folder} (${fields.join(', ')}). The Schematic panel reflects this now.${launchModeHint()}`,
         },
       ],
       details: { folder, fields },

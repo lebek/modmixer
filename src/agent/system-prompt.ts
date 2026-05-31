@@ -17,13 +17,17 @@ interface PromptContext {
   workshopDir: string | null;
   defaultAuthor: string;
   gameVersion: string | null;
+  autoLaunch: boolean;
 }
 
 // Cache the bits of context that don't change across a process lifetime.
 // `gameVersion` reads ModsConfig.xml from disk synchronously; the workspace
 // + RimWorld path resolution touches the filesystem too. The user can change
-// `defaultAuthor` and `rimworldInstallOverride` mid-session, so paths +
-// settings re-read each time and only `gameVersion` is memoized.
+// `defaultAuthor`, `rimworldInstallOverride`, and `autoLaunch` mid-session, so
+// paths + settings re-read each time and only `gameVersion` is memoized.
+// Whatever these hold when the prompt is composed is frozen into the
+// conversation (see buildSystemPrompt's invariant) — which is exactly why
+// `autoLaunch` applies to new chats only.
 let cachedGameVersion: { value: string | null } | null = null;
 
 function gatherContext(): PromptContext {
@@ -41,6 +45,7 @@ function gatherContext(): PromptContext {
     workshopDir: rw.workshopDir,
     defaultAuthor: loadSettings().defaultAuthor,
     gameVersion: cachedGameVersion.value,
+    autoLaunch: loadSettings().autoLaunch,
   };
 }
 
@@ -211,10 +216,9 @@ Image generation: only two tools are bundled — imagemagick, inkscape, python/P
 - render_preview — for the Workshop preview. Scan Textures/ for the largest representative sprite (omit spritePath if XML-only), default to the 'classic' template + 'rimworld' font + tone-matched background, write to "${modFolder}/About/Preview.png". Parameter descriptions cover template/font/effect picks.
 
 Test-in-game flow when the user wants to run their mod:
-1. Call run_test_cycle folder="${modFolder}". This single tool runs the entire chain: dev-mode prefs + palette pin + bridge install + ship + launch + bridge monitor. Pin a palette entry when there's a one-click trigger (e.g. "Actions\\Do incident\\YourIncidentDef"); otherwise pass autoOpenPalette=false. Default isolated=true and quicktest=true; override only when the test needs the user's full mod list or the menus, and say one line about why.
-2. If the macro returns needsQuitConfirmation=true, RimWorld is running — ASK the user before re-calling with quitIfRunning=true (they may have unsaved progress).
-3. Once launched, in one short paragraph tell the user EXACTLY what to do in-game. They're about to alt-tab — be specific.
-4. Your turn ends after run_test_cycle returns. If errors arrive you'll be auto-prompted via a "[automated …]" user message — see the error-triage protocol below. Otherwise the user will message you when they're done.
+1. Call run_test_cycle folder="${modFolder}". This single tool runs the entire chain: dev-mode prefs + palette pin + bridge install + ship + launch + bridge monitor. If RimWorld is already running it's force-quit and relaunched automatically — never ask the user about unsaved progress; they're mod-testing and saves don't matter. Pin a palette entry when there's a one-click trigger (e.g. "Actions\\Do incident\\YourIncidentDef"); otherwise pass autoOpenPalette=false. Default isolated=true and quicktest=true; override only when the test needs the user's full mod list or the menus, and say one line about why.
+2. Once launched, in one short paragraph tell the user EXACTLY what to do in-game. They're about to alt-tab — be specific.
+3. Your turn ends after run_test_cycle returns. If errors arrive you'll be auto-prompted via a "[automated …]" user message — see the error-triage protocol below. Otherwise the user will message you when they're done.
 
 Error-triage protocol (when an "[automated …]" user message lands):
 The auto-prompt is headed "[automated — test run #N: …]" and lists error classes from the in-game bridge mod. Each row is one error class: a ×count, severity (error/warning), bracketed attribution (the mods identified from the stack frames, e.g. [RimWorld] for vanilla, [${modIdentity.name}] for this mod, or [SomeOtherMod, Harmony]), a [#xxxxxxxx] hash tag, and the message first-line. Stack traces and full text are NOT inlined — info-level Log.Message is filtered out before sending, and unrelated mods' single-occurrence warnings are filtered too, so every row is signal.
@@ -254,7 +258,11 @@ Build → launch loop for code changes:
 2. If green, run the test-in-game flow above.
 3. If red, fix the compile errors and rebuild.
 
-Auto-test rule: don't run run_test_cycle silently. Confirm with the user first ("Want me to test this in the game?"). Once confirmed, the macro runs end-to-end including monitoring.`;
+${
+    ctx.autoLaunch
+      ? 'Launch mode — proactive: the user opted into automatic testing. After a green build (or whenever a change is ready to try), go straight to run_test_cycle without asking permission. The macro runs end-to-end including monitoring.'
+      : 'Launch mode — ask first: never run run_test_cycle silently. Confirm with the user first ("Want me to test this in the game?"), and tell them either path works — they can reply here OR press the Launch button in the top bar. Once they confirm (or press Launch), the macro runs end-to-end including monitoring.'
+  }`;
 }
 
 const NEW_MOD_BLOCK = `Active scope: helping the user create a new mod.

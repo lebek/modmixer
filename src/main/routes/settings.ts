@@ -65,6 +65,14 @@ export function registerSettingsRoutes(ctx: RouteContext): void {
   );
 
   ipc.handle(
+    'modmixer:settings:set-auto-launch',
+    // New-chats-only: takes effect for chats created after this point, since
+    // the launch mode is baked into the system prompt at conversation
+    // creation. Existing chats keep their mode.
+    (_evt, enabled: boolean) => saveSettings({ autoLaunch: enabled }),
+  );
+
+  ipc.handle(
     'modmixer:settings:set-community-lore',
     async (_evt, enabled: boolean) => {
       const before = loadSettings().useCommunityLore;

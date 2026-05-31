@@ -41,6 +41,7 @@ export function AppSettingsDialog({
     useState<ThinkingLevel>('medium');
   const [multiChat, setMultiChat] = useState(false);
   const [communityLore, setCommunityLore] = useState(false);
+  const [autoLaunch, setAutoLaunch] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -53,6 +54,7 @@ export function AppSettingsDialog({
       setDefaultThinking(s.thinkingLevel);
       setMultiChat(s.multiChat);
       setCommunityLore(s.useCommunityLore);
+      setAutoLaunch(s.autoLaunch);
       setLoaded(true);
     });
     void window.modmixer.listModels().then(setModelOptions);
@@ -93,6 +95,11 @@ export function AppSettingsDialog({
   const changeCommunityLore = async (next: boolean) => {
     setCommunityLore(next);
     await window.modmixer.setCommunityLore(next);
+  };
+
+  const changeAutoLaunch = async (next: boolean) => {
+    setAutoLaunch(next);
+    await window.modmixer.setAutoLaunch(next);
   };
 
   const sectionTitle =
@@ -225,6 +232,29 @@ export function AppSettingsDialog({
                         </code>
                         ).
                       </p>
+                    </div>
+
+                    <div>
+                      <label className="flex cursor-pointer items-start gap-2">
+                        <input
+                          type="checkbox"
+                          checked={autoLaunch}
+                          onChange={(e) =>
+                            void changeAutoLaunch(e.target.checked)
+                          }
+                          className="mt-0.5"
+                        />
+                        <span className="text-sm text-ink">
+                          Launch RimWorld automatically when ready to test
+                          <span className="mt-0.5 block text-xs text-muted">
+                            On: the agent launches as soon as a build is green
+                            or a change is ready to try. Off (default): it asks
+                            first — you confirm in chat or hit the Launch button
+                            up top. Applies to new chats; open chats keep the
+                            mode they started with.
+                          </span>
+                        </span>
+                      </label>
                     </div>
 
                     <div>

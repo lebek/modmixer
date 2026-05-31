@@ -11,6 +11,7 @@ import {
   type BuildErrorHint,
 } from '../build-error-hints.js';
 import { DOTNET_NOT_FOUND_MESSAGE, resolveDotnet } from '../dotnet.js';
+import { launchModeHint } from '../launch-mode.js';
 
 const Params = Type.Object({
   modFolder: Type.String({
@@ -93,7 +94,11 @@ export const buildModTool: AgentTool<typeof Params, BuildModDetails> = {
         result.stderr ? '\n--- stderr ---\n' + result.stderr : ''
       }` +
       formatFindings(lintFindings) +
-      formatHints(errorHints);
+      formatHints(errorHints) +
+      // Only on a green build: a red build's next step is fixing errors, not
+      // testing, so a launch reminder there is just noise. The hint itself is
+      // worded to NOT imply the green build means "ready to test".
+      (result.exitCode === 0 ? launchModeHint() : '');
     return {
       content: [{ type: 'text', text }],
       details: { ...result, sourceDir, lintFindings, errorHints },

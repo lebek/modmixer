@@ -161,6 +161,20 @@ export interface Settings {
    * no-op pushes when nothing has changed since the last sync.
    */
   loreLastPushedAt: string | null;
+  /**
+   * In-game test launch mode. false (default) = ask-first: the agent
+   * confirms before launching RimWorld (telling the user they can reply in
+   * chat OR press the Launch button). true = proactive: the agent launches
+   * as soon as a build is green / a change is ready to try, no prompt.
+   *
+   * Baked into each conversation's system prompt at creation, so it applies
+   * to NEW chats only — existing chats keep the mode they were born with.
+   * Same new-chats-only semantics as the default model / thinking level
+   * (see set-model / set-thinking-level). This is intentional: the prompt is
+   * a frozen, byte-stable conversation identifier (see buildSystemPrompt),
+   * so we never mutate it mid-conversation.
+   */
+  autoLaunch: boolean;
 }
 
 let cached: Settings | null = null;
@@ -185,6 +199,7 @@ function computeDefaults(): Settings {
     multiChat: false,
     useCommunityLore: true,
     loreLastPushedAt: null,
+    autoLaunch: false,
   };
 }
 
@@ -280,6 +295,9 @@ function normalize(raw: unknown, defaults: Settings): Settings {
 
   const loreLastPushedAt = readString(obj.loreLastPushedAt);
   if (loreLastPushedAt !== undefined) next.loreLastPushedAt = loreLastPushedAt;
+
+  const autoLaunch = readBool(obj.autoLaunch);
+  if (autoLaunch !== undefined) next.autoLaunch = autoLaunch;
 
   const model = readObjectShape<ModelSelection>(obj.model, {
     provider: readString,
