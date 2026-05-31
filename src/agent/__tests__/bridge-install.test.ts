@@ -29,21 +29,57 @@ interface TestEnv {
   cleanup: () => Promise<void>;
 }
 
+/**
+ * The Mods/ and Managed/ subpaths detectRimWorldPaths() resolves for an
+ * install-override root differ per platform — macOS reads them out of the
+ * .app bundle. Mirror that here so the fixture's dirs land exactly where the
+ * code looks; otherwise (e.g. on macOS) detection falls through to a real
+ * user-data path and the junction never lands in our sandbox.
+ */
+function platformInstallLayout(installDir: string): {
+  modsDir: string;
+  managedDir: string;
+} {
+  if (process.platform === 'darwin') {
+    return {
+      modsDir: path.join(installDir, 'RimWorldMac.app', 'Mods'),
+      managedDir: path.join(
+        installDir,
+        'RimWorldMac.app',
+        'Contents',
+        'Resources',
+        'Data',
+        'Managed',
+      ),
+    };
+  }
+  if (process.platform === 'win32') {
+    return {
+      modsDir: path.join(installDir, 'Mods'),
+      managedDir: path.join(installDir, 'RimWorldWin64_Data', 'Managed'),
+    };
+  }
+  return {
+    modsDir: path.join(installDir, 'Mods'),
+    managedDir: path.join(installDir, 'RimWorldLinux_Data', 'Managed'),
+  };
+}
+
 async function setupEnv(): Promise<TestEnv> {
-  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'mm-bridge-test-'));
+  // realpath() the temp root so it matches the bridge helper's realpath()
+  // output — on macOS os.tmpdir() sits under /tmp, a symlink to /private/tmp,
+  // and the source-vs-target comparison would otherwise mismatch.
+  const root = await fsp.realpath(
+    await fsp.mkdtemp(path.join(os.tmpdir(), 'mm-bridge-test-')),
+  );
   const installDir = path.join(root, 'RimWorld');
-  const managedDir = path.join(installDir, 'RimWorldWin64_Data', 'Managed');
-  const modsDir = path.join(installDir, 'Mods');
+  const { modsDir, managedDir } = platformInstallLayout(installDir);
   await fsp.mkdir(managedDir, { recursive: true });
   await fsp.mkdir(modsDir, { recursive: true });
   // Placeholder so detectExecutable() doesn't bail and detectRimWorldPaths
   // returns a usable modsDir / managedDir pair.
   await fsp.writeFile(
     path.join(managedDir, 'Assembly-CSharp.dll'),
-    'placeholder',
-  );
-  await fsp.writeFile(
-    path.join(installDir, 'RimWorldWin64.exe'),
     'placeholder',
   );
 

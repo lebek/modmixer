@@ -814,8 +814,26 @@ export class AgentHost {
         // that requires the `kimi_k2` parser; not every OpenRouter sub-provider
         // ships it, so pin to Moonshot's own infra to avoid raw tokens leaking
         // into tool-call args.
+        //
+        // supportsDeveloperRole:false — pi promotes the system prompt to the
+        // `developer` role for reasoning models, but Moonshot's own K2.6
+        // endpoint can't tokenize that role and rejects the whole request with
+        // "tokenization failed". Force the plain `system` role instead.
+        //
+        // requiresReasoningContentOnAssistantMessages:true — with thinking on,
+        // Moonshot rejects any follow-up turn whose prior assistant tool-call
+        // message lacks `reasoning_content` ("thinking is enabled but
+        // reasoning_content is missing..."). This flag makes pi stamp it (empty
+        // string is accepted), so multi-turn tool use works. Defaults true only
+        // for DeepSeek upstream; Kimi needs it too.
         ...(slug.startsWith('moonshotai/kimi-k2')
-          ? { compat: { openRouterRouting: { only: ['moonshotai'] } } }
+          ? {
+              compat: {
+                openRouterRouting: { only: ['moonshotai'] },
+                supportsDeveloperRole: false,
+                requiresReasoningContentOnAssistantMessages: true,
+              },
+            }
           : slug.startsWith('deepseek/deepseek-v4')
             ? {
                 compat: {
