@@ -12,10 +12,12 @@ import { track } from './telemetry.js';
 // RimWorld's Steam app ID. Workshop items live under this consumer/creator app.
 const RIMWORLD_APP_ID = 294100;
 
-// UgcItemVisibility from steamworks.js. We use the numeric literal so the
-// renderer/main can reference the same value without a runtime enum import
+// UgcItemVisibility from steamworks.js. We use numeric literals so the
+// renderer/main can reference the same values without a runtime enum import
 // (steamworks.js is externalized from the main bundle).
+// 0 Public · 1 FriendsOnly · 2 Private · 3 Unlisted.
 const VISIBILITY_PUBLIC = 0;
+const VISIBILITY_VALUES = new Set([0, 1, 2, 3]);
 
 // Tag every upload with "Mod" plus the supportedVersions from About.xml. RimWorld's
 // in-game uploader uses the same convention so Workshop's version filter works.
@@ -353,7 +355,16 @@ export interface PublishResult {
   agreementUrl?: string;
 }
 
-export async function publishToWorkshop(folder: string): Promise<PublishResult> {
+export async function publishToWorkshop(
+  folder: string,
+  visibility: number = VISIBILITY_PUBLIC,
+): Promise<PublishResult> {
+  // Guard a malformed value: visibility is only ever applied on the first
+  // publish (see below), so a bad number would otherwise stick permanently.
+  const itemVisibility = VISIBILITY_VALUES.has(visibility)
+    ? visibility
+    : VISIBILITY_PUBLIC;
+
   const emit = (e: Omit<PublishProgressEvent, 'folder'>) =>
     events.emit('progress', { folder, ...e });
 
@@ -447,7 +458,7 @@ export async function publishToWorkshop(folder: string): Promise<PublishResult> 
       updateDetails.title = about.name;
       updateDetails.description = about.description;
       updateDetails.tags = tags;
-      updateDetails.visibility = VISIBILITY_PUBLIC;
+      updateDetails.visibility = itemVisibility;
     }
 
     try {

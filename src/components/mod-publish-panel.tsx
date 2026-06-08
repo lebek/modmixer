@@ -10,6 +10,7 @@ import {
   UnlinkExistingControl,
 } from './mod-publish/link-controls';
 import { DangerZone } from './mod-publish/danger-zone';
+import { PublishConfirmDialog } from './mod-publish/publish-confirm-dialog';
 
 export function ModPublishPanel({
   mod,
@@ -36,6 +37,7 @@ export function ModPublishPanel({
     workshopUrlFor(mod.publishedFileId),
   );
   const [agreementUrl, setAgreementUrl] = useState<string | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   // Track the latest defaultAuthor so the sticky-detection effect doesn't
   // need it as a dep (it would otherwise re-run too often).
@@ -63,6 +65,7 @@ export function ModPublishPanel({
     setPublishedUrl(workshopUrlFor(mod.publishedFileId));
     setAgreementUrl(null);
     setProgress(null);
+    setConfirmOpen(false);
     // reseedFromAbout is stable enough for our purposes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mod.folder]);
@@ -165,7 +168,7 @@ export function ModPublishPanel({
     setExternalUpdate(false);
   };
 
-  const publish = useAsyncAction(async () => {
+  const publish = useAsyncAction(async (visibility: number) => {
     setProgress(null);
     setAgreementUrl(null);
     // Persist any pending edits so what gets uploaded matches what's on screen.
@@ -173,7 +176,7 @@ export function ModPublishPanel({
       const ok = await save.run();
       if (ok === null) return;
     }
-    const result = await window.modmixer.publishToWorkshop(mod.folder);
+    const result = await window.modmixer.publishToWorkshop(mod.folder, visibility);
     setPublishedUrl(result.url);
     if (result.agreementUrl) setAgreementUrl(result.agreementUrl);
   });
@@ -327,7 +330,7 @@ export function ModPublishPanel({
                 Open mod folder
               </button>
               <button
-                onClick={() => void publish.run()}
+                onClick={() => setConfirmOpen(true)}
                 disabled={publish.busy || !name.trim() || !description.trim()}
                 className="rounded-md bg-ink px-3 py-1 text-[10px] uppercase tracking-[0.18em] text-paper transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
               >
@@ -348,6 +351,17 @@ export function ModPublishPanel({
           />
         </div>
       </div>
+
+      <PublishConfirmDialog
+        open={confirmOpen}
+        isUpdate={isUpdate}
+        modName={name}
+        onCancel={() => setConfirmOpen(false)}
+        onConfirm={(visibility) => {
+          setConfirmOpen(false);
+          void publish.run(visibility);
+        }}
+      />
     </div>
   );
 }

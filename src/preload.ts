@@ -269,8 +269,8 @@ const api = {
   ) => on('modmixer:index:progress', handler),
 
   // Workshop
-  publishToWorkshop: (folder: string) =>
-    invoke('modmixer:workshop:publish', folder),
+  publishToWorkshop: (folder: string, visibility?: number) =>
+    invoke('modmixer:workshop:publish', folder, visibility),
   unlinkWorkshopItem: (folder: string) =>
     invoke('modmixer:workshop:unlink', folder),
   linkWorkshopItem: (folder: string, workshopId: string) =>

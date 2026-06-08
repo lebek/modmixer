@@ -324,7 +324,10 @@ export interface Channels {
   'modmixer:index:cancel': () => IndexSnapshot;
 
   // Workshop
-  'modmixer:workshop:publish': (folder: string) => PublishResult;
+  'modmixer:workshop:publish': (
+    folder: string,
+    visibility?: number,
+  ) => PublishResult;
   'modmixer:workshop:unlink': (folder: string) => WorkspaceMod | null;
   'modmixer:workshop:link': (
     folder: string,

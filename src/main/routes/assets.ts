@@ -154,13 +154,16 @@ export function registerAssetsRoutes(ctx: RouteContext): void {
     return result.filePaths[0];
   });
 
-  ipc.handle('modmixer:workshop:publish', async (_evt, folder: string) => {
-    const result = await publishToWorkshop(folder);
-    // First publish wrote About/PublishedFileId.txt — fan out so the panel
-    // re-reads `mod.publishedFileId` and shows the freshly-linked Workshop ID.
-    emitModChanged(folder);
-    return result;
-  });
+  ipc.handle(
+    'modmixer:workshop:publish',
+    async (_evt, folder: string, visibility?: number) => {
+      const result = await publishToWorkshop(folder, visibility);
+      // First publish wrote About/PublishedFileId.txt — fan out so the panel
+      // re-reads `mod.publishedFileId` and shows the freshly-linked Workshop ID.
+      emitModChanged(folder);
+      return result;
+    },
+  );
 
   ipc.handle(
     'modmixer:workshop:unlink',
