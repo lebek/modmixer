@@ -175,6 +175,17 @@ export interface Settings {
    * so we never mutate it mid-conversation.
    */
   autoLaunch: boolean;
+  /**
+   * Advanced/dangerous: when true, the confirmation gate auto-approves every
+   * sensitive agent action (file edits, deletes, shell commands, game/install
+   * changes) with no prompt. Off by default. Persists across restarts — the
+   * header shows a permanent "Permissions off" badge while it's on so an
+   * unsupervised session is never a surprise. Applied live in the main process
+   * via ConfirmationGate.setSkipPermissions, so flipping it takes effect for
+   * the next tool call without a restart (unlike the new-chats-only settings
+   * above, which are baked into the system prompt).
+   */
+  dangerouslySkipPermissions: boolean;
 }
 
 let cached: Settings | null = null;
@@ -200,6 +211,7 @@ function computeDefaults(): Settings {
     useCommunityLore: true,
     loreLastPushedAt: null,
     autoLaunch: false,
+    dangerouslySkipPermissions: false,
   };
 }
 
@@ -298,6 +310,11 @@ function normalize(raw: unknown, defaults: Settings): Settings {
 
   const autoLaunch = readBool(obj.autoLaunch);
   if (autoLaunch !== undefined) next.autoLaunch = autoLaunch;
+
+  const dangerouslySkipPermissions = readBool(obj.dangerouslySkipPermissions);
+  if (dangerouslySkipPermissions !== undefined) {
+    next.dangerouslySkipPermissions = dangerouslySkipPermissions;
+  }
 
   const model = readObjectShape<ModelSelection>(obj.model, {
     provider: readString,

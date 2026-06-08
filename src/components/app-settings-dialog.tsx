@@ -42,6 +42,7 @@ export function AppSettingsDialog({
   const [multiChat, setMultiChat] = useState(false);
   const [communityLore, setCommunityLore] = useState(false);
   const [autoLaunch, setAutoLaunch] = useState(false);
+  const [skipPermissions, setSkipPermissions] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -55,6 +56,7 @@ export function AppSettingsDialog({
       setMultiChat(s.multiChat);
       setCommunityLore(s.useCommunityLore);
       setAutoLaunch(s.autoLaunch);
+      setSkipPermissions(s.dangerouslySkipPermissions);
       setLoaded(true);
     });
     void window.modmixer.listModels().then(setModelOptions);
@@ -100,6 +102,11 @@ export function AppSettingsDialog({
   const changeAutoLaunch = async (next: boolean) => {
     setAutoLaunch(next);
     await window.modmixer.setAutoLaunch(next);
+  };
+
+  const changeSkipPermissions = async (next: boolean) => {
+    setSkipPermissions(next);
+    await window.modmixer.setDangerouslySkipPermissions(next);
   };
 
   const sectionTitle =
@@ -175,7 +182,9 @@ export function AppSettingsDialog({
               ) : (
                 <AdvancedSection
                   multiChat={multiChat}
-                  onChange={changeMultiChat}
+                  onMultiChatChange={changeMultiChat}
+                  skipPermissions={skipPermissions}
+                  onSkipPermissionsChange={changeSkipPermissions}
                 />
               ))}
             {section === 'general' && (
@@ -490,11 +499,20 @@ function AppearanceSection({
 
 function AdvancedSection({
   multiChat,
-  onChange,
+  onMultiChatChange,
+  skipPermissions,
+  onSkipPermissionsChange,
 }: {
   multiChat: boolean;
-  onChange: (next: boolean) => void | Promise<void>;
+  onMultiChatChange: (next: boolean) => void | Promise<void>;
+  skipPermissions: boolean;
+  onSkipPermissionsChange: (next: boolean) => void | Promise<void>;
 }) {
+  // Enabling the bypass is a two-step action: ticking the box opens a
+  // confirmation rather than flipping it immediately. Turning it off is one
+  // click. Local to the section so it resets when the dialog reopens.
+  const [confirming, setConfirming] = useState(false);
+
   return (
     <div className="space-y-4">
       <div>
@@ -502,7 +520,7 @@ function AdvancedSection({
           <input
             type="checkbox"
             checked={multiChat}
-            onChange={(e) => void onChange(e.target.checked)}
+            onChange={(e) => void onMultiChatChange(e.target.checked)}
             className="mt-0.5"
           />
           <span className="text-sm text-ink">
@@ -520,6 +538,76 @@ function AdvancedSection({
             Chats that run at the same time can edit the same mod files with no
             coordination — if two chats change the same code at once, one can
             overwrite the other's work. Keep parallel chats on separate tasks.
+          </div>
+        )}
+      </div>
+
+      <div className="border-t border-line pt-4">
+        <label className="flex cursor-pointer items-start gap-2">
+          <input
+            type="checkbox"
+            checked={skipPermissions}
+            onChange={(e) => {
+              if (e.target.checked) {
+                // Require an explicit confirmation before turning it on.
+                setConfirming(true);
+              } else {
+                setConfirming(false);
+                void onSkipPermissionsChange(false);
+              }
+            }}
+            className="mt-0.5"
+          />
+          <span className="text-sm text-ink">
+            Skip all permission prompts{' '}
+            <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-failed">
+              Dangerous
+            </span>
+            <span className="mt-0.5 block text-xs text-muted">
+              The agent runs every action — editing files, deleting things,
+              running shell commands, changing your RimWorld install — without
+              asking first. Saves clicks but removes the safety net. Stays on
+              across restarts until you turn it off.
+            </span>
+          </span>
+        </label>
+
+        {confirming && !skipPermissions && (
+          <div className="mt-2 space-y-2.5 rounded-md border border-failed/50 bg-failed/5 px-3 py-2.5 text-xs text-failed">
+            <p>
+              This lets the agent{' '}
+              <strong>delete files and run any shell command on your
+              computer</strong>{' '}
+              with no confirmation. Mistakes — and any instructions hidden in
+              files or web content the model reads — execute immediately. Only
+              enable this if you trust the model and the task.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirming(false)}
+                className="rounded-md border border-line bg-paper px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-muted transition-colors hover:border-ink/30 hover:text-ink"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setConfirming(false);
+                  void onSkipPermissionsChange(true);
+                }}
+                className="rounded-md border border-failed/60 bg-failed/10 px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-failed transition-colors hover:bg-failed/20"
+              >
+                Enable anyway
+              </button>
+            </div>
+          </div>
+        )}
+
+        {skipPermissions && (
+          <div className="mt-2 rounded-md border border-failed/50 bg-failed/5 px-3 py-2 text-xs text-failed">
+            Permission prompts are off. The agent can modify or delete files and
+            run shell commands without asking. Turn this off when you're done.
           </div>
         )}
       </div>

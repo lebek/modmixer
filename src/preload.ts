@@ -75,6 +75,8 @@ const api = {
     invoke('modmixer:settings:set-multi-chat', enabled),
   setAutoLaunch: (enabled: boolean) =>
     invoke('modmixer:settings:set-auto-launch', enabled),
+  setDangerouslySkipPermissions: (enabled: boolean) =>
+    invoke('modmixer:settings:set-dangerously-skip-permissions', enabled),
   setCommunityLore: (enabled: boolean) =>
     invoke('modmixer:settings:set-community-lore', enabled),
   listModels: () => invoke('modmixer:models:list'),

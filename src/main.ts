@@ -146,6 +146,10 @@ const confirmGate = initConfirmationGate(() => {
 ipcMain.on(CONFIRM_CHANNEL_RESOLVE, (_evt, payload: unknown) => {
   confirmGate.resolveFromRenderer(payload);
 });
+// Apply the persisted "dangerously skip permissions" bypass before the first
+// agent turn so it's in force from launch (the setting survives restarts). The
+// Advanced-settings toggle keeps the gate in sync live thereafter.
+confirmGate.setSkipPermissions(loadSettings().dangerouslySkipPermissions);
 const host = new AgentHost(getWindow);
 // Boot the mod registry so it's primed by the time the renderer asks for a
 // snapshot. Subscribers (renderer broadcast, agent tools) attach below.

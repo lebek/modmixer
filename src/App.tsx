@@ -54,6 +54,7 @@ export function App() {
   const [session, setSession] = useState<ActiveSession | null>(null);
   const [recoveryShown, setRecoveryShown] = useState(false);
   const [multiChat, setMultiChat] = useState(false);
+  const [skipPermissions, setSkipPermissions] = useState(false);
   // Bumped after a chat is created/archived/restored so the sidebar's chat
   // list re-fetches. The list also self-refreshes off agent events.
   const [chatListRev, setChatListRev] = useState(0);
@@ -85,14 +86,18 @@ export function App() {
     void window.modmixer.getAppVersion().then(setAppVersion);
   }, []);
 
-  // The multi-chat toggle lives in settings; re-read it whenever the settings
-  // dialog closes so flipping it takes effect without a restart.
-  const refreshMultiChat = useCallback(() => {
-    void window.modmixer.getSettings().then((s) => setMultiChat(s.multiChat));
+  // A couple of toggles live in settings and need to take effect without a
+  // restart; re-read them whenever the settings dialog closes. The skip-
+  // permissions flag also drives the header's "Permissions off" badge.
+  const refreshSettingsFlags = useCallback(() => {
+    void window.modmixer.getSettings().then((s) => {
+      setMultiChat(s.multiChat);
+      setSkipPermissions(s.dangerouslySkipPermissions);
+    });
   }, []);
   useEffect(() => {
-    refreshMultiChat();
-  }, [refreshMultiChat]);
+    refreshSettingsFlags();
+  }, [refreshSettingsFlags]);
 
   useEffect(() => {
     void refreshModels();
@@ -606,6 +611,16 @@ export function App() {
           />
         </div>
         <div className="flex shrink-0 items-center gap-3">
+          {skipPermissions && (
+            <button
+              onClick={() => openSettings('advanced')}
+              title="Permission prompts are off — the agent can edit or delete files and run shell commands without asking. Click to change."
+              className="inline-flex items-center gap-1.5 rounded-md border border-failed/50 bg-failed/10 px-2 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-failed transition-colors hover:bg-failed/20"
+            >
+              <span aria-hidden>⚠</span>
+              Permissions off
+            </button>
+          )}
           <button
             onClick={() =>
               void window.modmixer.openExternal(
@@ -705,7 +720,7 @@ export function App() {
           initialSection={settingsSection}
           onClose={() => {
             setSettingsSection(null);
-            refreshMultiChat();
+            refreshSettingsFlags();
           }}
         />
       )}

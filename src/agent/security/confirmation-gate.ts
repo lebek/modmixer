@@ -60,8 +60,9 @@ export interface ConfirmationLogEntry {
   alwaysAllow: boolean;
   /** "user" = explicit click, "session-allow" = previously-granted always-allow,
    * "no-window" = renderer not available so request denied by default,
-   * "test" = test harness short-circuit. */
-  source: 'user' | 'session-allow' | 'no-window' | 'test';
+   * "test" = test harness short-circuit, "skip-permissions" = user enabled the
+   * dangerous "skip all permission prompts" bypass in Advanced settings. */
+  source: 'user' | 'session-allow' | 'no-window' | 'test' | 'skip-permissions';
 }
 
 export const CONFIRM_CHANNEL_REQUEST = 'modmixer:confirm:request';
@@ -117,6 +118,15 @@ export class ConfirmationGate {
   private readonly sessionAllowed = new Set<string>();
   /** Override for tests. When set, the gate never asks the user. */
   private testApproveAll = false;
+  /**
+   * "Dangerously skip permissions" bypass. When the user enables it in
+   * Advanced settings, every confirmable action is auto-approved with no
+   * prompt. Set from main on startup (from persisted settings) and whenever
+   * the toggle flips. Kept distinct from `testApproveAll` so the audit log can
+   * tell a user-chosen bypass apart from a test short-circuit, and so this
+   * value survives the test-only setters.
+   */
+  private skipAll = false;
 
   constructor(private readonly getTransport: ConfirmTransportGetter) {}
 
@@ -133,6 +143,15 @@ export class ConfirmationGate {
   /** Test-only entry: short-circuit every request with `approved: true`. */
   setTestAutoApprove(value: boolean): void {
     this.testApproveAll = value;
+  }
+
+  /**
+   * Enable/disable the user-facing "skip all permission prompts" bypass.
+   * Called from main: once at startup with the persisted setting, then on
+   * every toggle so the change takes effect without a restart.
+   */
+  setSkipPermissions(value: boolean): void {
+    this.skipAll = value;
   }
 
   /** Test-only: forget all session-allow grants. */
@@ -152,6 +171,14 @@ export class ConfirmationGate {
 
     if (this.testApproveAll) {
       this.log({ tool: req.tool, paramsHash: hash, approved: true, alwaysAllow: false, source: 'test' });
+      return { approved: true, alwaysAllowForSession: false };
+    }
+
+    if (this.skipAll) {
+      // User opted into "skip all permission prompts" — auto-approve every
+      // action with no modal. We still log it (with a distinct source) so the
+      // console audit trail records that the call ran unsupervised.
+      this.log({ tool: req.tool, paramsHash: hash, approved: true, alwaysAllow: false, source: 'skip-permissions' });
       return { approved: true, alwaysAllowForSession: false };
     }
 

@@ -6,6 +6,7 @@ import {
   type ThemePreference,
 } from '../../agent/settings.js';
 import { setAnalyticsOptIn } from '../../agent/telemetry.js';
+import { getConfirmationGate } from '../../agent/security/confirmation-gate.js';
 import {
   clearCommunityLore,
   seedCommunityLoreFromShipped,
@@ -70,6 +71,18 @@ export function registerSettingsRoutes(ctx: RouteContext): void {
     // the launch mode is baked into the system prompt at conversation
     // creation. Existing chats keep their mode.
     (_evt, enabled: boolean) => saveSettings({ autoLaunch: enabled }),
+  );
+
+  ipc.handle(
+    'modmixer:settings:set-dangerously-skip-permissions',
+    (_evt, enabled: boolean) => {
+      // Persist AND apply live: the gate is the single chokepoint every
+      // confirmable tool funnels through, so flipping it here takes effect (or
+      // lifts) for the next tool call without a restart.
+      const next = saveSettings({ dangerouslySkipPermissions: enabled });
+      getConfirmationGate().setSkipPermissions(enabled);
+      return next;
+    },
   );
 
   ipc.handle(
