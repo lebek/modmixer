@@ -63,3 +63,25 @@ Vanilla sustainer SoundDefs (confirmed, base-game, no DLC needed) — list in `D
 - `WoodFiredGenerator_Ambience` / `ChemfuelFiredGenerator_Ambience` — combustion hums
 
 *Why it's tricky:* the name doesn't tell you. `PsychicSootheGlobal` SOUNDS like a sustained-feel global hum (and is — when played as a one-shot it has a long tail). But its def has no `<sustain>True</sustain>`, so the engine refuses to drive it as a Sustainer. Always check the def XML, don't go by the name.
+
+## Positional SoundDef distRange must account for camera altitude (min 15, max 65)
+
+RimWorld's `CameraDriver.MinAltitude = 15f` and `MaxAltitude = 65f` — the camera (and AudioListener) is **never closer than 15 units to the map surface**, even fully zoomed in. A worldspace SoundDef with `<distRange>4~14</distRange>` is **silent at every zoom level** because the listener is always farther than `maxDistance`. There is no log error — the sound plays into the void.
+
+For audible-only-when-zoomed-in proximity sounds, use `<distRange>15~30</distRange>` (or similar starting at 15+). For "always audible on-map" use vanilla's typical `<distRange>0~50</distRange>`. Confirm with `PlayOneShot(SoundInfo.InMap(new TargetInfo(thing.Position, thing.Map)))`.
+
+*Why it's tricky:* every reference (vanilla shambler `0~50`, pawn attacks `0~50`) just covers the whole altitude range, so you never see the constraint stated. The default `distRange` of `25~70` works by accident. Setting a "tight, intimate" range under 15 produces the exact symptom of "code fires, no error, no sound" — indistinguishable from a broken `.ogg`, which is why this took multiple test cycles to find. Look at `Verse.CameraDriver.MinAltitude` if you suspect this.
+
+## When you need a chained-clip Sustainer to play its current clip in full and then stop
+
+RimWorld's `SampleSustainer.Volume` formula bakes a per-clip volume ramp into the **last `sustainRelease` seconds** of every clip (typically 0.5s). During normal chaining this is masked by the next clip's `sustainAttack`. But if you "freeze" new clips (so the current one can finish in isolation when a job ends), the release ramp fades **the music itself** instead of silence — sounds like the song is mid-fading even though scheduledEndTime hasn't been reached.
+
+Recipe (when you want "let the current clip finish naturally, then stop"):
+1. Reflect into `Sustainer.subSustainers` (private List<SubSustainer>) and for each:
+   - Set `SubSustainer.nextSampleStartTime` (private float) to `float.MaxValue` — prevents new clips chaining.
+   - For each item in `SubSustainer.samples` (private List<SampleSustainer>), do `ss.scheduledEndTime += subDef.sustainRelease + 0.1f`. This pushes the release-ramp window past the audible content, so the fade happens during the silence after the clip rather than at its tail.
+2. **Keep calling `sustainer.Maintain()`** every tick during the grace period. Skipping Maintain() triggers `Sustainer.End()` after 1 tick, which schedules `Cleanup()` after `sustainFadeoutTime` (0.3s default) — forcibly destroying all active samples mid-play.
+3. When `samples.Count == 0` on every SubSustainer, call `sustainer.End()` yourself.
+4. Use a **real-time** safety timeout (`Time.realtimeSinceStartup`), not tick-based — at 3x game speed tick-based timeouts shrink to a third of their wall-clock duration. Long music clips (30–70s) will be cut short.
+
+*Why it's tricky:* `sustainRelease` looks like a Sustainer-end fadeout but is actually a per-clip property. `Sustainer.End()` and per-clip release ramps are two completely separate fade mechanisms in RimWorld's audio system. `SampleSustainer` and `SubSustainer` are both public classes in `Verse.Sound`, and `SampleSustainer.scheduledEndTime` is a public field, but the lists hooking them together are private — you need reflection on `Sustainer.subSustainers` and `SubSustainer.samples`/`nextSampleStartTime`.

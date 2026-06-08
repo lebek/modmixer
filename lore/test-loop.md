@@ -63,3 +63,28 @@ public void DailyTick(GameComponent core) {
 The cap matters — without it, loading a 5-year-old save would lock the game for minutes replaying every day.
 
 *Why it's tricky:* the storyteller-comp interval path is the documented place to put daily work, and it works fine for normal play. The bug only surfaces when a dev-tester (or savegame loaded after a long break) advances time non-incrementally. Your code looks correct, your save scribes correctly, and on a fresh natural-play test everything fires; but a tester who fast-forwards sees nothing.
+
+## Debug palette pin paths are Actions\&lt;label&gt; or Actions\T: &lt;label&gt; — categories are display-only
+
+RimWorld's debug palette (`Prefs.DebugActionsPalette`) stores actions by **path string**, looked up via `Dialog_Debug.GetNode(path)` which splits on `\` and walks `rootNode.children` by `label`. The structure is:
+
+- `rootNode` ("Root")
+  - `Actions` ← top-level menu node (label "Actions", capital A; `DebugTabMenu_Actions` creates `new DebugActionNode("Actions")`)
+    - direct children: each `[DebugAction]` method becomes a node here
+    - `Show more actions` (for `hideInSubMenu=true` entries)
+
+The `category` field of `[DebugAction("MyCat", "My Action", …)]` is **display-only** — it groups actions visually but does NOT create a parent node (`node.category = attribute.category`, never part of `Path`). So a pin path of `MyCat\My Action` ALWAYS fails to resolve and triggers `Could not find node from path 'MyCat\My Action'. Removing.` (non-fatal warning from `Dialog_DevPalette`, logged when the palette is opened).
+
+Correct path format (`DebugActionNode.Path` = `parent.Path + "\" + label`, and `Actions` is a top-level node so its Path is just `Actions`):
+- Non-tool actions (`DebugActionType.Action`): `Actions\<label>` (label = the second `[DebugAction]` argument, with any `\` replaced by `/`)
+- Tool actions (`DebugActionType.ToolMap` / `ToolMapForPawns` / `ToolWorld`): `Actions\T: <label>` — RimWorld auto-prepends `"T: "` in `DebugTabMenu_Actions.GenerateCacheForMethod`.
+- **Dynamic submenus** (a `[DebugAction]` returning `List<DebugActionNode>`, or a `DebugActionNode` with children — e.g. vanilla `Spawn thing`): the submenu node's label gets `"..."` appended at runtime (`if (!text.EndsWith("...")) text += "...";`), leaves live under it, so the path is `Actions\<label>...\<leafLabel>` — e.g. `Actions\Spawn thing...\DA_MyWeapon` (leaf label = the `defName`). The `...` is invisible in source; miss it and the pin silently disappears.
+
+Examples:
+- `[DebugAction("X", "Highlight clusters")] actionType = Action` → `Actions\Highlight clusters`
+- `[DebugAction("X", "Spawn cluster at cursor")] actionType = ToolMap` → `Actions\T: Spawn cluster at cursor`
+- `[DebugAction("Spawning", "Spawn thing")]` (returns a thing list) → `Actions\Spawn thing...\<defName>`
+
+This works for MODDED debug actions too: `Dialog_DevPalette` prunes the palette when it opens, *after* all mods and the full action tree (including mod `[DebugAction]`s, scanned in `GenerateCacheForMethod`) are built — so a correctly-formed modded path resolves fine. The common "modded pins always fail" belief is a path-format bug, not a load-timing one. (Parentheses in a label are fine too — they're matched verbatim; pins that "fail because of parens" actually failed because the path was category-prefixed instead of `Actions\…`.)
+
+*Why it's tricky:* the `[DebugAction("category", "name", …)]` constructor reads like the category creates structure, and the menu visually groups by category. But `Path` is `parent.Path + "\" + label` where `parent` is `Actions`, never the category. The `"T: "` prefix and the submenu `"..."` are both invisible at the C# level — appended inside `GenerateCacheForMethod`. All three mean palette-pin paths almost never match what the modder typed; the action still exists in the menu and works fine, so the only signal is the warning log and "my pinned actions vanished from the palette".

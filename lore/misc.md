@@ -94,3 +94,58 @@ Don't delete orphans on first pass — that destroys the design intent. Activate
 Recipe: any helper that takes `LookTargets` as an optional/default parameter must null-check the wrapper FIRST before touching its `.targets` field. Pattern: `bool hasTargets = lookTargets != null && lookTargets.targets != null && lookTargets.targets.Count > 0;`. If you want a non-null sentinel, callers must explicitly pass `LookTargets.Invalid` (a real instance with an empty/special targets list).
 
 *Why it's tricky:* RimWorld has several Verse types that feel struct-like by name and usage (`GlobalTargetInfo`, `TargetInfo`, `LocalTargetInfo` — all real structs; `LookTargets` — class). When you write a letter-dispatching helper inspired by `Find.LetterStack.ReceiveLetter(label, body, def, lookTargets, faction)`, it's natural to assume the parameter is uninitialised-safe like a struct. It isn't. The default-parameter convention you'd use for a struct produces a null reference at runtime.
+
+## default(CellRect) is NOT empty — it's a 1×1 rect at (0,0) with Area==1
+
+In RimWorld, `CellRect.Width => (minX > maxX) ? 0 : maxX - minX + 1`. For `default(CellRect)` all fields are 0, so minX==maxX==0 → Width = 0-0+1 = **1**, Height = 1, and **Area == 1** — a 1×1 cell at the map corner (0,0,0). So `return default;` as a "no rect found" sentinel is a trap: every `rect.Area > 0` validity check reads it as a real room at (0,0), and `rect.CenterCell` is (0,0,0).
+
+Real failure this caused: a room-placement helper returned `default` when no slot fit; the caller saw Area==1 > 0, "relocated the room to (0,0,0)", reserved it, and then drew a power-conduit line from the base all the way to map corner (0,0) — leaving a ~80-tile trail of stuck conduit frames.
+
+Fix: use an explicit Area-0 sentinel `new CellRect(0, 0, 0, 0)` — the 4-arg constructor sets `maxX = minX + width - 1 = -1`, so minX(0) > maxX(-1) → Width=0 → Area=0, which `Area > 0` correctly rejects. Never use `default(CellRect)` to mean "none". Same caution applies to any struct field (e.g. a cached `ShelterRect`) left at its default value and later gated on `.Area`.
+
+## When launching powershell.exe / system exes via Process.Start, use the FULL path
+
+Under RimWorld's Unity Mono runtime, `Process.Start` with `UseShellExecute=false` does NOT reliably search `%PATH%`. A bare `FileName="powershell.exe"` (or `cmd.exe`, etc.) throws a Win32Exception with `Native error= The system cannot find the file specified.` even though the exe is on PATH in a normal shell.
+
+Fix: resolve the full path yourself, e.g. `Path.Combine(Environment.GetFolderPath(SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe")` for PowerShell (SpecialFolder.System = `C:\Windows\System32`). Also set `psi.WorkingDirectory` to a guaranteed-valid dir — an empty `CurrentDirectory=''` was part of the same failure signature.
+
+*Why it's tricky:* the identical code works in a standalone .NET console app (full framework Process.Start searches PATH), so it looks correct until it runs inside the game and fails only there.
+
+## When spawning Python/pip from a RimWorld mod, override TMP/TEMP or pip dies with "No usable temporary directory found"
+
+If your mod shells out to an external Python (e.g. ComfyUI's embedded `python.exe`) to run `pip install`, the child process inherits RimWorld's Unity/Steam-launched environment, whose `TMP`/`TEMP` the embedded Python often can't use. pip then fails *before downloading anything* with:
+
+```
+ERROR: Exception:
+  ...
+  File "tempfile.py", line 224, in _get_default_tempdir
+FileNotFoundError: [Errno 2] No usable temporary directory found in
+['C:\Users\<u>\AppData\Local\Temp', ..., '<RimWorld install dir>']
+```
+
+(The last candidate in the list is the process CWD — a tell that the env-provided temp dirs all failed and it fell back to cwd.)
+
+Fix: when building the `ProcessStartInfo` (with `UseShellExecute = false`), explicitly set the temp env vars to a directory you create under a path you *know* is writable — e.g. inside the embedded `python_embeded` folder:
+```csharp
+string tmp = Path.Combine(Path.GetDirectoryName(pythonExe), "avatar_tmp");
+Directory.CreateDirectory(tmp);
+psi.EnvironmentVariables["TMP"] = tmp;
+psi.EnvironmentVariables["TEMP"] = tmp;
+psi.EnvironmentVariables["TMPDIR"] = tmp;
+psi.EnvironmentVariables["PIP_CACHE_DIR"] = Path.Combine(tmp, "pipcache");
+```
+
+*Why it's tricky:* the error reads like a network/permissions/dependency failure and the path it names (`AppData\Local\Temp`) exists and is writable from a normal shell — so it's invisible until you drill into the full pip stderr traceback. The breakage is purely the inherited environment from the Unity-launched parent, not the directory itself. The same fix applies to any child process you launch that needs a working temp dir.
+
+## When you want a second camera/viewport to render the RimWorld map, widen CurrentViewRect (scoped) — the renderer is single-camera and view-rect-culled
+
+RimWorld's map renderer is built around ONE camera. A second Unity `Camera` pointed at the map (e.g. a split-screen viewport) renders BLACK everywhere the main camera isn't looking — and shows only a tiny patch when the main camera is zoomed in.
+
+Why: the per-frame draw in `Map.MapUpdate()` runs only for `Find.CurrentMap`, and both geometry passes cull to the single main camera's view rect:
+- Static mesh: `MapDrawer.DrawMapMesh` → `ViewRect => Find.CameraDriver.CurrentViewRect.ExpandedBy(1).ClipInsideMap(map)`.
+- Dynamic things (pawns/items/filth): `DynamicDrawManager.DrawDynamicThings` → `ComputeCulledThings` → `Find.CameraDriver.CurrentViewRect`.
+The draws themselves are cameraless `Graphics.DrawMesh(mesh, matrix, mat, layer)`, so ANY active camera renders whatever IS enqueued — the problem is purely that only the main camera's view rect gets enqueued.
+
+Fix for "same map, independent zoom/pan in a 2nd viewport": while those two render methods run, widen the reported view rect to the UNION of both cameras' view rects (`leftRect.Encapsulate(rightRect)`). Each camera's viewport `rect` then clips the extra geometry to its own half. Recipe: a postfix on the `CameraDriver.CurrentViewRect` getter (`ref CellRect __result`) that encapsulates the second rect, gated by a flag that prefixes/postfixes on `MapDrawer.DrawMapMesh` and `DynamicDrawManager.DrawDynamicThings` set/clear.
+
+*Why it's tricky:* `CurrentViewRect` is read by ~25 call sites, several of them GAMEPLAY/AI (InfestationCellFinder, UnnaturalCorpse escape logic, Pawn_CallTracker, RegionGrid). You MUST scope the widening to only the render passes via the flag — widening it globally silently changes AI/spawn behavior. Compute the second viewport's rect by mirroring `CurrentViewRect`'s own math but with that viewport's aspect (half-width → `UI.screenWidth*0.5/UI.screenHeight`) and the second camera's position/orthographicSize. Different MAPS per viewport is a much harder problem (MapUpdate only draws `Find.CurrentMap`, and cameraless draws bleed into both viewports) — needs camera-routed `Graphics.DrawMesh(...,Camera)` or RenderTextures.

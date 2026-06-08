@@ -104,3 +104,17 @@ Two consequences:
 Re-running `sync_to_game` often resolves cases 4/5. For cases 1/2, edit the manifest or def. For case 3, explain that the asset has to be dropped in by hand because it's referenced from a Patch.
 
 *Why it's tricky:* without this prior, an asset-load error reads as "user just hasn't added their textures yet, ignore" — and the agent moves on without diagnosing the real bug. The stub + vanilla-fallback system means the error is real and worth investigating.
+
+## RimWorld auto-loads mod AssetBundles — don't AssetBundle.LoadFromFile them yourself (returns null)
+
+RimWorld's `ModAssetBundlesHandler.ReloadAll` (called during mod load) scans `<mod>/AssetBundles/**` and `AssetBundle.LoadFromFile`s **every extensionless file** it finds (recursively, including platform subfolders like `AssetBundles/StandaloneWindows64/rcgi`). The loaded bundles land in `content.assetBundles.loadedAssetBundles` (a `List<AssetBundle>`, public field on `ModContentPack`).
+
+So if your C# then calls `AssetBundle.LoadFromFile(path)` on that same file, Unity returns **null** — you cannot load one bundle file into memory twice. The symptom looks exactly like a corrupt/version-mismatched bundle even though the file is valid (header reads `UnityFS...2022.3.35f1`).
+
+**Recipe:** retrieve RimWorld's already-loaded copy instead. Iterate `myMod.Content.assetBundles.loadedAssetBundles` and `ab.LoadAsset<T>("AssetName")` (or `ab.LoadAllAssets<ComputeShader>()`) to find your shader/compute/etc. Keep `LoadFromFile` only as a fallback for the (rare) case RimWorld didn't pick it up.
+
+Two related facts from the same code:
+- `IsAcceptableExtension` accepts files **with no extension only** — so the bundle file must be named e.g. `rcgi` (no `.bundle`/`.assetbundle` suffix) to be auto-loaded. The `.manifest` sidecar (has an extension) is ignored, which is correct.
+- OS targeting uses **name suffixes** `_win` / `_mac` / `_linux` on the bundle filename (`GetBundleNameWithoutOsSpecifier`). A bundle with NO suffix loads on every platform. So for multi-platform shipping, name them `mybundle_win` / `_mac` / `_linux` directly under `AssetBundles/` rather than per-platform subfolders — otherwise RimWorld tries to load all platforms' bundles on every OS (the non-native ones just fail with a logged "Could not load asset bundle").
+
+*Why it's tricky:* nothing tells you RimWorld pre-loaded your bundle; you only see your own `LoadFromFile` returning null and assume the bake/version is wrong. The bundle is fine — you're just loading it a second time.

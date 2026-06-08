@@ -48,3 +48,58 @@ static Type? GetXType() {
 ```
 
 *Why it's tricky:* the null-check cache appears correct and the bug only manifests when the optional mod is absent — which usually isn't tested until users remove the dependency.
+
+## Schedule periodic work with elapsed-time tracking, NOT TicksGame modulo — modulo breaks against debug time-skips and save/load
+
+The natural "fire periodic work every N ticks" idiom looks like this:
+
+```csharp
+public override void GameComponentTick()
+{
+    if (Find.TickManager.TicksGame % SlowTickInterval == 0)
+        DoSlowWork();
+}
+```
+
+It seems clean. It's wrong. The modulo check only fires when `TicksGame` is *exactly* a multiple of `SlowTickInterval`. After any of these scenarios it goes silent for a long time:
+
+- **Debug time-skip** (`Tick: +1 day`, etc.) can leave `TicksGame` in a state where the next normal ticks don't hit a multiple of `SlowTickInterval` for nearly `SlowTickInterval - 1` ticks
+- **Save/load**: same as above — you resume at a `TicksGame` value that may be far from a multiple
+- **Long-running events** (LongEventHandler, worldgen ticks) advance time non-uniformly
+- **Storyteller force-pause** or any external `TickManager` manipulation by other mods
+
+User-visible symptom: "I posted a diplomat and used the dev time-skip and they took 20 days to arrive instead of 1." Their data shows arriveTick has passed; your tick code just isn't firing the promotion because the modulo check is sleeping.
+
+**The right pattern is elapsed-time tracking with a scribed cache:**
+
+```csharp
+private int lastSlowTickAt = -1;  // -1 = uninitialised
+private const int SlowTickInterval = GenDate.TicksPerHour;
+
+public override void GameComponentTick()
+{
+    int now = Find.TickManager.TicksGame;
+    if (lastSlowTickAt < 0 || now - lastSlowTickAt >= SlowTickInterval)
+    {
+        DoSlowWork();
+        lastSlowTickAt = now;
+    }
+}
+
+public override void ExposeData()
+{
+    Scribe_Values.Look(ref lastSlowTickAt, "lastSlowTickAt", -1);
+}
+```
+
+This fires on the very first tick after enough wall-time has elapsed, regardless of the modulo state. Self-heals after time-skips, save/load, and any non-continuous tick advancement. Scribing the cache preserves cadence across save/load (skip this only if you want a fresh schedule every load).
+
+*Why it's tricky:* the modulo idiom works perfectly during normal play (you never notice the brittleness), and `Find.TickManager.TicksGame` looks like an ever-increasing counter that should pair naturally with modulo. The bug surfaces only when something interrupts continuity, and the *symptom* is "my mod's scheduled work didn't run" — easy to misdiagnose as a stale state issue, a save-compat issue, or a Harmony patch failure. Diagnostic clue: if your slow-tick logic seems to skip beats *after* time-skips or saves, but works during normal play, switch to elapsed-time tracking.
+
+## When prefixing a per-tick engine method like Projectile.Tick, gate on a cached per-map flag before any pawn scan
+
+A Harmony prefix on `Projectile.Tick` (or any per-tick, per-instance engine method) runs an enormous number of times — once per projectile per tick. Never do a `map.mapPawns.AllPawnsSpawned` loop or a LINQ `.OfType<T>().FirstOrDefault()` hediff scan inside it. Even gating on a world-level condition (e.g. "any legendary exists anywhere") is wrong, because a distant unrelated entity makes every projectile on the player's map pay the cost.
+
+Recipe: maintain a cheap per-map boolean on a `MapComponent` (refresh it in `MapComponentTick`, which runs once/tick regardless of projectile count) and have the prefix read that single bool first, bailing instantly when false. Only do the expensive proximity scan once the cheap gate confirms it's relevant on *this* projectile's map.
+
+*Why it's tricky:* it compiles fine and works in early-game testing where few projectiles fly; the framerate cliff only appears in late-game firefights (mortar barrage + large raid + the triggering entity present) — exactly the dramatic moment the feature exists for. Also prefer an allocation-free `for` loop over `hediffSet.hediffs` to `OfType<T>().FirstOrDefault()` in any per-frame/per-tick path — the LINQ form allocates an iterator every call.

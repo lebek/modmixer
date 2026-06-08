@@ -27,3 +27,40 @@ Vanilla humanlikes never crawl-attack when downed — the whole system (introduc
 Don't try to fake `IsMutant` itself — `mutant` is null for non-Anomaly pawns and the rest of the codebase will NRE the moment it tries to dereference `pawn.mutant.Def`.
 
 *Why it's tricky:* The "downed but still crawling" behavior LOOKS like a generic pawn capability — it's not. It's an Anomaly mechanic and the gates are scattered across three files. Patching just `CanAttackWhileCrawling` isn't enough because `MakeDowned`'s ClearMind kills the job before any combat code runs.
+
+## When you want a colonist to live abroad without being on any map, use DeSpawn + WorldPawns.PassToWorld(KeepForever)
+
+For mechanics where a colonist needs to be *somewhere else* for an extended period — diplomatic postings, deep covers, long quests, hostage exchanges, exile, sabbaticals — the right vanilla pattern is:
+
+```csharp
+// Outbound: pawn leaves the colony to live elsewhere
+if (pawn.Spawned)
+    pawn.DeSpawn();
+if (!Find.WorldPawns.Contains(pawn))
+    Find.WorldPawns.PassToWorld(pawn, PawnDiscardDecideMode.KeepForever);
+
+// Inbound: pawn returns from being abroad
+if (Find.WorldPawns.Contains(pawn))
+    Find.WorldPawns.RemovePawn(pawn);
+GenSpawn.Spawn(pawn, DropCellFinder.TradeDropSpot(map), map);
+```
+
+Key points:
+- **DeSpawn FIRST.** `WorldPawns.PassToWorld` logs an error and refuses if `pawn.Spawned == true`.
+- **`PawnDiscardDecideMode.KeepForever`** is essential — without it, vanilla's WorldPawnGC may decide the pawn isn't important and discard them (their data freed, references nulled). KeepForever adds them to `pawnsForcefullyKeptAsWorldPawns` which is GC-safe.
+- **The pawn ages normally** while in WorldPawns. Vanilla's mothballing ticks them at reduced frequency, applying needs/age/disease over time. No special handling needed for "the diplomat got older while abroad."
+- **The pawn can die normally** too (old age, hediffs). Detect via `pawn.Dead` in a slow tick; vanilla doesn't fire any event when a world pawn dies.
+- **Relationships, hediffs, skills, inventory are preserved** across the round-trip. You don't need to snapshot/restore anything — Scribe handles them as part of the pawn ref.
+- **Use `Scribe_References.Look(ref pawn, "fieldName")`** on the field that holds the pawn ref. This survives save/load correctly across the despawn/spawn cycle.
+
+*Why it's tricky:* if you reach for `Pawn.Destroy()` or set `pawn.Spawned = false` directly or use `Notify_PawnSold`, you get cascading bugs — `Destroy` actually destroys the pawn and discards them; manual `Spawned` flag changes don't update `Map.mapPawns`. The clean state machine is DeSpawn → PassToWorld(KeepForever), and the reverse for return. Vanilla uses this same pattern for quest pawns, captured Empire titleholders, slaves sold to caravans, etc.
+
+## When finding a Pawn by ThingID across maps/caravans, use PawnsFinder with the British double-L "Travelling"
+
+To resolve a pawn that may be on a map OR in a caravan/transporter, use `PawnsFinder.AllMapsCaravansAndTravellingTransporters_Alive` (or the `_FreeColonists` variant for colonists). Map-only is `Find.Maps[...].mapPawns.AllPawns`.
+
+*Why it's tricky:* RimWorld spells it **"Travelling"** with two L's (British spelling), so `AllCaravansAndTravelingTransportPods_AliveOrDead` and `AllMapsCaravansAndTravelingTransporters_Alive` (one L) both fail to compile with `CS0117: 'PawnsFinder' does not contain a definition`. The single-L American spelling is the natural guess and is wrong. When in doubt, `read_csharp_symbol PawnsFinder` and copy the exact member name.
+
+## When assigning fixed names to humanlike pawns, keep NameTriple not NameSingle
+
+Humanlike pawn relation generation assumes parent names are `NameTriple`: `PawnRelationWorker_Parent.ResolveMyName` casts `generatedChild.GetFather().Name` / `GetMother().Name` to `NameTriple` when giving a child a parent surname. If you set a faction leader or other humanlike pawn to `new NameSingle("...")`, later pawn generation can throw `InvalidCastException: Specified cast is not valid` from `PawnRelationWorker_Parent.ResolveMyName`. Use `new NameTriple(first, nick, last)` even for mysterious/fixed names; put the display name in `Nick` because RimWorld's short label uses Nick.

@@ -118,3 +118,50 @@ Fix: defer all Unity API calls to the first render frame (`Camera.onPostRender`)
 The in-app `decompile_dll` tool runs ilspycmd through a path-policy guard. Bash-invoking `ilspycmd` triggers a permission prompt AND current upstream packages have a broken `DotnetToolSettings.xml` that fails `dotnet tool install`.
 
 *Why it's tricky:* if `decompile_dll type=TypeName` returns "Could not find type definition", call `decompile_dll listTypes=true` to dump every class/struct/enum in the assembly (~5KB even for big mods) — type names rarely match what you'd guess. Patches are typically named like `MyMod.MainTabWindowWork_DoWindowContents_Patch` with idiosyncratic underscoring, and `WeatherOverlay_Rain` lives in `RimWorld` not `Verse`. Calling `decompile_dll` with neither `type` nor `listTypes` on a large assembly auto-falls-back to the type list rather than dumping 100KB of unrelated code.
+
+## 1.4 → 1.6 tick-batched job system: GainComfortFromCellIfPossible / JoyTickCheckEnd now require a delta
+
+RimWorld 1.6 batches job ticks to amortize cost. APIs that used to be called every tick now take an `int delta` parameter (how many ticks to advance):
+
+- `PawnUtility.GainComfortFromCellIfPossible(this Pawn p, int delta, bool chairsOnly = false)`
+- `JoyUtility.JoyTickCheckEnd(Pawn pawn, int delta, JoyTickFullJoyAction = EndJob, float = 1f, Building = null)`
+- (Same pattern on most `*Tick*` helpers — if a 1.4-era call breaks with CS7036 "delta required", that's why.)
+
+In a `Toil.AddPreTickAction` (runs every tick), pass `delta=1`. In a toil that uses `tickIntervalAction` or its own batching, pass the matching interval.
+
+*Why it's tricky:* the second arg to `JoyTickCheckEnd` used to be `JoyTickFullJoyAction`; in 1.6 that's argument 3. A literal `JoyTickFullJoyAction.None` in arg 2 surfaces as CS1503 ("cannot convert from JoyTickFullJoyAction to int") rather than as a count mismatch, which is the giveaway.
+
+## RimWorld csproj HintPaths must be a single string, not relative dots, when project depth varies
+
+When migrating older mods, the `<HintPath>../../../...</HintPath>` chain often doesn't match the current workspace depth (e.g. modmixer's workspace lives at `~/.config/Modmixer/workspace/Mods/<id>/Source/<name>/`, not RimWorld's `Mods/`). Symptom: ~200 CS0246 errors for every Verse/RimWorld type, because Assembly-CSharp.dll didn't resolve.
+
+Fix: define a property and use it in HintPaths:
+```xml
+<PropertyGroup>
+  <RimWorldManaged Condition="'$(RimWorldManaged)'==''">/home/.../RimWorld/RimWorldLinux_Data/Managed</RimWorldManaged>
+</PropertyGroup>
+<Reference Include="Assembly-CSharp">
+  <HintPath>$(RimWorldManaged)/Assembly-CSharp.dll</HintPath>
+  ...
+</Reference>
+```
+
+*Why it's tricky:* if even ONE of Assembly-CSharp / UnityEngine fails to resolve, the symptom is a wall of "Pawn / Verse / RimWorld type not found" errors that look like missing `using` directives. Look at the *first* error: if it's a type that lives in Assembly-CSharp (Verse.Pawn, RimWorld.JobGiver_Work, etc.) and you have `using Verse; using RimWorld;` already, it's the reference that's broken, not the using. Also: Windows-style backslashes in HintPath generally work on Linux too in modern MSBuild, but mixed-style paths in the same file can confuse path normalization — pick one and stick with it.
+
+## Bare ampersand (&) in About.xml description breaks entire mod loading with cryptic EntityName parse error
+
+In `About.xml`, the `<description>` field is raw XML text, not CDATA. If you write `[b]Compatibility & Resilience Pack[/b]`, the bare `&` triggers `System.Xml.XmlException: An error occurred while parsing EntityName` because XML treats `&` as the start of an entity reference. The mod fails to load entirely — no defs parsed, no assemblies loaded, button doesn't appear — and the only clue is a vague log line: `Exception loading file at ...\About\About.xml. Loading defaults instead.`
+
+**Always escape `&` as `&amp;` in About.xml descriptions.** Other characters like `<` and `>` must also be escaped as `&lt;` and `&gt;` unless wrapped in a CDATA block. This is a silent mod-killer that gives no in-game error message.
+
+*Why it's tricky:* the `About.xml` parser runs before any defs or code, so the entire mod is invisible. The log message says "Loading defaults instead" which makes it look like a minor issue, but it means the mod is completely dead.
+
+## When bundling a Python TTS/ML server (Chatterbox/resemble-perth), pin setuptools&lt;81
+
+Mods that shell out to a bundled Python server using `chatterbox-tts` (or anything depending on `resemble-perth`) must pin `setuptools<81` in requirements.txt and must NOT `pip install --upgrade setuptools` in their setup script.
+
+`resemble-perth` imports `pkg_resources` at module load (`from pkg_resources import resource_filename`). setuptools 81+ removed `pkg_resources`, so perth's `__init__` hits an `ImportError`, swallows it in a `try/except`, and sets `PerthImplicitWatermarker = None`. The failure surfaces much later as `ChatterboxTTS.from_pretrained` → `self.watermarker = perth.PerthImplicitWatermarker()` raising `TypeError: 'NoneType' object is not callable`, which the FastAPI bridge returns as HTTP 500. From the RimWorld side this looks like a generic TTS failure, not a dependency problem.
+
+*Why it's tricky:* the error message names neither setuptools nor pkg_resources; the import error is silently swallowed and only blows up at call time in a different package. Fix: `pip install "setuptools<81"` into the venv.
+
+Two related launch gotchas for any bundled localhost server process started from C#: (1) launch the venv `python.exe` **directly** via Process.Start and keep the Process handle alive — a batch that does `start /B python …` lets the child get reaped when the batch exits, giving ConnectFailure. (2) Do **not** set RedirectStandardOutput/Error unless you drain them; uvicorn logs every request and the ~4KB pipe buffer fills and deadlocks the server. Use CreateNoWindow=true with no redirect. Poll a `/health` endpoint to know when it's ready instead of fixed sleeps.

@@ -352,3 +352,84 @@ Recipe:
 3. **Never** put a Harmony patch on `Hediff.Tick`/`Pawn.Tick`/`ThingWithComps.Tick` unless you've measured the cost. There's almost always a less-hot event you can hook instead — `Pawn_HealthTracker.NotifyPlayerOfKilled` (one fire per pawn death) beats `Hediff.Tick` for "pawn died" haptics by 5 orders of magnitude.
 
 *Why it's tricky:* the patch itself looks tiny in source — a reflection call here, a property dereference there. None of those operations are "expensive" in isolation. The cost is the **call count**, which you only learn from a profile. Once a hot-path patch ships, players report inexplicable stutter that no Player.log error explains.
+
+## When calling vanilla methods via Traverse.Method, pass exact param types — TaggedString silently breaks string-arg lookups
+
+`Traverse.Create(obj).Method("Name", args...).GetValue()` matches the target method by NAME + EXACT runtime types of `args`. C# implicit conversions (like `TaggedString → string`) are NOT applied to the match. When the lookup fails Traverse returns an empty Traverse and `GetValue()` is a silent no-op — no exception, no log message. The code "runs" but does nothing.
+
+Concrete trap: `Traverse.Create(page).Method("DoBottomButtons", inRect, null, "Edit".Translate(), action, true, true)` looks for `DoBottomButtons(Rect, ?, TaggedString, Action, bool, bool)` — doesn't exist (vanilla takes `string` for label). Silent no-op = no bottom buttons rendered.
+
+Fix: either `.ToString()` the TaggedString, or skip Traverse entirely and call your own static helper directly when the logic is yours to control.
+
+*Why it's tricky:* The standard `string label = "X".Translate();` pattern works everywhere ELSE in modding code because the C# compiler inserts the implicit conversion at the call site. Traverse bypasses the compiler — it uses runtime type lookup. So this fails ONLY through Traverse, and fails silently, so it can look like "method call succeeded but had no effect" rather than "method call didn't happen".
+
+## Constraining where AI pawns can go: patch Reachability.CanReach, not job/target consumers
+
+When you need to forbid a class of pawns from going to certain cells (e.g. only roofed cells during a hazard), do NOT try to filter at the consumer level. RimWorld has dozens of AI subsystems that pick targets/destinations independently — `JobGiver_AIFightEnemy`, `TrashUtility.ShouldTrashBuilding`, `JobGiver_AIGotoNearestHostile`, `JobGiver_AISapper`, `JobGiver_AIDefendPoint`, lord-set duty.focus cells, breaching, infestations, escort, hunt, patrol, etc. Patching them one by one is whack-a-mole — there is always one more.
+
+**Patch `Reachability.CanReach(IntVec3, LocalTargetInfo, PathEndMode, TraverseParms)` instead.** Every AI consumer ultimately funnels through it (or through the pathfinder, which calls it). Return `__result = false` for forbidden destinations and the entire AI stack naturally drops those targets from candidate sets. Vanilla AI runs untouched; you only narrow the reachable set.
+
+```csharp
+[HarmonyPatch(typeof(Reachability), nameof(Reachability.CanReach),
+    new System.Type[] { typeof(IntVec3), typeof(LocalTargetInfo),
+        typeof(PathEndMode), typeof(TraverseParms) })]
+static class Patch {
+    static bool Prefix(Reachability __instance, IntVec3 start,
+                      LocalTargetInfo dest, TraverseParms traverseParams,
+                      ref bool __result) {
+        if (!ShouldConstrain) return true;
+        Pawn pawn = traverseParams.pawn;
+        if (pawn == null || pawn.IsColonist) return true; // exempt
+        Map map = Traverse.Create(__instance).Field<Map>("map").Value;
+        if (map == null) return true;
+        if (!IsForbiddenZone(map, dest.Cell)) return true;
+        __result = false;
+        return false;
+    }
+}
+```
+
+*Why it's tricky:* the obvious approach is to patch `AttackTargetFinder.BestAttackTarget` (which has a Predicate<Thing> validator slot, so it looks designed for this). It works for combat but misses building trash, lord focus, escort, etc. — each of those does its own target picking with its own validator. Reachability is the common denominator.
+
+*Equally important:* do NOT patch `Pawn_PathFollower.StartPath` to deny outdoor paths — calling `EndCurrentJob` from inside it is reentrant and corrupts the pather state, freezing pawns. And do NOT patch `Pawn_JobTracker.StartJob` to filter jobs — vanilla AI emits dozens of intermediate Wait/Goto/idle jobs that you can't safely deny without breaking the think tree.
+
+*Also:* if the constrained pawn type ends up in a custom infinite-loop "stay here" job (e.g. a SeekShelter wander loop), the `Pawn_JobTracker.CheckForJobOverride` only runs the constant think tree mid-job — `JobGiver_AIFightEnemy` lives in the main think tree. So the pawn will never start combat while in your job. End your custom job once the pawn satisfies your constraint, then vanilla AI's main think tree fires and combat works normally.
+
+## When patching RimWorld 1.6 ideology style methods, use these exact signatures
+
+In RimWorld 1.6, the style API changed significantly from 1.5:
+
+- `Pawn_StyleTracker.StyleCategory` **does not exist**. The property was removed entirely.
+- `IdeoStyleTracker.StyleForThingDef` is the correct interception point for both pawn items (hair/beard/tattoos) and thing styles. Its exact signature is: `StyleCategoryPair StyleForThingDef(ThingDef thing, Precept precept)` — note the return type is `StyleCategoryPair` (not `ThingStyleDef`), and the parameter is named `thing` (not `thingDef`). Use a Postfix; mutate `ref StyleCategoryPair __result` by boxing, setting fields by type, then unboxing.
+- `CompStyleable` has a property `StyleCategoryDef` (not `StyleDef`). The backing field is `styleDef` (lowercase).
+- `Faction.ideos` is a **field** (not a property like `ideoTracker`). Its container type is unknown at compile time — use reflection to iterate it as `IEnumerable` to get the first `Ideo`.
+- `Ideo.style` is a field of type `IdeoStyleTracker` (not `StyleCategoryDef`).
+- `StyleCategoryPair` fields: find by type (`StyleCategoryDef` and `ThingStyleDef`) rather than by name to avoid breaking across versions.
+
+*Why it's tricky:* Between 1.5 and 1.6 Ludeon restructured the ideology style system, renaming and removing members. `PatchAll` throws `HarmonyException: Patching exception in method null` when any `[HarmonyPatch]` attribute targets a non-existent property getter — crashing the entire mod constructor silently from RimWorld's perspective.
+
+## When a Postfix mutates ref __result via reflection, handle the null case
+
+If the patched method returns a reference type, `__result` can be null — and `FieldInfo.SetValue(null, …)` throws `TargetException: Non-static field requires a target`. Always check `if (box == null) box = Activator.CreateInstance(targetType);` before calling SetValue. This bites especially when patching ideology lookup methods like `IdeoStyleTracker.StyleForThingDef`, which return null for any ThingDef the ideology doesn't have a style entry for — extremely common during pawn generation. *Why it's tricky:* the error says "non-static field" but the fields ARE instance — the missing piece is that the *target* (the boxed instance) is null.
+
+## In RimWorld 1.5+, hide a pawn's rendering by patching DynamicDrawPhaseAt, not DrawAt
+
+A Harmony prefix on `Pawn.DrawAt` returning `false` no longer hides the pawn in 1.5+. Pawn rendering goes through `Pawn.DynamicDrawPhaseAt(DrawPhase, Vector3, bool)`, which dispatches the three phases (PreDraw / ParallelPreDraw / Draw). Patch this instead:
+
+```csharp
+[HarmonyPatch(typeof(Pawn), nameof(Pawn.DynamicDrawPhaseAt))]
+public static class Patch { public static bool Prefix(Pawn __instance) => !ShouldHide(__instance); }
+```
+
+Unlike `DrawAt`, `DynamicDrawPhaseAt` is public so `nameof` works directly (no string overload needed).
+
+*Why it's tricky:* compile + Harmony patch both succeed silently with `DrawAt`; the pawn just keeps rendering because the new pipeline doesn't go through it. The clue is in `Assembly-CSharp.dll`: `strings | grep` for `DynamicDrawPhaseAt` and `RenderPawnInternal` and you'll see those, plus `ParallelPreRenderPawnAt` — the pre-1.5 `DrawAt` path is essentially vestigial for pawns.
+
+## 1.4 → 1.6 ritual API renames: OutcomeChance → RitualOutcomePossibility, ExpectedOutcomeDesc → QualityFactor
+
+When porting Ideology ritual code from 1.4 to 1.5/1.6, four overrides shifted:
+
+- `RitualOutcomeEffectWorker_FromQuality.ApplyExtraOutcome(..., OutcomeChance outcome, ...)` → `..., RitualOutcomePossibility outcome, ...`. Same shape, just renamed.
+- `RitualOutcomeComp_Quality.GetExpectedOutcomeDesc(...)` returning `ExpectedOutcomeDesc` → `RitualOutcomeComp.GetQualityFactor(...)` returning `QualityFactor`. The field `effect` on the return value was renamed to `qualityChange`; other fields (label/count/quality/positive/priority) carry over.
+
+*Why it's tricky:* Harmony patches against `ApplyExtraOutcome` by name still work because Harmony resolves the method by `MethodInfo` after the type change, but **subclass overrides** silently no-op (CS0115: no suitable method found to override) — the only signal is a build error pointing at the old return type. Both renames are pure renames with no logic change, so the fix is mechanical once you know what to search for.
