@@ -1,5 +1,6 @@
 import {
   LORE_TOPICS,
+  deleteUserEntries,
   readAllUserEntries,
   seedCommunityLoreFromShipped,
   writeCommunityLore,
@@ -90,6 +91,45 @@ async function pullCommunityLore(): Promise<
 }
 
 /**
+ * Ask the server which of this device's submissions have reached a
+ * terminal review state — meaning the local user-tier copy can be
+ * pruned. The RPC filters to `verified, dup, rejected, meta, auto_filter`
+ * (verified/dup are now served from community_lore and arrive via the
+ * pull; the rest were judged not-to-be-kept); `pending` and `needs_edit`
+ * are still in flight and are deliberately excluded.
+ *
+ * It's a SECURITY DEFINER RPC so the anon role can read its own rows'
+ * status without a table-wide SELECT policy exposing every submission's
+ * markdown/review_notes (see the migration that defines it).
+ */
+async function fetchReviewedHooks(
+  deviceId: string,
+): Promise<Array<{ topic: LoreTopic; hook: string; reviewedAt?: string }>> {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/reviewed_lore_hooks`, {
+    method: 'POST',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ p_device_id: deviceId }),
+  });
+  if (!res.ok) {
+    throw new Error(
+      `reviewed-hooks fetch failed: ${res.status} ${res.statusText} — ${await res.text()}`,
+    );
+  }
+  const rows = (await res.json()) as Array<{
+    topic: string;
+    hook: string;
+    reviewed_at: string | null;
+  }>;
+  return rows
+    .filter((r) => isLoreTopic(r.topic))
+    .map((r) => ({
+      topic: r.topic as LoreTopic,
+      hook: r.hook,
+      reviewedAt: r.reviewed_at ?? undefined,
+    }));
+}
+
+/**
  * Push the user's local lore, then pull the curated community lore and
  * write it into the local cache. Both halves are independent — a failed
  * push doesn't block the pull and vice versa. The toggle gate is checked
@@ -119,11 +159,29 @@ export async function syncCommunityLore(): Promise<void> {
     console.error('[community-lore] push failed:', err);
   }
 
+  let pullOk = false;
   try {
     const rows = await pullCommunityLore();
     await writeCommunityLore(rows);
+    pullOk = true;
     console.log(`[community-lore] pulled ${rows.length} entries`);
   } catch (err) {
     console.error('[community-lore] pull failed:', err);
+  }
+
+  // Prune local lessons the reviewer has finished with — but only after a
+  // successful pull this run, so a verified entry's curated copy is in the
+  // cache before we delete the local original (a stale/failed pull could
+  // otherwise leave a gap).
+  if (pullOk) {
+    try {
+      const reviewed = await fetchReviewedHooks(settings.distinctId);
+      const removed = reviewed.length ? await deleteUserEntries(reviewed) : 0;
+      if (removed > 0) {
+        console.log(`[community-lore] pruned ${removed} reviewed user entries`);
+      }
+    } catch (err) {
+      console.error('[community-lore] prune failed:', err);
+    }
   }
 }

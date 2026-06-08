@@ -466,6 +466,62 @@ export async function readAllUserEntries(): Promise<LoreEntry[]> {
 }
 
 /**
+ * Remove user-tier entries by (topic, hook). Used by the community-lore
+ * sync to prune local lessons the reviewer has already adjudicated —
+ * once an entry reaches a terminal `review_status` server-side it's
+ * either available via the community pull (verified/dup) or judged
+ * not-to-be-kept (rejected/meta/auto_filter), so the local copy is dead
+ * weight that would otherwise shadow the curated version forever.
+ *
+ * Matching is by case-insensitive hook, mirroring `saveEntry`. Each
+ * target may carry `reviewedAt` (ISO date): if the local entry was
+ * updated *after* the review, the user has changed it since the reviewer
+ * looked, so we keep it rather than clobber unreviewed local work.
+ *
+ * Returns the number of entries actually removed. Files left empty are
+ * deleted. Preamble before the first `## ` heading is not preserved, but
+ * user-tier files are agent-authored and never carry preamble.
+ */
+export async function deleteUserEntries(
+  targets: Array<{ topic: LoreTopic; hook: string; reviewedAt?: string }>,
+): Promise<number> {
+  // hook (lowercased) -> reviewedAt date, grouped by topic.
+  const byTopic = new Map<LoreTopic, Map<string, string | undefined>>();
+  for (const t of targets) {
+    if (!isLoreTopic(t.topic)) continue;
+    const hooks = byTopic.get(t.topic) ?? new Map();
+    hooks.set(t.hook.trim().toLowerCase(), t.reviewedAt?.slice(0, 10));
+    byTopic.set(t.topic, hooks);
+  }
+
+  let removed = 0;
+  for (const [topic, hooks] of byTopic) {
+    const { path: file } = topicFile('user', topic);
+    if (!fs.existsSync(file)) continue;
+    const md = await fsp.readFile(file, 'utf8');
+    const entries = splitEntries(md, 'user', topic);
+    const keep = entries.filter((e) => {
+      const key = e.hook.trim().toLowerCase();
+      if (!hooks.has(key)) return true; // not under review — keep
+      // Locally edited after the review landed — keep the newer local copy.
+      // Date strings compare chronologically (YYYY-MM-DD).
+      const reviewedDate = hooks.get(key);
+      if (reviewedDate && e.updatedAt && e.updatedAt > reviewedDate) return true;
+      return false; // reviewed and not since edited — drop
+    });
+    if (keep.length === entries.length) continue;
+    removed += entries.length - keep.length;
+    if (keep.length === 0) {
+      await fsp.rm(file, { force: true });
+    } else {
+      const next = keep.map((e) => e.markdown.trimEnd()).join('\n\n') + '\n';
+      await fsp.writeFile(file, next, 'utf8');
+    }
+  }
+  return removed;
+}
+
+/**
  * Replace the community-lore cache with the supplied snapshot. Each
  * input entry contributes one block (`## hook` + body) inside its
  * topic file. Topics with no entries are left untouched so a partial
