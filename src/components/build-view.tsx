@@ -78,6 +78,7 @@ export function BuildView({
         {activeMod && (
           <ModHeader
             mod={activeMod}
+            conversationId={activeConvo.id}
             busy={busy}
             onTest={onTest}
             hasAi={hasAi}

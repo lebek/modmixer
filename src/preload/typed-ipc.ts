@@ -185,6 +185,11 @@ export interface Channels {
     conversationId: string,
   ) => { messages: AgentMessage[] };
   'modmixer:conversations:start-fresh-for-mod': (folder: string) => Conversation;
+  'modmixer:conversations:copy-session-log': (
+    conversationId: string,
+  ) =>
+    | { ok: true; bytes: number }
+    | { ok: false; reason: 'not-found' | 'unreadable' };
 
   // Mods (workspace)
   'modmixer:mods:list-workspace': () => WorkspaceMod[];

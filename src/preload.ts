@@ -119,6 +119,12 @@ const api = {
    */
   startFreshChatForMod: (folder: string) =>
     invoke('modmixer:conversations:start-fresh-for-mod', folder),
+  /**
+   * Copy this conversation's raw session transcript (.jsonl) to the clipboard
+   * for troubleshooting. Returns { ok, bytes } so the caller can confirm.
+   */
+  copySessionLog: (conversationId: string) =>
+    invoke('modmixer:conversations:copy-session-log', conversationId),
 
   // Mods (workspace)
   listWorkspaceMods: () => invoke('modmixer:mods:list-workspace'),

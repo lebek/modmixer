@@ -1,8 +1,11 @@
+import { readFile } from 'node:fs/promises';
+import { clipboard } from 'electron';
 import type { ThinkingLevel } from '@mariozechner/pi-agent-core';
 import {
   archiveConversation,
   clearActiveForMod,
   getActiveForMod,
+  getConversation,
   listConversations,
   listConversationsForMod,
   setActiveForMod,
@@ -166,6 +169,29 @@ export function registerConversationRoutes(ctx: RouteContext): void {
       });
       setActiveForMod(folder, created.id);
       return created;
+    },
+  );
+
+  /**
+   * Copy a conversation's raw session transcript (.jsonl) to the clipboard for
+   * troubleshooting. We read the file and write it via Electron's clipboard
+   * rather than the renderer's navigator.clipboard — the transcript can be
+   * large, and main-process clipboard access isn't gated on document focus or
+   * permission prompts. Rarely used, so it stays behind the chat-header kebab.
+   */
+  ipc.handle(
+    'modmixer:conversations:copy-session-log',
+    async (_evt, conversationId: string) => {
+      const convo = getConversation(conversationId);
+      if (!convo) return { ok: false as const, reason: 'not-found' as const };
+      let text: string;
+      try {
+        text = await readFile(convo.sessionFile, 'utf8');
+      } catch {
+        return { ok: false as const, reason: 'unreadable' as const };
+      }
+      clipboard.writeText(text);
+      return { ok: true as const, bytes: Buffer.byteLength(text) };
     },
   );
 }

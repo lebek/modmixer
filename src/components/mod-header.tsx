@@ -1,14 +1,16 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { WorkspaceMod } from '../agent/workspace';
 import { cn } from '@/lib/cn';
 
 export function ModHeader({
   mod,
+  conversationId,
   busy,
   onTest,
   hasAi,
 }: {
   mod: WorkspaceMod;
+  conversationId: string;
   busy: boolean;
   onTest: () => void;
   hasAi: boolean;
@@ -72,8 +74,95 @@ export function ModHeader({
             launch in rimworld
           </button>
         )}
+        <SessionMenu conversationId={conversationId} />
       </div>
     </div>
+  );
+}
+
+/**
+ * Discrete overflow menu for rarely-used, per-chat troubleshooting actions.
+ * Today its only entry copies this chat's raw session transcript (.jsonl) to
+ * the clipboard so a tester can paste it into a bug report. Closes on
+ * outside-click and flips the item to a confirmation for a beat after copying.
+ */
+function SessionMenu({ conversationId }: { conversationId: string }) {
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      const target = e.target as Node | null;
+      if (target && menuRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+    window.addEventListener('mousedown', onDown);
+    return () => window.removeEventListener('mousedown', onDown);
+  }, [open]);
+
+  const copyLog = async () => {
+    let ok = false;
+    try {
+      const res = await window.modmixer.copySessionLog(conversationId);
+      ok = res.ok;
+    } catch {
+      // Clipboard/read failures aren't actionable here — just don't confirm.
+    }
+    if (!ok) {
+      setOpen(false);
+      return;
+    }
+    setCopied(true);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => {
+      setCopied(false);
+      setOpen(false);
+    }, 1200);
+  };
+
+  return (
+    <div className="relative" ref={menuRef}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        title="Troubleshooting"
+        aria-label="Troubleshooting"
+        className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-line text-muted shadow-sm transition-colors hover:border-ink/30 hover:text-ink"
+      >
+        <KebabIcon />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full z-30 mt-1 w-56 overflow-hidden rounded-md border border-line bg-paper shadow-xl">
+          <button
+            type="button"
+            onClick={() => void copyLog()}
+            className="block w-full px-3 py-2 text-left text-[12px] text-ink hover:bg-surface"
+          >
+            {copied ? 'Copied session log ✓' : 'Copy session log'}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function KebabIcon() {
+  return (
+    <svg aria-hidden className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+      <circle cx="12" cy="5" r="1.5" />
+      <circle cx="12" cy="12" r="1.5" />
+      <circle cx="12" cy="19" r="1.5" />
+    </svg>
   );
 }
 
