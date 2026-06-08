@@ -859,6 +859,93 @@ function ChatLoading() {
   );
 }
 
+function CopyIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden
+      className={className ?? 'h-3.5 w-3.5'}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="9" y="9" width="13" height="13" rx="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </svg>
+  );
+}
+
+function CopiedIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden
+      className={className ?? 'h-3.5 w-3.5'}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M20 6 9 17l-5-5" />
+    </svg>
+  );
+}
+
+/**
+ * Discrete copy-to-clipboard control for a message. Hidden until the message
+ * is hovered (the caller supplies the `group-hover` reveal classes) and flips
+ * to a check mark for a beat after a successful copy.
+ */
+function CopyButton({
+  text,
+  className,
+  iconClassName,
+}: {
+  text: string;
+  className?: string;
+  iconClassName?: string;
+}) {
+  const [copied, setCopied] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current);
+    },
+    [],
+  );
+  const copy = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      if (timer.current) clearTimeout(timer.current);
+      timer.current = setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard access can be denied; nothing useful to do but skip feedback.
+    }
+  }, [text]);
+  return (
+    <button
+      type="button"
+      onClick={copy}
+      title={copied ? 'Copied' : 'Copy message'}
+      aria-label={copied ? 'Copied' : 'Copy message'}
+      className={cn(
+        'rounded p-1 text-subtle transition-colors hover:text-ink',
+        className,
+      )}
+    >
+      {copied ? (
+        <CopiedIcon className={iconClassName} />
+      ) : (
+        <CopyIcon className={iconClassName} />
+      )}
+    </button>
+  );
+}
+
 type MessageBubbleProps = {
   message: AgentMessage;
   toolStates: Record<string, { name: string; status: ToolStatus }>;
@@ -896,7 +983,13 @@ function MessageBubbleImpl({
     const text = extractText(message.content);
     const images = extractImages(message.content);
     return (
-      <div className="flex justify-end">
+      <div className="group flex items-center justify-end gap-1">
+        {text && (
+          <CopyButton
+            text={text}
+            className="shrink-0 opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100"
+          />
+        )}
         <div className="max-w-[88%] rounded-md bg-ink/90 px-3 py-2 text-sm text-paper">
           {images.length > 0 && (
             <div className="mb-1.5 flex flex-wrap gap-1.5">
@@ -929,6 +1022,7 @@ function MessageBubbleImpl({
     const fallbackThinking =
       !hasContent && !isStreaming ? extractThinking(message.content) : '';
     const showSpinner = !hasContent && !fallbackThinking && isStreaming;
+    const copyText = text || fallbackThinking;
     // Slugs like "moonshotai/kimi-k2.6" or "accounts/fireworks/models/kimi-k2p6"
     // — only the tail is meaningful in the bubble header.
     const modelLabel = message.model.split('/').pop() || message.model;
@@ -936,7 +1030,7 @@ function MessageBubbleImpl({
     return (
       <div
         className={cn(
-          'rounded-md border border-line bg-paper/70 p-3',
+          'group rounded-md border border-line bg-paper/70 p-3',
           // The streaming bubble draws a rotating accent arc around its
           // border so the user can spot the live one at a glance.
           isStreaming && 'juicy-trace',
@@ -948,6 +1042,16 @@ function MessageBubbleImpl({
           </span>
           {cost !== null && (
             <span className="ml-auto text-subtle">{formatCost(cost)}</span>
+          )}
+          {copyText && !isStreaming && (
+            <CopyButton
+              text={copyText}
+              iconClassName="h-3 w-3"
+              className={cn(
+                '-my-1 shrink-0 opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100',
+                cost === null && 'ml-auto',
+              )}
+            />
           )}
         </div>
         {text && <Markdown>{text}</Markdown>}
