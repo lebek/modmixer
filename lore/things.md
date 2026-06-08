@@ -231,3 +231,9 @@ Key buildings carry a `<constructionSkillPrerequisite>` that prevents the constr
 Fix (honest-player): detect the deadlock by scanning live blueprints/frames for any `entityDefToBuild.constructionSkillPrerequisite > maxColonistConstruction`, and when found run a build-wall → `DesignationDefOf.Deconstruct` → rebuild grind on a small reserved patch (every build and every deconstruct grants Construction XP). Keep the training patch >10 tiles from base origin if you compute a "shelter rect" from nearby walls, or the temporary walls corrupt it.
 
 *Why it's tricky:* the symptom ("nobody had the skill to finish the generator") looks like a botch loop, but it's a pre-job gate — no error, no botch, the build order just sits unbuilt with pawns idle. You won't find it in C#; it's a field on the ThingDef (`search_defs` the building and read `constructionSkillPrerequisite`).
+
+## Effecters need manual EffectTick every CompTick, not the EffecterMaintainer
+
+To run an `Effecter` from a `ThingComp`, store the `Effecter` reference and call `effecter.EffectTick(parent, parent)` (passing the parent Thing as both A and B targets) inside `CompTick()`. Do NOT rely on `map.effecterMaintainer.AddEffecterToMaintain(eff, pos, ticks)` — vanilla code (e.g. `CompFireBurst`) uses the manual-tick pattern. The maintainer pattern compiles fine and runs without errors, but the effecter spawns invisibly. Also: the parent ThingDef MUST have `<tickerType>Normal</tickerType>` or CompTick never runs — Modmixer's lint catches this.
+
+*Why it's tricky:* `AddEffecterToMaintain` looks like the obvious API, the maintainer's `EffecterMaintainerTick` does call `EffectTick`, and there are no errors in Player.log. But sub-effecters that use `SubEffecter_SprayerChance` need the parent.position context to spawn motes/flecks correctly — only when `EffectTick(parent, parent)` is called manually do they render visibly.

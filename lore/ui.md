@@ -1048,3 +1048,358 @@ Safe minimums for RimWorld fonts:
 For a one-line label, use these as `rect.height`. Going smaller to "save vertical space" in a tight panel layout is a false economy — you save 4 px and lose the bottom of every label. If you really need to compress, switch to a smaller font (Tiny instead of Small), don't shrink the rect.
 
 *Why it's tricky:* the clipping is silent — no Player.log warning, no exception, no rendered hint. The text just disappears from the rect's bottom edge. Easy to mistake for "the panel is too short" and waste time hunting for layout bugs elsewhere.
+
+## Faction info in different UI surfaces comes from different methods — patch the right one for the surface you want
+
+RimWorld renders faction info in several distinct UI surfaces, each pulling from a different method. Patching the wrong method = your text only shows in places the player doesn't look. There is no single "faction info" entry point.
+
+The map (1.6):
+
+| UI surface | What the player does | Vanilla method to patch |
+|---|---|---|
+| **World-map settlement click → inspect pane** (bottom of screen) | Click any settlement on the world map | `Settlement.GetInspectString()` (`RimWorld.Planet.Settlement`) — override of `WorldObject.GetInspectString` |
+| **Comms console negotiation dialog header** | Right-click comms → call a faction | `Faction.GetInfoText()` — only called from `Dialog_Negotiation` |
+| **Info card (right-click → "Show info")** | Right-click faction → Show info | `Faction.GetReportText` (property, get-only) — feeds `StatsReportUtility` |
+| **Factions tab (gear menu)** | Open the Factions tab in the World view | `FactionUIUtility.DoWindowContents` — composes its own layout; no single "info text" call |
+
+Verify with `search_source` before patching: `\.GetInfoText\(\)` and `\.GetInspectString\(\)` show exact call sites. `Faction.GetInfoText` has exactly one caller (`Dialog_Negotiation`); patching it for "anywhere the player looks at a faction" is a common mistake.
+
+*Why it's tricky:* the names suggest interchangeability. `GetInfoText` sounds like "the info you see when you look at a faction." It's not — it's *one specific call site's* info. The world-map settlement click hits a totally different method living on `Settlement`, not on `Faction`. Patch BOTH (and `GetReportText` for the info card) if you want consistent agenda/stability/etc. visibility across all faction-looking surfaces.
+
+## Section-helper functions taking y by value silently overlap their body callback
+
+When you write a "draw section header then body" helper that advances a `float y` cursor, take `y` by `ref`. If you take it by value, and the body argument is a lambda that closes over the caller's outer `y` (typical when the body is `() => DrawFoo(rect, ref y)`), the helper's local-y advances for the header but the body still reads/writes the *outer* y — so the body draws at the outer y (one step behind the header), and the helper's return value of "header_y + header_height + body_y_delta + gap" doesn't match where content actually ended. Visual symptom: section title text appears UNDER content lines (you see "OCKS" peeking out from behind icons because "UNL" is hidden), and subsequent sections start at the wrong height.
+
+*Why it's tricky:* the code compiles and runs without errors, the layout calls return sane-looking values, but the section header and section body silently target slightly different y variables. Refactor: change the signature to `static void DrawSection(Rect inner, ref float y, string title, Action body, float gap)` and let body mutate the same ref-y. The closure compiles identically — the only change is who owns the variable.
+
+## When a Tier-3 menu opens via PollSelection, prime its visible-row list inside OpenWindow — Tick reads Update phase, DrawShell runs OnGUI
+
+Selection-triggered Tier-3 windows (StockpileFullScreenNav, similar future ones) have a one-frame hole: `Tick()` is dispatched from `GameComponentUpdate` during Unity's **Update phase**, but the per-frame `BuildRows()` (or equivalent visible-cell layout pass) usually lives inside `DrawShell()` which only runs during **OnGUI**. Order per frame is Update → OnGUI, so on the FIRST frame the window exists, Tick sees `_rows.Count == 0`. Every `_focusIdx >= 0 && _focusIdx < _rows.Count` guard fails, A/X effectively no-op, and any `if (_focusIdx < _rows.Count - 1) _focusIdx++; else { _zone = N }` branch hits the `else` immediately — so a single D-pad press silently swaps zones before the user has seen anything. Reads to the player as "the menu opened but isn't focused for D-pad navigation."
+
+Recipe: call `BuildRows()` (and any count cache / index clamp) at the bottom of `OpenWindow()`, wrapped in try/catch so a transient null in `Target?.GetStoreSettings()?.filter` can't block the window from opening. Defense-in-depth: at the top of each per-zone Tick handler, early-out on empty rows with a quiet `Tick_Tiny` sound rather than allowing the auto-zone-swap branch to fire.
+
+*Why it's tricky:* the bug doesn't reproduce on the SECOND frame onward — OnGUI has run by then — so single-frame logging traces look fine. The user only sees it because the very first press happens before BuildRows ever ran. Symptom is "controls feel dead" but only on open; press anything else first (e.g. opening any other window between selection and stockpile) and it works, masking the bug.
+
+## When iterating QuestManager.QuestsListForReading filter out grammar-failed quests
+
+Vanilla quest generation can leave a `Quest` in a half-baked state when its `QuestNode_X` throws — `q.description.Resolve()` then returns a string starting with `"ERR:"` containing raw `[placeholder]` tokens (`[settlement_label]`, `[RequestedThingCount]`, etc.) instead of resolved grammar. Filter these out at iteration time:
+
+```csharp
+static bool IsMalformedQuest(Quest q) {
+    if (q == null) return true;
+    string desc; try { desc = q.description.Resolve(); } catch { return true; }
+    if (string.IsNullOrWhiteSpace(desc)) return true;
+    if (desc.StartsWith("ERR:", System.StringComparison.Ordinal)) return true;
+    return false;
+}
+```
+
+*Why it's tricky:* Displaying these quests shows the user gibberish text, AND iterating through them tends to cascade `Error while processing a quest signal: NullReferenceException` and `Error in QuestPart cleanup: NullReferenceException` because their `QuestPart`s reference null fields. One filter solves both the display issue and gets your mod off the attribution list for those cascade NREs. Common in quicktest maps that boot before factions are fully baked (`QuestNode_TradeRequest_RandomOfferDuration` NRE, `Grammar unresolvable. Root 'questDescription'`).
+
+## When re-skinning a vanilla menu that builds its option list inline, patch the renderer helper not the outer method
+
+When vanilla draws a menu that builds options inline then hands them to a small renderer (e.g. `MainMenuDrawer.DoMainMenuControls` → `OptionListingUtility.DrawOptionListing`), DON'T Prefix-skip the outer method and replicate vanilla's option-building logic. Instead:
+
+1. Set a flag in a Prefix/Postfix around the outer method (`_inDoMainMenuControls`).
+2. Prefix the renderer helper (`DrawOptionListing(rect, optList)`), check the flag, divert to your themed renderer, set `__result` to the same return type as vanilla, return false to skip vanilla draw.
+
+Vanilla keeps building the list with all its conditional entries (Save vs Load vs ReviewScenario based on `ProgramState`, DevQuickTest gated on `Prefs.DevMode`, permadeath flow gated on `Current.Game.Info.permadeathMode`, etc), so you stay robust as Ludeon adds new options across patches.
+
+*Why it's tricky:* Replicating the option-list-building branches works initially but rots fast — every Ludeon patch that adds a main-menu entry breaks your version. Hooking at the renderer instead means the option list is whatever vanilla wants it to be. Also covers BOTH `MainMenuDrawer.MainMenuOnGUI` (title screen, Entry) AND `MainTabWindow_Menu.DoWindowContents` (in-game ESC menu) automatically since both call into `DoMainMenuControls` → `DrawOptionListing` — one patch, two surfaces.
+
+## When taking over a vanilla MainTabWindow with a Tier-3 shell, also resize the vanilla window AND TryRemove it on close
+
+Patching `MainTabWindow_*.DoWindowContents` Prefix to return false skips vanilla's draw, but the vanilla window's brown frame still renders at its default size (e.g. 1010×640 for Quests) and peeks around the edges of your 95%×95% Tier-3 shell. Add a Postfix on `Window.SetInitialSizeAndPosition` gated by `__instance is MainTabWindow_*` that resizes the vanilla window to match your Tier-3 dimensions — the frame is then completely hidden behind your shell.
+
+On close (B button), call `Find.WindowStack.TryRemove` on BOTH your Tier-3 Window AND the underlying vanilla MainTabWindow. Removing only your shell leaves the (now invisible because your patch returns false) vanilla MainTab open underneath — the player presses B expecting "menu closed" and gets an empty screen instead, with no further input target.
+
+Recipe summary:
+1. `[HarmonyPatch(MainTabWindow_Quests, DoWindowContents)]` Prefix → return `!IsTier3Active`.
+2. `[HarmonyPatch(Window, SetInitialSizeAndPosition)]` Postfix gated on `__instance is MainTabWindow_Quests` → set `windowRect` to your 95% screen size.
+3. On B: walk `Find.WindowStack` for `WindowOfType<MainTabWindow_Quests>()` and `TryRemove(w)` BEFORE closing your own window.
+
+*Why it's tricky:* vanilla MainTabs are GameUI-layer, not Dialog-layer, so they sit below your Dialog-layer Tier-3 — but their frame, close-X, and content-rect background still render. Without resizing them, the screen edges show a half-eaten vanilla panel poking out from behind your shell.
+
+## Controller-triggered FloatMenus need explicit FloatMenuAnchor.Set; auto-anchor only fires for ButtonInvisible click paths
+
+The universal `FloatMenuAnchor` auto-tracker (Postfix on every `Widgets.Button*`) only fires for mouse clicks that route through one of those button helpers. **Controller A-press paths that call the same action handler directly bypass `ButtonInvisible` and therefore never set an anchor** — the FloatMenu falls back to vanilla cursor positioning, which on controller is wherever the user last left the mouse (usually wrong).
+
+Recipe: cache each focused row/cell's `Rect` during the draw pass into a static array, and at the top of the controller A-press handler call `FloatMenuAnchor.Set(_rowRects[focusedIdx])` BEFORE invoking the action. Same pattern that the mouse path gets for free, just made explicit for controller.
+
+```csharp
+// Draw pass — cache rect every frame:
+var modeRect = new Rect(inner.x, y, inner.width, DetailRowH);
+_detailRowRects[DR_MODE] = modeRect;
+if (DrawDetailButton(modeRect, "Do X times ▾", focused)) MakeConfigFloatMenu(bp);
+
+// Controller A handler — set anchor explicitly:
+if (XInputHelper.JustPressed(XInputHelper.BTN_A))
+{
+    if (_detailRowRects[_detailRow].width > 0f)
+        FloatMenuAnchor.Set(_detailRowRects[_detailRow]);
+    BillRepeatModeUtility.MakeConfigFloatMenu(bp);   // would otherwise open at cursor
+}
+```
+
+*Why it's tricky:*
+- The mouse and controller code paths LOOK like they call the same function (`MakeConfigFloatMenu`), so it's natural to assume both get anchored. They don't — only the mouse path passes through `Widgets.ButtonInvisible` which the Postfix patch listens to.
+- Forgetting this manifests as "the menu opens at my mouse cursor when I press A", which to the user looks like a regression of the universal-anchor system. The system is working — the controller path is what's missing.
+- A useful audit pattern: grep for `MakeConfigFloatMenu`, `Find.WindowStack.Add(new FloatMenu(`, etc. in any controller `Tick` / handler method, and ensure each call is preceded by `FloatMenuAnchor.Set(...)`.
+
+## FillTab-heartbeat windows: B-close needs a _userClosed gate keyed by target, else FillTab re-opens next frame
+
+Tier-3 windows driven by an `ITab.FillTab` Prefix heartbeat (e.g. Bills Tier-3 opened by `ITab_Bills.FillTab`) have a sneaky close-button bug: pressing B closes the window, but **the vanilla inspector's open ITab is still ITab_Bills, so the very next frame `FillTab` fires again, runs your Prefix, calls `NotifyFillTabActive` → `EnsureWindowOpen` → window reopens**. The user perceives "B doesn't close the menu".
+
+Recipe: add a `_userClosedTarget` field keyed to the SelectableThing (e.g. workbench). When the user B-closes, store the current target. In `NotifyFillTabActive`, refuse to reopen when the current target equals `_userClosedTarget`. Clear the flag when the target changes (different building selected) so re-selecting is enough to bring it back. An explicit X-press opener (like `OpenForWorkbench`) should also clear the flag to override a prior close.
+
+```csharp
+static Building_WorkTable? _userClosedTarget = null;
+
+// B-close path:
+if (B pressed && _zone == Zone.List) {
+    _userClosedTarget = GetTargetTable();
+    CloseWindow();
+}
+
+// FillTab heartbeat:
+public static void NotifyFillTabActive() {
+    _lastNotifiedFrame = Time.frameCount;   // keep IsActive/IsTopmostUsable accurate
+    var target = GetTargetTable();
+    if (_userClosedTarget != null && _userClosedTarget == target) return;  // user-closed gate
+    _userClosedTarget = null;
+    EnsureWindowOpen();
+}
+```
+
+*Why it's tricky:*
+- FillTab fires every frame on the active ITab — closing your window doesn't change which ITab is "open" on the vanilla inspector, so the heartbeat never stops.
+- Without the gate, B-close oscillates: closes one frame, reopens next, closes again on the next B-press, reopens again. To the user this looks like B is broken.
+- The gate must be keyed to the target object (not just a boolean) so selecting a DIFFERENT workbench naturally clears it — otherwise the user would have to deselect-and-reselect after every close.
+
+## Tier-3 window triggered by ITab heartbeat must use WindowLayer.GameUI not Dialog
+
+When a Tier-3 full-screen nav opens a Window that relies on a per-frame heartbeat from an ITab (`FillTab` Prefix calling `NotifyActive()` / setting `_lastNotifiedFrame`), use **`WindowLayer.GameUI`**, never `WindowLayer.Dialog`.
+
+**Recipe:** Set `layer = WindowLayer.GameUI` in the Window subclass constructor. Keep `preventCameraMotion = false`. The `IsTopmostUsable` loop (`w.layer == WindowLayer.Dialog || w.layer == WindowLayer.Super → return false`) still correctly yields to real modal dialogs that open on top.
+
+**Why it's tricky:** `WindowLayer.Dialog` suppresses all lower-layer draw calls — including `InspectPaneUtility.InspectPaneOnGUI()`, which is where `ITab.FillTab()` is invoked. With the inspector suppressed, the heartbeat (`_lastNotifiedFrame`) goes stale in ~4 frames. `Tick()` detects the stale heartbeat at the very first check, closes the window, and returns before any input-handling code runs. The window oscillates: opens → Dialog suppresses inspector → heartbeat dies → window closes → inspector draws → heartbeat fires → window reopens → repeat. From the user's perspective: controls are completely dead.
+
+This affects **any** Tier-3 menu whose liveness is derived from an ITab draw callback. Menus triggered by main-tab window `DoWindowContents` intercepts are unaffected (main-tab Window stays on the stack regardless of layer).
+
+**Error signature:** "no controller controls working in the new [menu]" — window appears to open but all D-pad/button input is silently dropped.
+
+## Universal FloatMenu button-anchoring: Postfix every Widgets.Button* + repos in FloatMenu.SetInitialSizeAndPosition
+
+To anchor every "click a button → open a FloatMenu" path to the **button rect** instead of the mouse cursor (controller-friendly UX), don't try to enumerate every call site. Two pieces:
+
+1. A static one-shot tracker: `RecordButtonClick(rect)` stashes `(rect, frameCount)`. `TryConsume(out rect)` accepts this-frame or last-frame and clears state.
+2. **Postfix every `Widgets.Button*` overload** with `[HarmonyPatch] static IEnumerable<MethodBase> TargetMethods()` enumerating each `AccessTools.Method(typeof(Widgets), "ButtonText"|"ButtonImage"|...)`. In the Postfix, `if (__result) FloatMenuAnchor.RecordButtonClick(rect)`. Then Postfix `FloatMenu.SetInitialSizeAndPosition` to reposition `__instance.windowRect` next to the consumed rect (with screen-edge flips) and set `__instance.vanishIfMouseDistant = false` — anchored menus open far from the cursor and would otherwise self-close in ~half a second.
+
+*Why it's tricky:*
+- Param name differs across overloads — `ButtonText`/`ButtonTextSubtle` use `rect`, `ButtonImage`/`ButtonInvisible` use `butRect`. Harmony binds by name, so split into two helper classes with two `TargetMethods()` enumerations.
+- A single `[HarmonyPatch(typeof(Widgets), nameof(ButtonText))]` without arg-type filter triggers Harmony's ambiguous-method error when there are multiple overloads. Use `TargetMethods()` with explicit `AccessTools.Method(t, name, new[]{...})`.
+- `FloatMenu.vanishIfMouseDistant` defaults to true; without flipping it off, controller/anchored menus fade based on cursor distance and self-close. Only flip it for **anchored** opens — mouse-opened menus should keep vanilla behavior.
+- Don't try to track only "buttons that open FloatMenus" — there's no signal. Track every clicked button rect; the 1-frame consume window in `TryConsume` discards stale rects naturally when no FloatMenu opens.
+- World right-click context menus (`FloatMenuMap`) inherit from `FloatMenu` so the Postfix fires, but no button click is recorded → tracker empty → falls through to vanilla cursor positioning. Correct behavior.
+
+## When implementing custom D-pad nav alongside UniversalButtonNavHelper, always suppress the helper to prevent double-input
+
+If both a custom Tick-style nav helper AND `UniversalButtonNavHelper.Tick()` run on the same window in the same frame, D-pad events are processed twice and A-button clicks fire on whichever widget the *universal* helper's spatial finder landed on — which may differ from your custom `_focusIdx`. This causes phantom card activations ("snapping to boxes I haven't selected").
+
+Fix: In `HandleDpad()`, gate the universal helper call with `!MyNav.IsTopmostUsable`:
+```csharp
+if (!ScenarioPickerNav.IsTopmostUsable && !MainMenuFullScreenNav.IsTopmostUsable
+    && UniversalButtonNavHelper.IsActive)
+    UniversalButtonNavHelper.Tick();
+```
+
+Pattern applies to every Quests-style take-over nav: the moment you have an `IsTopmostUsable` / `Tick()` pair, you must add that nav to the suppression chain in `HandleDpad()`.
+
+## Consumed-flag gates must be per-button inline, never a blanket return at top of Tick
+
+When a nav helper's `Tick()` runs inside `PollIfNeeded` BEFORE input poll + consumed-flag reset, it reads LAST frame's `_aConsumedThisFrame` / `_bConsumedThisFrame`. The temptation is to gate the whole method:
+
+```csharp
+// WRONG — freezes all controls for a frame after any other helper consumes A or B
+void Tick() {
+    if (XInputHelper._aConsumedThisFrame || XInputHelper._bConsumedThisFrame) return;
+    // ...D-pad, X, LB/RB, triggers all blocked too
+}
+```
+
+That blocks D-pad, X, shoulders, triggers — every input, not just the consumed button. Since universal helpers (FloatMenuNav, UniversalButtonNav synthesizing Return, etc.) frequently set `_aConsumedThisFrame=true`, the Tier-3 nav appears to lock up after any A press anywhere.
+
+Correct pattern: inline check on each specific A/B handler:
+
+```csharp
+if (JustPressed(B) && !_bConsumedThisFrame) { /* close */ }
+bool aJustPressed = JustPressed(A) && !_aConsumedThisFrame;
+if (aJustPressed || JustPressed(DpadRight)) { /* enter details */ }
+```
+
+*Why it's tricky:* The blanket gate "works" in isolation — your unit-test scenario only fires A then expects no re-fire — but in-game, A and B get consumed every frame by something somewhere (FloatMenu just closed, UniversalNav synthesized Return on a button, etc.), so the gate becomes a near-permanent input freeze. Always scope consumed-flag gates to the exact button they protect, never the whole Tick.
+
+## FloatMenuMap guard prevents world right-click menus from consuming button-anchors via race condition
+
+When using a universal button-anchor system (`FloatMenuAnchor`), always add an explicit `if (__instance is FloatMenuMap) return;` guard at the top of the `FloatMenu.SetInitialSizeAndPosition` Postfix, **before** calling `TryConsume`.
+
+Without it there is a 1-frame race: a UI button click sets an anchor (`_lastButton` / `_lastButtonFrame`), and if a `FloatMenuMap` world context menu opens within the same 1-2 frame consume window, it wrongly gets repositioned to the UI button's rect instead of the world click position.
+
+`FloatMenuMap` is the `FloatMenu` subclass that genuinely wants cursor positioning (`is FloatMenuMap` also catches any subclasses; `FloatMenuWorld` is the world-map context-menu equivalent — add a parallel guard there if your anchor system fires on the world map) — they represent "you clicked here on the map". Every other `FloatMenu` subclass opened from a UI button benefits from anchoring. The guard makes this explicit and eliminates the race permanently rather than relying on "the tracker happens to be empty" for correctness.
+
+## Tier-3 input gates must check IsWindowOpen, not IsActive — IsActive stays true after window closes
+
+A Tier-3 nav helper typically exposes both `IsActive` (feature-on + correct selection / topmost main-tab) and the implicit "is my window currently in the stack" state. Every `HandleA/B/X/Y/RB/LB/Start/Dpad/Camera` handler in `InputCore` will be gated like `if (FooNav.IsActive) return;` — but `IsActive` does NOT track whether the user pressed B to close the window. After B-close:
+- `_window` is removed from the stack
+- The selection / main-tab condition is still true (workbench still selected, tab still open, etc.)
+- `IsActive` returns true → every handler bails → **all controller input dies**
+
+Fix: expose a strict `IsWindowOpen` accessor that ONLY returns true when the window is in `Find.WindowStack`, and gate every input handler on THAT, not on `IsActive`:
+
+```csharp
+public static bool IsWindowOpen =>
+    _window != null && Find.WindowStack?.Windows?.Contains(_window) == true;
+```
+
+Then `sed -i 's/FooNav\.IsActive/FooNav.IsWindowOpen/g' input/InputCore.cs` over every handler-gate site. Keep `IsActive` for the *Tick lifecycle* (it decides whether to reopen the window) — those two concerns are different.
+
+*Why it's tricky:* The bug only manifests if your B handler doesn't also flip the underlying selection/tab state. As long as `IsActive` includes "feature enabled + workbench selected", a B-close leaves controls dead until the user reselects. The fix is two accessors with one-line difference — easy to write, easy to miss.
+
+## Tier-3 windows opened at the main menu MUST consume Esc in OnCancelKeyPressed
+
+If your custom `Window` overrides `closeOnCancel = false` (because you want to handle B/Esc yourself via a nav helper), you ALSO have to override `OnCancelKeyPressed` to do **both** `Close()` and `Event.current.Use()`. Vanilla's `Window.OnCancelKeyPressed` only calls `Event.current.Use()` when `closeOnCancel` is true — so with closeOnCancel=false and an empty override, the Esc keypress is never consumed and propagates to the next window in the stack.
+
+```csharp
+public override void OnCancelKeyPressed()
+{
+    try { if (Find.WindowStack != null && Find.WindowStack.IsOpen(this)) Close(); } catch { }
+    try { if (Event.current != null) Event.current.Use(); } catch { }
+}
+```
+
+*Why it's tricky:* Steam Input commonly maps controller B → physical Esc. At the title screen this means a B press opens the Quit-confirm dialog the moment your Options/whatever window closes — looks like a "double press" to the user. The fix is to consume the keyboard Event in OnCancelKeyPressed even though `closeOnCancel` is false. The XInput-driven B handler in your own Tick still works as a fallback for controllers without Steam Input remapping.
+
+## When recording widget rects inside a vanilla scroll view for D-pad nav, use draw-order index not screen-space position
+
+When recording widget rects inside a vanilla `BeginScrollView` for D-pad nav (e.g. `Dialog_Options.DoOptions`), **do not store screen-space rects and compare them across frames**. If scroll changes between frames (e.g. `ScrollToContent()` updates `optionsScrollPosition`), the stored positions are stale and the highlight/click-sim will never match — the symptom is a focus highlight that never appears, or A-press that never activates the cell.
+
+The correct approach is **draw-order index**: since `Listing_Standard` draws top→bottom every frame in the same order, draw order == visual order == sorted order. Pass the scratch index from Harmony Prefix to Postfix via `out int __state`:
+```csharp
+// Prefix:
+static void Prefix(Rect rect, string label, ref bool drawBackground, out int __state) {
+    __state = -1;
+    if (OptionsNavHelper.IsActive && OptionsFullScreenNav._inContentArea) {
+        OptionsNavHelper.RecordOption(rect, label, null);
+        __state = OptionsNavHelper.RecordedScratchCount - 1; // draw-order index
+        drawBackground = false; // suppress vanilla gold/brown
+    }
+}
+// Postfix:
+static void Postfix(Rect rect, ref bool __result, int __state, ...) {
+    if (__state >= 0 && __state == OptionsFullScreenNav._contentIdx) {
+        OptionsFullScreenNav.DrawContentFocusHighlight(rect); // highlight
+        if (OptionsNavHelper._pendingCellClick && active) {
+            __result = true; // A-press sim
+            OptionsNavHelper._pendingCellClick = false;
+        }
+    }
+}
+```
+For `ButtonInvisibleDraggable` (checkbox toggle path): same pattern in Prefix, set `__result = Widgets.DraggableResult.Pressed` when draw index matches. For sliders: record then immediately check `RecordedScratchCount - 1 == _contentIdx` in the same Postfix. Note: dedup does NOT decrement the count — after a dedup skip, `Count - 1` still points at the last successfully added entry (the same cell, same index). ✓
+
+## When replacing a legacy nav helper, grep HandleDpad for EVERY call site of the old helper
+
+When you Tier-3-replace an existing nav helper (e.g. `PolicyNavHelper.Tick` → `PolicyFullScreenNav.Tick`), grep `InputCore.HandleDpad` for **every** `OldHelper.Tick()` call site, not just the obvious one. The same helper is often called from multiple places in the routing chain — typically one earlier site (above the LB-modifier early-return) for shoulder-button consumption, and one later site (after LB-modifier) for the general dispatch. If you add your new helper's route below only the later site, the earlier site's `OldHelper.Tick()` runs FIRST and `return`s — your new route is unreachable, and the symptom is **"no controls work in any of the new sub-menus"**.
+
+**Recipe:**
+1. `grep "OldHelper\.Tick\|OldHelper\.IsTopmost" InputCore.cs` to find every dispatch.
+2. Replace EACH with `if (NewHelper.IsTopmostUsable) { NewHelper.Tick(); return; } if (OldHelper.IsTopmost) { OldHelper.Tick(); return; }` (new first, legacy fallback for when the setting is off).
+3. Remove the now-redundant later dispatch if it's only there for the same helper.
+
+*Why it's tricky:* the new route looks correct in isolation — but the routing chain is order-dependent and one of the legacy sites was intentionally placed BEFORE the LB-modifier block to win over LB-held early-out. Your new route added below that block is dead code. The build passes, the Harmony patches load, the shell draws fine, focus highlight even appears on row 0 — but D-pad does nothing because legacy `Tick` consumed the input on a prior code path. Compounding the diagnosis: legacy `OldHelper.Tick` likely doesn't render anything visible inside the new shell so it just silently eats input.
+
+## When a controller-B opens a MainTabWindow that instantly flashes closed, suspect your OWN Tick's toggle branch, not vanilla cancel-key
+
+Symptom: pressing controller-B on the map opens the pause/Menu tab then it instantly closes (a flash), often dragging visible bottom-bar/cell-info redraws with it. The intuitive culprit is vanilla's Escape handling (Steam double-binds controller-B to gamepad-B AND keyboard-Escape), so you reach for Harmony patches on `Window.OnCancelKeyPressed` / `Window.Close`.
+
+Recipe: Before patching vanilla, check whether YOUR input Tick has a B→toggle/resume branch that runs on the same B press that opened the window. A single B press both opens (your open branch) and then closes (your resume branch) in the same frame. Guard the close branch with an "opened-this-frame" flag: stamp `_menuTabOpenedFrame` when you detect the tab transitioned to open, expose `MenuTabJustOpened` (frame-count window ~12 frames), and have the resume/close branch early-return when it's true. Critically, the open-transition detector must run BEFORE the Tick that reads the flag.
+
+*Why it's tricky:* Harmony diagnostic Prefixes on `Window.Close` and `Window.OnCancelKeyPressed` NEVER FIRED — proving the close didn't go through either. `WindowStack.TryRemove` calls `PreClose`/`PostClose` directly and bypasses `Window.Close()` entirely. So the close path was invisible to the obvious patch points; the real closer was the mod's own `TryRemove(menu)` in its nav Tick.
+
+## When recording a Widgets.HorizontalSlider rect for nav/highlight, capture it in a Prefix — the body mutates rect.y
+
+`Verse.Widgets.HorizontalSlider` mutates its own `rect` parameter at the **top** of the method before drawing:
+```csharp
+if (middleAlignment || !label.NullOrEmpty())
+    rect.y += Mathf.Round((rect.height - 10f) / 2f);   // ~+10px on a 30px row
+```
+`Listing_Standard.SliderLabeled` always passes `middleAlignment: true`. So a Harmony **Postfix** that records `rect` (for D-pad focus-box positioning, click-sim, etc.) captures the already-shifted Y and your highlight lands ~10px low — over the gap or the next row. In a record-driven options/settings nav this looks like "the focus box is on the wrong item," and it only affects the one category that mixes a slider in with checkboxes/buttons (e.g. RimWorld's Graphics tab: Resolution dropdown + Fullscreen/TextureCompression checkboxes + ScreenShakeIntensity slider).
+
+*Why it's tricky:* every other widget (CheckboxLabeled, ButtonText) records its rect untouched, so the bug is invisible until a slider shares the list — and the nav's own up/down index stays self-consistent, so you chase coordinate-transform red herrings instead of the parameter mutation. Fix: add a `Prefix(Rect rect, out Rect __state){ __state = rect; }` and use `__state` in the Postfix for anything that positions off the row.
+
+## WorkTags.LabelTranslated() only maps a SINGLE flag — split combined values or it logs every frame
+
+`WorkTags.LabelTranslated()` (Verse.WorkTypeDefsUtility) is a `switch` over individual `WorkTags` enum values. Passing a COMBINED flag value (e.g. a pawn's `CombinedDisabledWorkTags`, which is usually multiple flags OR'd together) hits the `default` branch and calls `Log.Error("Unknown or mixed worktags for naming: " + (int)tags)`. In a per-frame draw (an inspector tab, a HUD), that's thousands of identical errors (×2010 in one test run).
+
+Recipe: never call `LabelTranslated()` on a combined value. Split first:
+```csharp
+var labels = disabled.GetAllSelectedItems<WorkTags>()
+    .Where(t => t != WorkTags.None)
+    .Select(t => t.LabelTranslated());
+string text = string.Join(", ", labels).CapitalizeFirst();
+```
+Vanilla's `CharacterCardUtility` does exactly this via its private `WorkTagsFrom` iterator + per-tag `LabelTranslated()` — it never labels the combined value directly.
+
+*Why it's tricky:* a single-disabled-tag pawn works fine (the switch matches), so it only repros on pawns with 2+ disabled work tags — easy to miss until a test pawn happens to have a multi-tag incapability, then the log explodes.
+
+## Tier-3 menu opens a Dialog_Rename/Dialog_Confirm via X — set _xConsumedThisFrame before adding the window
+
+When a Tier-3 menu's Tick (driven from HandleDpad) handles an X-press by adding a sub-dialog like `Dialog_Rename<T>` to the WindowStack, **always set `XInputHelper._xConsumedThisFrame = true` (and `return`) before/after the `Find.WindowStack.Add(...)` call**. Otherwise the sub-dialog opens and instantly closes again on the same frame.
+
+Why it's tricky: per-button handlers (HandleAButton/BButton/XButton/...) run AFTER HandleDpad in `Mod.cs`'s Update order. The X-press handler's early-return guard `if (MyTier3Nav.IsTopmost) return;` no longer fires the moment the sub-dialog is on top, because `IsTopmost` checks the topmost Dialog-layer window. HandleXButton then reaches its `if (UniversalButtonNavHelper.IsActive) keybd_event(VK_RETURN, ...);` branch — which the just-opened sub-dialog catches as Enter and treats as Accept, calling `Find.WindowStack.TryRemove(this)`.
+
+The `_xConsumedThisFrame` flag is the only one HandleXButton honours at the top of the function, so it's the right way to short-circuit the synth. Same fix pattern applies if a Tier-3 Y handler opens a sub-dialog that listens for Enter — set `_yConsumedThisFrame` defensively.
+
+This bit ManageAreasDialogNav's X=Rename and the symptom was exactly "rename text box opens then closes immediately". The reference good-pattern is `PolicyFullScreenNav.Tick`'s `if (y) { DoRenamePolicy(dlg); XInputHelper._yConsumedThisFrame = true; return; }`.
+
+## When scoping nav candidates to a Window.windowRect, scale it by Prefs.UIScale first
+
+`Window.windowRect` is in LOGICAL UI units (the `UI.screenWidth` space, = physical px / `Prefs.UIScale`). But anything you derive from `GUIUtility.GUIToScreenPoint(...)` is in PHYSICAL pixels, because `UI.ApplyUIScale()` sets `GUI.matrix = Matrix4x4.TRS(0, identity, scale(Prefs.UIScale))`. At `Prefs.UIScale == 1` the two spaces coincide and everything works; at any other scale a test like `windowRect.Contains(screenCenterFromGUIToScreenPoint)` silently fails.
+
+Recipe: when filtering/scoping recorded widget centers (GUIToScreenPoint output) against a window rect, convert the rect into physical px first: `if (s != 1f) wr = new Rect(wr.x*s, wr.y*s, wr.width*s, wr.height*s);` where `s = Prefs.UIScale`.
+
+*Why it's tricky:* it only manifests at non-1× UI scale AND only when a dialog opens over another window that also feeds the same nav snapshot. Symptom in our case: the in-game "Really quit?" `Dialog_MessageBox` over the ESC menu showed no focus box and ignored the controller — focus had been seeded onto the menu buttons drawing *behind* the box because the mis-scaled scope rejected the dialog's own buttons and the unfiltered fallback picked the topmost-leftmost item overall. Confirms over the bare map looked fine (no competing recorded widgets), which masks the bug during testing at scale 1.
+
+## 1.4 → 1.6 TimeAssignmentSelector grid became a horizontal row, not 2×2
+
+When patching `TimeAssignmentSelector.DrawTimeAssignmentSelectorGrid` to inject a new TimeAssignmentDef button (e.g. a "Worship" or "Pray" schedule), the rect-stepping math is fragile and version-sensitive:
+
+- **1.4** drew a 2×2 grid: (0,0)Anything (1,0)Work / (0,1)Joy (1,1)Sleep, with Meditate at (2,0) if Royalty active.
+- **1.5/1.6** draw a single horizontal row: (0,0)Anything (1,0)Work (2,0)Joy (3,0)Sleep [(4,0)Meditate].
+
+A patch authored for 1.4 that walks "0,0 → 1,0 → 0,1 → 1,1 → 2,0 → 3,0" lands at horizontal slot 3 in 1.6 — i.e. on top of the Sleep button. Symptom: the modded label silently replaces Sleep visually (and clicks select the modded assignment), but the actual TimeAssignmentDef.Sleep still exists and still ticks correctly in the timetable grid below — it's a pure draw-order shadow.
+
+Recipe for 1.6:
+```csharp
+rect.yMax -= 2f;
+Rect rect2 = rect;
+rect2.xMax = rect2.center.x;   // button width = parent.width / 2
+rect2.yMax = rect2.center.y;
+// (0,0) Anything
+rect2.x += rect2.width;        // (1,0) Work
+rect2.x += rect2.width;        // (2,0) Joy
+rect2.x += rect2.width;        // (3,0) Sleep
+if (ModsConfig.RoyaltyActive) rect2.x += rect2.width;  // (4,0) Meditate
+rect2.x += rect2.width;        // our slot
+// invoke DrawTimeAssignmentSelectorFor(rect2, MyAssignmentDef)
+```
+
+*Why it's tricky:* the rect's `width` is half the parent — buttons span TWICE the rect.width passed to the public method (the rect is 191px in vanilla but the buttons march off to x≈480 with Royalty). That looks broken but is intentional in vanilla — the schedule window has plenty of horizontal room. Don't try to "fix" the math by clamping inside the rect.
+
+## LongEventHandler.ExecuteWhenFinished is NOT a safe background→main-thread marshal
+
+To run Unity/main-thread work (Texture2D ctor, EncodeToPNG, Scribe, Messages) from a background thread (ThreadPool/`new Thread`), do NOT use `LongEventHandler.ExecuteWhenFinished(action)`. When no long event is in progress (at the menu or in-game), it executes the action **inline on the calling thread**, so your "main-thread" code runs off-thread and Unity HARD-CRASHES the process (no managed exception — a native crash dump with `UnityEngine.Texture2D:Internal_CreateImpl` near the top of the Mono stack, and the bridge only shows a benign `"Type X probably needs a StaticConstructorOnStartup attribute … assets must be loaded in the main thread"` warning).
+
+Reliable pattern: enqueue actions into a `static Queue<Action>` (lock-guarded) and drain them from a method guaranteed to run on the main thread every frame — e.g. a Harmony Postfix on `UIRoot_Play.UIRootOnGUI` / `UIRoot_Entry.UIRootOnGUI` calling a `DrainMainQueue()`. OnGUI runs on the Unity main thread for both the menu and in-game.
+
+*Why it's tricky:* `ExecuteWhenFinished` works correctly when called *during* game load (a long event is active, so it defers) — which is exactly when most prewarm/init code runs — so the same call site looks fine until something triggers it from a worker while idle (e.g. a mod-options button kicking off a background pipeline).
