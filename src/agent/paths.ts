@@ -57,6 +57,28 @@ export interface RimWorldPaths {
  * with packs as siblings under Resources/. Returns null when neither shape
  * has a Core/Defs/ where we expect it.
  */
+/**
+ * Read CFBundleExecutable from a macOS .app's Info.plist — the authoritative
+ * name of the Mach-O binary inside Contents/MacOS/. RimWorld has shipped it
+ * under different names across versions (older builds: "RimWorldMac"; 1.6:
+ * "RimWorld by Ludeon Studios"), so we can't hard-code it. RimWorld's plist
+ * is XML, so a regex is enough — no binary-plist parser needed.
+ */
+function readBundleExecutableName(bundle: string): string | null {
+  try {
+    const plist = fs.readFileSync(
+      path.join(bundle, 'Contents', 'Info.plist'),
+      'utf8',
+    );
+    const m = plist.match(
+      /<key>\s*CFBundleExecutable\s*<\/key>\s*<string>([^<]+)<\/string>/,
+    );
+    return m ? m[1].trim() : null;
+  } catch {
+    return null;
+  }
+}
+
 function detectExecutable(managedDir: string, os: NodeJS.Platform): string | null {
   // managedDir is <install>/<Platform>_Data/Managed (Win/Linux) or
   // <bundle>/Contents/Resources/Data/Managed (mac). The exe lives at the
@@ -71,11 +93,32 @@ function detectExecutable(managedDir: string, os: NodeJS.Platform): string | nul
     const exe = path.join(installRoot, 'RimWorldLinux');
     return fs.existsSync(exe) ? exe : null;
   }
-  // macOS: managedDir = <bundle>/Contents/Resources/Data/Managed.
-  // Walk up four levels to the .app bundle, then into Contents/MacOS/.
+  // macOS: managedDir = <bundle>/Contents/Resources/Data/Managed. Walk up
+  // four levels to the .app bundle, then into Contents/MacOS/. The binary
+  // name varies by version, so resolve it from Info.plist first, fall back
+  // to the names we've seen, and finally to the lone file in Contents/MacOS/
+  // (a Unity bundle has exactly one) so a future rename still launches.
   const bundle = path.dirname(path.dirname(path.dirname(path.dirname(managedDir))));
-  const exe = path.join(bundle, 'Contents', 'MacOS', 'RimWorldMac');
-  return fs.existsSync(exe) ? exe : null;
+  const macosDir = path.join(bundle, 'Contents', 'MacOS');
+  const fromPlist = readBundleExecutableName(bundle);
+  const names = [
+    ...(fromPlist ? [fromPlist] : []),
+    'RimWorld by Ludeon Studios',
+    'RimWorldMac',
+  ];
+  for (const name of names) {
+    const exe = path.join(macosDir, name);
+    if (fs.existsSync(exe)) return exe;
+  }
+  try {
+    const files = fs
+      .readdirSync(macosDir, { withFileTypes: true })
+      .filter((e) => e.isFile());
+    if (files.length === 1) return path.join(macosDir, files[0].name);
+  } catch {
+    // Contents/MacOS/ missing — not a valid bundle.
+  }
+  return null;
 }
 
 function detectDataDir(managedDir: string): string | null {
