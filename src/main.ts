@@ -2,7 +2,15 @@
 // handlers before any other module body runs. Catches startup crashes that
 // happen during bundled require() — too early for initSentry() to help.
 import { SMOKE_TEST } from './agent/early-error.js';
-import { app, BrowserWindow, ipcMain, Menu, nativeImage, nativeTheme } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  ipcMain,
+  Menu,
+  MenuItem,
+  nativeImage,
+  nativeTheme,
+} from 'electron';
 import path from 'node:path';
 import started from 'electron-squirrel-startup';
 import { initSentry } from './agent/sentry.js';
@@ -258,6 +266,53 @@ const createWindow = () => {
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
     },
+  });
+
+  // Electron ships the spell-checker (red underlines) but no default context
+  // menu, so right-clicking a misspelled word does nothing until we build the
+  // menu ourselves from the event params. Covers any editable field, not just
+  // the chat box.
+  mainWindow.webContents.on('context-menu', (_event, params) => {
+    const menu = new Menu();
+
+    for (const suggestion of params.dictionarySuggestions) {
+      menu.append(
+        new MenuItem({
+          label: suggestion,
+          click: () => mainWindow?.webContents.replaceMisspelling(suggestion),
+        }),
+      );
+    }
+
+    if (params.misspelledWord) {
+      menu.append(
+        new MenuItem({
+          label: 'Add to dictionary',
+          click: () =>
+            mainWindow?.webContents.session.addWordToSpellCheckerDictionary(
+              params.misspelledWord,
+            ),
+        }),
+      );
+      menu.append(new MenuItem({ type: 'separator' }));
+    }
+
+    if (params.isEditable) {
+      menu.append(
+        new MenuItem({ role: 'cut', enabled: params.editFlags.canCut }),
+      );
+      menu.append(
+        new MenuItem({ role: 'copy', enabled: params.editFlags.canCopy }),
+      );
+      menu.append(
+        new MenuItem({ role: 'paste', enabled: params.editFlags.canPaste }),
+      );
+    } else if (params.editFlags.canCopy) {
+      // Non-editable selection (e.g. a model's reply) — still allow copy.
+      menu.append(new MenuItem({ role: 'copy' }));
+    }
+
+    if (menu.items.length > 0) menu.popup();
   });
 
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
