@@ -25,6 +25,11 @@ const api = {
   onUpdaterState: (handler: (state: import('./agent/updater').UpdaterState) => void) =>
     on('modmixer:updater:state', handler),
 
+  // Quit confirmation: main defers the window close to us so we can warn the
+  // user when an agent turn is in flight, then call back to let it proceed.
+  onQuitRequested: (handler: () => void) => on('modmixer:quit:requested', handler),
+  confirmQuit: () => ipcRenderer.send('modmixer:quit:confirm'),
+
   // Consent
   getConsentStatus: () => invoke('modmixer:consent:get'),
   acceptConsent: (options?: { analyticsOptIn?: boolean }) =>

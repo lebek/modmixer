@@ -404,6 +404,8 @@ export interface Events {
   'modmixer:confirm:request': ConfirmationRequest;
   'modmixer:index:progress': IndexProgressEvent;
   'modmixer:updater:state': UpdaterState;
+  /** Main asks the renderer to confirm a pending quit (payload-less). */
+  'modmixer:quit:requested': void;
 }
 
 type ChannelArgs<K extends keyof Channels> = Parameters<Channels[K]>;

@@ -75,6 +75,7 @@ import {
   installAssetProtocolHandler,
   registerAssetSchemeAsPrivileged,
 } from './main/asset-protocol.js';
+import { approveQuit, isQuitApproved } from './main/quit-guard.js';
 
 if (started) {
   app.quit();
@@ -153,6 +154,14 @@ const confirmGate = initConfirmationGate(() => {
 });
 ipcMain.on(CONFIRM_CHANNEL_RESOLVE, (_evt, payload: unknown) => {
   confirmGate.resolveFromRenderer(payload);
+});
+// The window `close` handler defers quitting to the renderer so it can confirm
+// with the user when an agent turn is mid-flight (quitting aborts it). The
+// renderer calls back here once approved; we mark the quit and re-issue the
+// close, which now sails through the guard instead of looping back.
+ipcMain.on('modmixer:quit:confirm', () => {
+  approveQuit();
+  mainWindow?.close();
 });
 // Apply the persisted "dangerously skip permissions" bypass before the first
 // agent turn so it's in force from launch (the setting survives restarts). The
@@ -266,6 +275,19 @@ const createWindow = () => {
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
     },
+  });
+
+  // Quitting aborts any in-flight agent turn, so defer the close to the
+  // renderer, which confirms with the user first (only when a turn is actually
+  // running). It calls back via 'modmixer:quit:confirm' to let the close
+  // proceed. A crashed/destroyed renderer can't be asked, so we let those
+  // through rather than trap the user in an unclosable window.
+  mainWindow.on('close', (event) => {
+    if (isQuitApproved()) return;
+    const wc = mainWindow?.webContents;
+    if (!wc || wc.isDestroyed() || wc.isCrashed()) return;
+    event.preventDefault();
+    wc.send('modmixer:quit:requested');
   });
 
   // Electron ships the spell-checker (red underlines) but no default context

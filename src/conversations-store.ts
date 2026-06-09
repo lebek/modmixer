@@ -401,6 +401,11 @@ export function useAnyBusy(): boolean {
   return useSyncExternalStore(subscribeGlobal, anyBusy);
 }
 
+/** Non-reactive snapshot of {@link useAnyBusy} for one-off reads (e.g. quit confirm). */
+export function anyConversationBusy(): boolean {
+  return anyBusy();
+}
+
 /**
  * Non-reactive check: does this conversation have a turn in flight right now?
  * Used when the multi-chat UI switches chats — re-seeding a busy chat from its
