@@ -145,6 +145,12 @@ export interface Channels {
   'modmixer:agent:get-context-usage': (
     conversationId: string,
   ) => import('@mariozechner/pi-coding-agent').ContextUsage | null;
+  // Demo-video harness only — handler registered behind MODMIXER_DEMO=1.
+  'modmixer:demo:complete': (args: {
+    modelId: string;
+    system: string;
+    user: string;
+  }) => string;
 
   // Settings
   'modmixer:settings:get': () => Settings;

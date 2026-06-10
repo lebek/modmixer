@@ -14,13 +14,14 @@ import {
   type SessionHeader,
   type ToolDefinition,
 } from '@mariozechner/pi-coding-agent';
-import type {
-  Api,
-  ImageContent,
-  Model,
-  OAuthAuthInfo,
-  OAuthPrompt,
-  OAuthProviderId,
+import {
+  complete,
+  type Api,
+  type ImageContent,
+  type Model,
+  type OAuthAuthInfo,
+  type OAuthPrompt,
+  type OAuthProviderId,
 } from '@mariozechner/pi-ai';
 import type {
   AgentMessage,
@@ -2100,6 +2101,40 @@ export class AgentHost {
     } catch (err) {
       console.error('Failed to prompt session with bridge errors:', err);
     }
+  }
+
+  /**
+   * Demo-video harness only — the IPC handler is registered behind
+   * MODMIXER_DEMO=1 in main.ts. One-shot completion against the user's
+   * configured Anthropic credentials (OAuth subscription or API key), so the
+   * harness's "user-actor" bills like the app itself instead of needing a
+   * separate ANTHROPIC_API_KEY.
+   */
+  async demoComplete(args: {
+    modelId: string;
+    system: string;
+    user: string;
+  }): Promise<string> {
+    const model = this.modelRegistry.find('anthropic', args.modelId);
+    if (!model) throw new Error(`unknown anthropic model: ${args.modelId}`);
+    const auth = await this.modelRegistry.getApiKeyAndHeaders(model);
+    if (!auth.ok) throw new Error(auth.error);
+    const result = await complete(
+      model,
+      {
+        systemPrompt: args.system,
+        messages: [{ role: 'user', content: args.user, timestamp: Date.now() }],
+      },
+      {
+        apiKey: auth.apiKey,
+        maxTokens: 400,
+        ...(auth.headers ? { headers: auth.headers } : {}),
+      },
+    );
+    return result.content
+      .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
+      .map((b) => b.text)
+      .join('');
   }
 
   async shutdown(): Promise<void> {

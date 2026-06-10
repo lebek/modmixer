@@ -187,6 +187,15 @@ ipcMain.on('modmixer:quit:confirm', () => {
 // Advanced-settings toggle keeps the gate in sync live thereafter.
 confirmGate.setSkipPermissions(loadSettings().dangerouslySkipPermissions);
 const host = new AgentHost(getWindow);
+if (DEMO_MODE) {
+  // Demo-video harness: one-shot completions on the user's own credentials
+  // (powers the stage-1 "user-actor"). Never registered outside demo mode.
+  ipcMain.handle(
+    'modmixer:demo:complete',
+    (_event, args: { modelId: string; system: string; user: string }) =>
+      host.demoComplete(args),
+  );
+}
 // Boot the mod registry so it's primed by the time the renderer asks for a
 // snapshot. Subscribers (renderer broadcast, agent tools) attach below.
 const registry = getRegistry();

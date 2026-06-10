@@ -60,6 +60,9 @@ const api = {
     invoke('modmixer:agent:get-context-usage', conversationId),
   onEvent: (handler: (env: import('./preload/typed-ipc').AgentEventEnvelope) => void) =>
     on('modmixer:agent:event', handler),
+  // Demo-video harness only — rejects unless launched with MODMIXER_DEMO=1.
+  demoComplete: (args: { modelId: string; system: string; user: string }) =>
+    invoke('modmixer:demo:complete', args),
   onScopeUpgraded: (
     handler: (env: import('./preload/typed-ipc').ScopeUpgradedEnvelope) => void,
   ) => on('modmixer:agent:scope-upgraded', handler),
