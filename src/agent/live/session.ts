@@ -135,8 +135,12 @@ function liveUnavailableMessage(
 /**
  * Write the session mod skeleton directly (not via the scaffold_mod tool —
  * that's agent-facing and scope-coupled). XML-only at boot: Assemblies/ is
- * intentionally absent so the initial launch loads it as a contentless
- * mod; the first apply_live hot-builds and hot-loads the C# side.
+ * intentionally absent so the first apply_live hot-builds and hot-loads the
+ * C# side. An (empty) keyed-strings file is scaffolded because RimWorld
+ * error-logs any mod where AnyContentLoaded() is false — and a Languages/
+ * folder containing any file at all satisfies it (AnyTranslationsLoaded is
+ * a pure file-existence check), with none of the load cost or gameplay
+ * surface that a placeholder def or patch would carry.
  */
 async function scaffoldSessionMod(displayName: string): Promise<string> {
   const { workspaceDir } = getWorkspacePaths();
@@ -151,6 +155,20 @@ async function scaffoldSessionMod(displayName: string): Promise<string> {
   for (const d of ['About', 'Defs', 'Patches', 'Source']) {
     await fsp.mkdir(path.join(modPath, d), { recursive: true });
   }
+
+  const keyedDir = path.join(modPath, 'Languages', 'English', 'Keyed');
+  await fsp.mkdir(keyedDir, { recursive: true });
+  await fsp.writeFile(
+    path.join(keyedDir, 'LiveSession.xml'),
+    `<?xml version="1.0" encoding="utf-8"?>
+<!-- Keyed UI strings for this mod (empty is fine). This file's presence is
+     also what stops RimWorld from error-logging the mod as "did not load
+     any content" before the first live change lands. -->
+<LanguageData>
+</LanguageData>
+`,
+    'utf8',
+  );
 
   await fsp.writeFile(
     path.join(modPath, 'About', 'About.xml'),
