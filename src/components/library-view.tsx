@@ -16,6 +16,12 @@ import { SessionBanner } from './library/session-banner';
 type SourceFilter = 'all' | 'official' | 'local' | 'workshop' | 'workspace';
 type ColumnFilter = 'all' | 'issues';
 
+// Modmixer's own infrastructure mods (telemetry bridge + live-session
+// channel). Junction-installed and enabled automatically per session;
+// hidden from the library so users don't toggle them by hand and fight
+// that automation.
+const INFRA_PACKAGE_IDS = new Set(['modmixer.bridge', 'modmixer.live']);
+
 export function LibraryView({
   envelope,
   session,
@@ -102,7 +108,8 @@ export function LibraryView({
       const mod = byPackageId.get(pid) ?? null;
       out.push({ packageId: pid, mod, loadOrder: i + 1 });
     }
-    return out.filter(({ mod }) => {
+    return out.filter(({ packageId, mod }) => {
+      if (INFRA_PACKAGE_IDS.has(packageId)) return false;
       if (!mod) return columnFilter === 'all';
       return matchesSearch(mod) && matchesSource(mod) && matchesColumn(mod);
     });
@@ -112,6 +119,7 @@ export function LibraryView({
     const activeSet = new Set(activeOrder);
     return mods
       .filter((m) => !activeSet.has(m.about.packageIdLc))
+      .filter((m) => !INFRA_PACKAGE_IDS.has(m.about.packageIdLc))
       .filter((m) => matchesSearch(m) && matchesSource(m) && matchesColumn(m))
       .sort((a, b) => a.about.name.localeCompare(b.about.name));
   }, [mods, activeOrder, matchesSearch, matchesSource, matchesColumn]);

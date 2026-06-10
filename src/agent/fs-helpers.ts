@@ -41,6 +41,27 @@ export async function isSymlinkedInto(
   }
 }
 
+/**
+ * True iff a readdir Dirent names a scannable directory — a real directory,
+ * or a symlink/junction resolving to one. Junctions are how Modmixer syncs
+ * workspace mods into RimWorld's Mods/ and installs the bridge/live infra
+ * mods, and Dirent reports them as symlinks, NOT directories — a plain
+ * isDirectory() check silently hides every one of them. RimWorld itself
+ * follows junctions, so scanners must too.
+ */
+export async function direntIsDirectoryLike(
+  entry: fs.Dirent,
+  parentDir: string,
+): Promise<boolean> {
+  if (entry.isDirectory()) return true;
+  if (!entry.isSymbolicLink()) return false;
+  try {
+    return (await fsp.stat(path.join(parentDir, entry.name))).isDirectory();
+  } catch {
+    return false; // dangling link
+  }
+}
+
 export async function containsDll(dir: string): Promise<boolean> {
   if (!fs.existsSync(dir)) return false;
   try {

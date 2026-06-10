@@ -17,6 +17,7 @@ import { readModsConfig, writeActiveMods } from './mods-config.js';
 import {
   SKIP_DIRS,
   containsDll,
+  direntIsDirectoryLike,
   isSymlinkedInto,
   readPublishedFileId,
 } from '../fs-helpers.js';
@@ -323,7 +324,8 @@ async function scanRoot(
   const entries = await safeReaddir(root);
   const result: RegistryMod[] = [];
   for (const entry of entries) {
-    if (!entry.isDirectory() || SKIP_DIRS.has(entry.name)) continue;
+    if (SKIP_DIRS.has(entry.name)) continue;
+    if (!(await direntIsDirectoryLike(entry, root))) continue;
     const modPath = path.join(root, entry.name);
     const aboutPath = path.join(modPath, 'About', 'About.xml');
     let about: AboutXml = parseAboutXml('');
