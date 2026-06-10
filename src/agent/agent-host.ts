@@ -307,12 +307,13 @@ function providerLabel(provider: string): string {
  * what someone picking "an AI to write RimWorld mods" wants. The picker shows
  * only the IDs listed here. Update when new flagships ship.
  *
- * `claude-opus-4-8` isn't in our pinned pi-ai catalog yet (newest built-in is
- * 4-7), so it's bridged in via BRIDGE_MODELS / seedBridgeModels() below. Drop
- * that bridge once pi-ai ships the built-in entry.
+ * `claude-fable-5` and `claude-opus-4-8` aren't in our pinned pi-ai catalog
+ * yet (newest built-in is 4-7), so they're bridged in via BRIDGE_MODELS /
+ * seedBridgeModels() below. Drop a bridge once pi-ai ships the built-in entry.
  */
 const FEATURED_MODELS: Record<string, string[]> = {
   anthropic: [
+    'claude-fable-5',
     'claude-opus-4-8',
     'claude-opus-4-7',
     'claude-sonnet-4-6',
@@ -360,6 +361,7 @@ const DEFAULT_MODEL: Record<string, string> = {
  */
 const MODEL_COST_TIER: Record<string, '$' | '$$' | '$$$'> = {
   // Anthropic
+  'claude-fable-5': '$$$',
   'claude-opus-4-8': '$$$',
   'claude-opus-4-7': '$$$',
   'claude-sonnet-4-6': '$$',
@@ -392,10 +394,41 @@ const MODEL_COST_TIER: Record<string, '$' | '$$' | '$$$'> = {
  * `baseUrl` are omitted: for a built-in provider, parseModels() inherits them
  * from the provider's built-in defaults (anthropic-messages, api.anthropic.com).
  *
+ * claude-fable-5 specs match upstream pi's generated catalog (earendil-works/pi
+ * commit 66f432c, June 2026): same API surface as Opus 4.7/4.8 plus one new
+ * constraint — an explicit `thinking: {type: "disabled"}` is a 400; the param
+ * must be omitted when thinking is off.
+ *
+ * ADAPTIVE-THINKING PATCH (patches/@mariozechner+pi-ai+0.70.6.patch): pinned
+ * pi-ai 0.70.6 decides adaptive vs. budget thinking by a hardcoded model-id
+ * substring list (opus-4-6/4-7, sonnet-4-6) and ignores the
+ * `compat.forceAdaptiveThinking` flag that upstream added in 0.75.5 — so the
+ * flag is omitted above (it would be a no-op). Neither bridge model is in
+ * that list, so without the patch both fall back to budget-based thinking,
+ * which these models reject (`budget_tokens` is removed on 4.8/Fable;
+ * observed on 4.8 as blank follow-up replies) plus the deprecated
+ * interleaved-thinking beta header; fable-5 additionally 400s on the explicit
+ * disabled-thinking param when thinking is off. The patch teaches
+ * supportsAdaptiveThinking / mapThinkingLevelToEffort about opus-4-8 and
+ * fable-5, and omits `thinking` for fable-5 when off. It is pinned to 0.70.6:
+ * bumping pi-ai silently drops it (the version-stamped filename stops
+ * matching), so re-cut it on any bump. At pi-ai >= 0.77.0 (rescoped to
+ * @earendil-works) drop the patch and these bridge entries — both models are
+ * built-ins there carrying forceAdaptiveThinking.
+ *
  * Remove an entry once the pinned pi-ai release includes it as a built-in.
  */
 const BRIDGE_MODELS: Record<string, Array<Record<string, unknown>>> = {
   anthropic: [
+    {
+      id: 'claude-fable-5',
+      name: 'Claude Fable 5',
+      reasoning: true,
+      input: ['text', 'image'],
+      cost: { input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5 },
+      contextWindow: 1_000_000,
+      maxTokens: 128_000,
+    },
     {
       id: 'claude-opus-4-8',
       name: 'Claude Opus 4.8',
