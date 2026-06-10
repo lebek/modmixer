@@ -308,25 +308,58 @@ This is strictly better even for RimWorld-only users (no more wall if the
 game isn't installed yet) and is the natural multi-game shape: setting up a
 game you never use never happens.
 
-### 5.2 New Mod: a game picker, only when it matters
+### 5.2 App-level "active game" — a lens, not a mode
 
-"+ New Mod" → game cards (RimWorld / Minecraft Java). One game set up ⇒
-preselect it with a quiet switcher; the common case stays one click. The
-choice stamps `game` into the conversation scope and project marker, which
-selects adapter, prompt, and tool set for the life of that project.
+Game selection should be app-level state (`activeGame: GameId`, persisted
+in settings) — but a *default/lens*, not a hard mode wall. The split:
+
+**Follows `activeGame`:**
+
+- **Library** — fully scoped to it. The library is a view of one game's
+  install; a merged multi-game list has no coherent meaning. Switching game
+  swaps the whole view (RimWorld keeps load-order/autosort; Minecraft gets
+  a simpler enabled/disabled jar list via capability flags).
+- **Monitor** — selects which game's bridge/log stream to display.
+- **Home** — default-filtered to it, with game badges on workspace mods and
+  a cheap "all games" affordance.
+- **+ New Mod** — defaults to it (zero extra clicks in the common case);
+  the game picker remains as an override, not a gate. The choice stamps
+  `game` into the conversation scope and project marker, which selects
+  adapter, prompt, and tool set for the life of that project.
+- **Per-game setup** — switching to a not-yet-configured game is the entry
+  point for that game's setup flow (§5.1).
+
+**Ignores `activeGame`:**
+
+- **Open tabs.** A tab's project carries its own game (frozen into the
+  conversation/prompt/tool set), and tabs hold live agent sessions — a
+  global switch must never hide or interrupt them. Each tab renders from
+  its own adapter (its own launch button, monitor feed, publish targets).
+  Focusing a tab of another game does *not* silently flip `activeGame`
+  (silent mode flips are the classic mode-error source); switching is
+  manual.
+
+Two rules keep this clean:
+
+1. **The switcher doesn't exist until it matters.** With one game set up
+   there is no switcher and the UI looks exactly like today; it appears in
+   the header only once a second game is configured.
+2. **`activeGame` is a UI convenience, not plumbing.** Hold it in renderer/
+   app state (persisted via settings), but keep IPC routes and the agent
+   layer explicitly parameterized by game — conversations already carry
+   their game id. If the main process reads ambient global game state, the
+   implicit "everything is RimWorld" assumption has just been rebuilt with
+   a variable.
 
 ### 5.3 Everything else follows the adapter
 
 - **Tabs/Build view:** per-tab game badge; header button text from
   `adapter.strings` ("Launch in Minecraft"); test prompt template from the
   adapter.
-- **Library:** scoped by game. RimWorld keeps load-order/autosort UI;
-  Minecraft renders a simpler enabled/disabled jar list (capability flags
-  drive which columns/actions exist). MVP can ship without the MC library
-  view since the dev client doesn't need it.
 - **Monitor:** status bar reads `gameVersion`; panels render per declared
   monitor capabilities (perf/patches/errors). MC MVP shows the errors panel
-  fed by log parsing; perf/Mixin panels arrive with the bridge.
+  fed by log parsing; perf/Mixin panels arrive with the bridge. The MC
+  library view can ship after the MVP since the dev client doesn't need it.
 - **Publish:** panel renders the adapter's targets; metadata section edits
   `ModMetadata` (writing About.xml or fabric.mod.json underneath).
 
