@@ -9,54 +9,67 @@ the cleanest path to ship it — with an architecture that makes the *next* game
 
 ---
 
-## 1. Target: Minecraft Java 26.x on Fabric
+## 1. Target: Minecraft Java — loader is a parameter; the default is an open product call
 
-**Recommendation: latest stable Minecraft Java (26.1.x today, 26.2 lands
-June 16, 2026) on the Fabric loader.**
+Candidate loaders are **Fabric** and **NeoForge**. Legacy Forge (declining
+post-fork; its audience is on old versions only) and Quilt (marginal) are
+out. Loaders vs launchers are separate axes: Fabric/NeoForge are what a mod
+runs on; Prism/CurseForge App/Modrinth App are how players run instances.
 
-Why Fabric and not NeoForge:
+**Technically, the loaders have converged — this is no longer a technical
+decision.** Both are Gradle-based, both default to official Mojang mappings
+(Fabric dropped its remapping step as of 26.1 with the
+`net.fabricmc.fabric-loom` plugin; NeoForge's ModDevGradle has used MojMap
+throughout), both provide a `runClient` dev-client task, both expose
+decompiled, mapped Minecraft source for indexing (Loom `genSources` /
+ModDevGradle's decompiled artifact), and both ship maintained project
+templates — including for current 26.x. Two adapters would share ~80% of
+their code (JDK provisioning, Gradle wrapper flow, build diagnostics,
+dev-client test loop, index pipeline, monitor). The real cost of a loader
+is the *content* polish: scaffold template, prompt blocks, seed lore, and
+index QA for the version it targets.
 
-- **Day-one latest-version support.** Fabric ships support for new Minecraft
-  versions on release day; NeoForge was still on snapshot builds for 26.1
-  months after release. Since the brief is "latest version," Fabric is the
-  only loader that reliably tracks it.
-- **The toolchain just got dramatically simpler.** As of 26.1, Mojang ships
-  official mappings and Fabric dropped its remapping step entirely: the new
-  `net.fabricmc.fabric-loom` Gradle plugin compiles mods directly against
-  official Mojang mappings (Loom 1.15 + Gradle 9.4). No Yarn, no
-  intermediary remap, no `modImplementation` — plain `implementation`. This
-  removes the single biggest historical source of agent-confusing build
-  errors in Minecraft modding.
-- **Dominant on the newest versions.** NeoForge leads for big legacy content
-  mods on the 1.21-era; Fabric dominates mods that target current versions
-  (the Modrinth ecosystem, performance/QoL mods, new projects).
-- **Lightest runtime.** Fabric loader + Fabric API is a small install, easy
-  to provision automatically, and `gradle runClient` gives us a self-contained
-  dev client — see §4.3.
+**The actual decision is which player the first-time creator is reaching,
+and the loader (and game version) fall out of that:**
 
-Hard requirements this brings: **Java (JDK) 25** (mandatory for 26.x) and
-**Gradle** (via per-project wrapper). Both are provisionable without user
-interaction — see §4.2.
+- **Modpack players → NeoForge on pack-stable 1.21.1.** The modpack
+  heartland (ATM10 at ~18M downloads, Better MC 5, essentially every major
+  pack) runs NeoForge 1.21.1 — a ~2-year-old version, and that's normal:
+  pack-stable versions persist for years, so index/lore investment there
+  has a long shelf life. The reach story is concrete and strong: *"make an
+  add-on for the pack you already play"* — the mod drops into the user's
+  own Prism/CurseForge instance alongside Create and Mekanism. These are
+  the most engaged mod users, and CurseForge download volume lives here.
+- **Current-version players → Fabric on latest (26.1.x today; 26.2 lands
+  June 16, 2026).** Fabric ships day-one support for every drop and owns
+  new mods on current versions and the Prism+Modrinth crowd. The reach
+  story: the mod runs in *their* game and their friends' games, all
+  auto-updated to latest.
 
-**Reach.** Loaders vs launchers are separate axes: Forge/NeoForge/Fabric
-are what a mod runs on; Prism/CurseForge App/Modrinth App are how players
-run instances. Through a reach lens: legacy Forge's audience is on *old*
-versions only (post-fork it's declining on 1.20.5+ — irrelevant unless we
-add old-version support); NeoForge owns the modpack/content audience but
-structurally lags the game (snapshots for 26.1 months after release), so it
-can't carry a "latest version" product; Fabric owns new mods on current
-versions and the Prism+Modrinth power-user stack. On 26.x today this is
-barely a choice — Fabric is the only mature option. Two things soften the
-cost: cross-loader bridges (Forgified Fabric API / Connector) let
-Fabric-targeted mods reach NeoForge users, and reach is driven more by
-*publishing to both CurseForge and Modrinth* than by loader choice — which
-raises the priority of the CurseForge publish target in Phase 2.
+A third shape worth weighing: since NeoForge now has a 26.1.2 MDK, **one
+loader (NeoForge) × two versions (pack-stable + latest)** covers both ends
+more cheaply than two loaders × one version — one bridge mod, one template
+family, one lore corpus with version-conditional notes — at the cost of
+ceding the Fabric-native crowd until a second adapter lands.
 
-NeoForge support later slots into the same adapter seam as a sibling
-`minecraft-neoforge` adapter (or a loader axis on one `minecraft-java`
-adapter) — the unambiguous second loader, timed for when a pack-stable
-NeoForge 26.x exists. Skip legacy Forge and Quilt. Prism Launcher is the
-natural Phase-2 production-test integration: its instances are plain
+**Decision: deferred.** The architecture treats `(loader, gameVersion)` as
+*project-level parameters* (stamped at creation alongside the game id, §3.1),
+the index is already version-fingerprinted, and adapters share the
+infrastructure above — so the MVP ships with one loader polished first, and
+the default can be revisited with real user data without rework. Where the
+rest of this document needs a concrete loader for illustration it uses
+Fabric; every such point has a direct NeoForge equivalent.
+
+Hard requirements either way: **JDK** (Java 25 for 26.x; Java 21 for the
+1.21.1 era — provision per target version) and **Gradle** via per-project
+wrapper. Both provisionable without user interaction — see §4.2.
+
+Reach is driven more by *publishing* than by loader: a first-timer's users
+come from CurseForge and Modrinth search, so publishing to both platforms
+is the bigger lever — which raises the priority of the CurseForge publish
+target in Phase 2. Cross-loader bridges (Forgified Fabric API / Connector)
+further soften loader lock-in. Prism Launcher is the natural Phase-2
+production-test integration regardless of loader: its instances are plain
 folders with a documented layout, far more automatable than the official
 launcher or the closed CurseForge app, and it's what the most engaged mod
 users run.
@@ -188,9 +201,11 @@ Design rules that keep this clean:
 
 - `Conversation.scope` gains `game: GameId` (default `'rimworld'` on load —
   one-line migration in `conversations.ts`).
-- Workspace mods get `.modmixer/project.json` with `{ game: GameId }`
-  (absence ⇒ rimworld). The schematic sidecar already establishes the
-  `.modmixer/` convention.
+- Workspace mods get `.modmixer/project.json` with
+  `{ game: GameId, params?: { loader?: string, gameVersion?: string } }`
+  (absence ⇒ rimworld). `params` carries per-game axes like Minecraft's
+  `(loader, gameVersion)` so they're project-level, not app-level (§1).
+  The schematic sidecar already establishes the `.modmixer/` convention.
 - Settings: `rimworldInstallOverride: string|null` →
   `installOverrides: Record<GameId, string|null>` (migrate the old key), plus
   per-game setup-completed markers.
@@ -204,8 +219,10 @@ Design rules that keep this clean:
 
 ### 4.1 Project shape
 
-Scaffold from a bundled Fabric template (the `templates/minecraft-java/`
-data directory), substituting mod id/name/author:
+Scaffold from a bundled per-loader template (`templates/minecraft-java/
+<loader>/`), substituting mod id/name/author. Fabric shape shown; the
+NeoForge MDK template is structurally identical with `neoforge.mods.toml`
+in place of `fabric.mod.json` and ModDevGradle in place of Loom:
 
 ```
 my-mod/
@@ -245,7 +262,8 @@ assets pipeline (sprite import, SVG→PNG) is directly reusable for textures.
 
 Two viable modes; **ship dev-client first**:
 
-1. **Dev client (recommended default): `./gradlew runClient`.** Loom
+1. **Dev client (recommended default): `./gradlew runClient`.** Loom (or
+   ModDevGradle, identically)
    launches an isolated Minecraft client with the mod loaded from the
    workspace — no touching the user's `.minecraft`, no launcher, no
    Microsoft auth needed for singleplayer testing, and **we own the
@@ -271,7 +289,7 @@ RimWorld parity comes from three sources, all with direct MC analogs:
 | RimWorld | Minecraft Java equivalent |
 | --- | --- |
 | Defs XML index (`search_defs`) | **Vanilla registry reports**: `java -DbundlerMainClass=net.minecraft.data.Main -jar server.jar --reports` dumps every block/item/entity/biome id + block-state JSON. Index into the same SQLite (namespace/registry/identifier). |
-| ilspycmd decompile of Assembly-CSharp.dll | **Loom `genSources`**: produces full decompiled, Mojang-mapped Minecraft source (Vineflower) per version — *better* than our DIY decompile path; we just index its output. |
+| ilspycmd decompile of Assembly-CSharp.dll | **Loom `genSources`** (or ModDevGradle's decompiled-source artifact): full decompiled, Mojang-mapped Minecraft source (Vineflower) per version — *better* than our DIY decompile path; we just index its output. |
 | tree-sitter-c-sharp symbol index (`read_csharp_symbol`) | tree-sitter-**java** over genSources output (`read_symbol`). Same fetch script pattern as `fetch-tree-sitter-csharp.mjs`. |
 | ripgrep over decompiled source (`search_source`) | Identical — bundled ripgrep pointed at the genSources corpus. |
 | `decompile_dll` for other mods | `decompile_jar` via Vineflower (small standalone jar, runs on the provisioned JDK — no new native binaries). |
@@ -290,9 +308,10 @@ pipeline already exists and is game-agnostic; give it a game dimension.
 ### 4.5 Monitoring & bridge (phase 2)
 
 The TCP protocol (`hello/perf/mods/errors`, port 13371, error hashing,
-run tracking, attribution) generalizes with minor renames. A Fabric
-`modmixer-bridge` mod can stream the same shapes: TPS/MSPT for perf, the
-Fabric loader's mod container list for inventory, log4j appender +
+run tracking, attribution) generalizes with minor renames. A loader-side
+`modmixer-bridge` mod (Fabric entrypoint or NeoForge event subscriber —
+Mixin is available on both) can stream the same shapes: TPS/MSPT for perf,
+the loader's mod container list for inventory, log4j appender +
 stack-attribution for errors, and Mixin info where the Harmony patch graph
 sits today. Attribution by mod id from stack frames works the same way.
 But because §4.3's dev client gives us stdout, the bridge is an
@@ -393,7 +412,8 @@ existing RimWorld code behind `src/games/rimworld/` mechanically; add
 prompt paths). Ship this inside a normal release; if nothing regresses, the
 seam is right.
 
-**Phase 1 — Minecraft Java MVP.** Fabric template + scaffold; JDK
+**Phase 1 — Minecraft Java MVP.** Pick the first loader (§1 decision) and
+polish it: template + scaffold; JDK
 provisioning + priming build; `build_mod` via Gradle; `runClient` test loop
 with stdout/crash-report error flow into the existing ErrorBuffer; index =
 registry reports + genSources + tree-sitter-java + ripgrep; MC prompt
@@ -406,8 +426,10 @@ chat → build → test-in-game → fix-from-errors → publish.**
 prefer a Prism Launcher dev instance (plain-folder layout, automatable)
 over official-launcher profiles; MC library view; lore expansion from
 dogfooding + community lore; CurseForge publish target (reach: most users
-discover mods on CurseForge + Modrinth, so publish to both); NeoForge
-adapter once a pack-stable NeoForge 26.x exists.
+discover mods on CurseForge + Modrinth, so publish to both); the second
+loader adapter (whichever of Fabric/NeoForge wasn't first — ~80% shared
+code, so the marginal cost is template + prompt/lore + index QA); further
+game versions on the version-fingerprinted index.
 
 Biggest schedule risks, in order: lore/knowledge quality (content, not
 code — start dogfooding early), first-run toolchain time (mitigate with the
