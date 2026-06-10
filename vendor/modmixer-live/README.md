@@ -20,5 +20,7 @@ mod). Override it elsewhere:
 
     dotnet build Source/ModMixerLive.csproj -p:RimWorldManagedDir=/path/to/RimWorld/Data/Managed
 
-The build produces `Assemblies/` (ModMixerLive.dll plus 0Harmony.dll). It is
-not checked in: the app refuses to install the mod until it has been built.
+The build produces `Assemblies/` (ModMixerLive.dll plus 0Harmony.dll), which
+is checked in so the app and packaged installer work out of the box (the app
+refuses to install the mod when the assembly is missing). Rebuild and commit
+the result whenever the C# source changes.

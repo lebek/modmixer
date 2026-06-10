@@ -27,5 +27,15 @@
       <HintPath>$(RimWorldManagedDir)/UnityEngine.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <!-- IMGUI (GUI/Event/GUIContent) and TextAnchor live in their own module
+         assemblies in modern Unity; UnityEngine.dll is only a facade. -->
+    <Reference Include="UnityEngine.IMGUIModule">
+      <HintPath>$(RimWorldManagedDir)/UnityEngine.IMGUIModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.TextRenderingModule">
+      <HintPath>$(RimWorldManagedDir)/UnityEngine.TextRenderingModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
   </ItemGroup>
 </Project>
