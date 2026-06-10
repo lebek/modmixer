@@ -1841,7 +1841,17 @@ export class AgentHost {
         onProgress: (message: string) => {
           this.emitOAuth({ type: 'login-progress', providerId, message });
         },
-        onPrompt: (prompt: OAuthPrompt) => this.awaitPrompt(providerId, prompt),
+        onPrompt: (prompt: OAuthPrompt) => {
+          // Modmixer targets individual users, not orgs. pi's GitHub Copilot
+          // flow opens with a "GitHub Enterprise URL/domain" prompt; auto-answer
+          // it with "" (→ github.com) so it never reaches the UI. It's also the
+          // only prompt that flow issues before opening the browser, so
+          // suppressing it is what lets the device-code box render at all.
+          if (providerId === 'github-copilot' && /enterprise/i.test(prompt.message)) {
+            return Promise.resolve('');
+          }
+          return this.awaitPrompt(providerId, prompt);
+        },
         onManualCodeInput: () =>
           this.awaitPrompt(providerId, {
             message: 'Paste the authorization code from your browser:',
