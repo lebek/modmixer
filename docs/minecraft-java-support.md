@@ -38,9 +38,28 @@ Hard requirements this brings: **Java (JDK) 25** (mandatory for 26.x) and
 **Gradle** (via per-project wrapper). Both are provisionable without user
 interaction — see §4.2.
 
+**Reach.** Loaders vs launchers are separate axes: Forge/NeoForge/Fabric
+are what a mod runs on; Prism/CurseForge App/Modrinth App are how players
+run instances. Through a reach lens: legacy Forge's audience is on *old*
+versions only (post-fork it's declining on 1.20.5+ — irrelevant unless we
+add old-version support); NeoForge owns the modpack/content audience but
+structurally lags the game (snapshots for 26.1 months after release), so it
+can't carry a "latest version" product; Fabric owns new mods on current
+versions and the Prism+Modrinth power-user stack. On 26.x today this is
+barely a choice — Fabric is the only mature option. Two things soften the
+cost: cross-loader bridges (Forgified Fabric API / Connector) let
+Fabric-targeted mods reach NeoForge users, and reach is driven more by
+*publishing to both CurseForge and Modrinth* than by loader choice — which
+raises the priority of the CurseForge publish target in Phase 2.
+
 NeoForge support later slots into the same adapter seam as a sibling
 `minecraft-neoforge` adapter (or a loader axis on one `minecraft-java`
-adapter); nothing in this proposal blocks it.
+adapter) — the unambiguous second loader, timed for when a pack-stable
+NeoForge 26.x exists. Skip legacy Forge and Quilt. Prism Launcher is the
+natural Phase-2 production-test integration: its instances are plain
+folders with a documented layout, far more automatable than the official
+launcher or the closed CurseForge app, and it's what the most engaged mod
+users run.
 
 ---
 
@@ -383,10 +402,12 @@ publish (or export-jar fallback). **This is "Minecraft Java today": create →
 chat → build → test-in-game → fix-from-errors → publish.**
 
 **Phase 2 — depth.** Fabric bridge mod on the generalized TCP protocol
-(perf + mod inventory + richer attribution); production `.minecraft`
-install + launcher profile flow; MC library view; lore expansion from
-dogfooding + community lore; CurseForge target; NeoForge adapter when
-demand shows up.
+(perf + mod inventory + richer attribution); production install flow —
+prefer a Prism Launcher dev instance (plain-folder layout, automatable)
+over official-launcher profiles; MC library view; lore expansion from
+dogfooding + community lore; CurseForge publish target (reach: most users
+discover mods on CurseForge + Modrinth, so publish to both); NeoForge
+adapter once a pack-stable NeoForge 26.x exists.
 
 Biggest schedule risks, in order: lore/knowledge quality (content, not
 code — start dogfooding early), first-run toolchain time (mitigate with the
