@@ -63,6 +63,7 @@ export function ModHeader({
           </button>
         ) : (
           <button
+            data-demo="launch"
             onClick={onTest}
             disabled={busy || !hasAi}
             title={!hasAi ? 'Connect an AI provider to run tests' : undefined}

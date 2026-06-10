@@ -336,7 +336,9 @@ function applyEvent(cur: ConvoRuntime, event: AgentSessionEvent): ConvoRuntime {
   }
 }
 
-function handleEvent(env: AgentEventEnvelope): void {
+// Exported for demo-hooks.ts (dev-only replay injection); the product itself
+// only feeds this from the IPC subscription below.
+export function handleAgentEvent(env: AgentEventEnvelope): void {
   const id = env.conversationId;
   if (!id) return;
   const cur = runtimes.get(id);
@@ -352,7 +354,7 @@ function handleEvent(env: AgentEventEnvelope): void {
 // One global subscription for the whole renderer lifetime. Events are routed
 // to the right conversation by id — this is what keeps a background tab's
 // turn accumulating while its chat component is unmounted.
-window.modmixer.onEvent(handleEvent);
+window.modmixer.onEvent(handleAgentEvent);
 
 function subscribeTo(conversationId: string, cb: () => void): () => void {
   let set = listeners.get(conversationId);

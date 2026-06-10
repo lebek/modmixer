@@ -105,6 +105,25 @@ app.on('second-instance', () => {
 // About menu, and userData paths match the packaged app.
 app.setName('Modmixer');
 
+// Demo-video harness (dev-only; driven externally from ~/projects/modmixer-demo).
+// MODMIXER_DEMO=1 opens a CDP port so the harness can drive the renderer, and
+// reshapes the window (createWindow below) for clean capture. Inert otherwise.
+const DEMO_MODE = process.env.MODMIXER_DEMO === '1';
+if (DEMO_MODE) {
+  app.commandLine.appendSwitch(
+    'remote-debugging-port',
+    process.env.MODMIXER_DEMO_CDP ?? '9223',
+  );
+  // Optional supersampling: render at N× device scale so post-production
+  // zooms stay sharp (captured frames come out at N× the window size).
+  if (process.env.MODMIXER_DEMO_SCALE) {
+    app.commandLine.appendSwitch(
+      'force-device-scale-factor',
+      process.env.MODMIXER_DEMO_SCALE,
+    );
+  }
+}
+
 // Hide the default Electron menu strip on Windows/Linux. The Mac menubar lives
 // in the OS chrome so it's free real estate; on other platforms it duplicates
 // our in-app navigation and steals vertical space.
@@ -267,15 +286,36 @@ const createWindow = () => {
     (themePref === 'auto' && nativeTheme.shouldUseDarkColors);
   const bg = dark ? '#131417' : '#f4f4f0';
 
+  // Demo capture wants an exact, chrome-free canvas at a fixed content size;
+  // normal runs get the standard framed window.
+  const demoSize = DEMO_MODE
+    ? (process.env.MODMIXER_DEMO_SIZE ?? '1920x1080').split('x').map(Number)
+    : null;
+
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 800,
+    width: demoSize?.[0] || 1280,
+    height: demoSize?.[1] || 800,
+    ...(demoSize
+      ? { frame: false, resizable: false, useContentSize: true }
+      : {}),
     backgroundColor: bg,
     icon: devIconPath ?? undefined,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
     },
   });
+
+  if (DEMO_MODE) {
+    // Let the harness's injected MediaRecorder capture the app without a
+    // source picker: grant getDisplayMedia with our own frame (tab capture —
+    // no OS chrome, immune to window occlusion).
+    mainWindow.webContents.session.setDisplayMediaRequestHandler(
+      (_request, callback) => {
+        const frame = mainWindow?.webContents.mainFrame;
+        if (frame) callback({ video: frame });
+      },
+    );
+  }
 
   // Quitting aborts any in-flight agent turn, so defer the close to the
   // renderer, which confirms with the user first (only when a turn is actually

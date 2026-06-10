@@ -14,6 +14,10 @@ if (typeof __SENTRY_DSN__ === 'string' && __SENTRY_DSN__) {
   Sentry.init({});
 }
 
+// Demo-video harness seam (~/projects/modmixer-demo). Statically false in
+// production builds, so the demo-hooks chunk is never emitted.
+if (import.meta.env.DEV) void import('./demo-hooks');
+
 const container = document.getElementById('root');
 if (!container) throw new Error('Missing #root element');
 createRoot(container).render(<ConsentGate />);
