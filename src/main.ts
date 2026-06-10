@@ -63,6 +63,7 @@ import { registerAssetsRoutes } from './main/routes/assets.js';
 import { registerAttachmentRoutes } from './main/routes/attachments.js';
 import { registerSnapshotsRoutes } from './main/routes/snapshots.js';
 import { registerSystemRoutes } from './main/routes/system.js';
+import { registerLiveRoutes } from './main/routes/live.js';
 import {
   installAssetProtocolHandler,
   registerAssetSchemeAsPrivileged,
@@ -209,6 +210,7 @@ registerAssetsRoutes(routeContext);
 registerAttachmentRoutes(routeContext);
 registerSnapshotsRoutes(routeContext);
 registerSystemRoutes(routeContext);
+registerLiveRoutes(routeContext);
 
 // Renderer-side broadcasts for events whose handlers can't easily live in
 // route modules (they need the live mainWindow ref).

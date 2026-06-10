@@ -75,6 +75,8 @@ const api = {
     invoke('modmixer:settings:set-multi-chat', enabled),
   setAutoLaunch: (enabled: boolean) =>
     invoke('modmixer:settings:set-auto-launch', enabled),
+  setLiveSessions: (enabled: boolean) =>
+    invoke('modmixer:settings:set-live-sessions', enabled),
   setDangerouslySkipPermissions: (enabled: boolean) =>
     invoke('modmixer:settings:set-dangerously-skip-permissions', enabled),
   setCommunityLore: (enabled: boolean) =>
@@ -189,6 +191,13 @@ const api = {
   onAssetsChanged: (
     handler: (env: import('./preload/typed-ipc').AssetsChangedEnvelope) => void,
   ) => on('modmixer:assets:changed', handler),
+
+  // Live sessions (in-game prompting)
+  launchLiveSession: () => invoke('modmixer:live:launch'),
+  getLiveState: () => invoke('modmixer:live:get-state'),
+  onLiveState: (
+    handler: (state: import('./agent/live/protocol').LiveConnectionState) => void,
+  ) => on('modmixer:live:state', handler),
 
   // Monitor (in-game bridge)
   getMonitorState: () => invoke('modmixer:monitor:get-state'),

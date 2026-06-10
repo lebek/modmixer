@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { WorkspaceMod } from '../agent/workspace';
 import { ModTile } from './mod-tile';
 import { byUpdatedDesc } from '@/lib/sort-mods';
@@ -7,13 +8,29 @@ export function ModsView({
   onOpen,
   onNewMod,
   onImportMod,
+  liveSessions,
+  onLaunchLiveSession,
 }: {
   mods: WorkspaceMod[];
   onOpen: (folder: string) => void;
   onNewMod: () => void;
   onImportMod: () => void;
+  liveSessions: boolean;
+  onLaunchLiveSession: () => Promise<void>;
 }) {
   const sorted = [...mods].sort(byUpdatedDesc);
+  // Launching quits/starts RimWorld in the main process and takes several
+  // seconds — keep the button disabled with a busy label until it settles
+  // (errors are surfaced by the handler itself).
+  const [launching, setLaunching] = useState(false);
+  const launchLive = async () => {
+    setLaunching(true);
+    try {
+      await onLaunchLiveSession();
+    } finally {
+      setLaunching(false);
+    }
+  };
   return (
     <div className="flex-1 overflow-auto px-8 py-8">
       <div className="mx-auto max-w-5xl">
@@ -27,6 +44,16 @@ export function ModsView({
             </p>
           </div>
           <div className="flex items-center gap-2">
+            {liveSessions && (
+              <button
+                onClick={() => void launchLive()}
+                disabled={launching}
+                title="Start RimWorld in a sandboxed test colony and prompt Modmixer from inside the game. Experimental."
+                className="rounded-md border border-line bg-paper px-4 py-2 font-mono text-[11px] uppercase tracking-[0.18em] text-muted transition-colors hover:border-ink/40 hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {launching ? 'launching…' : 'launch live session'}
+              </button>
+            )}
             <button
               onClick={onImportMod}
               className="rounded-md border border-line bg-paper px-4 py-2 font-mono text-[11px] uppercase tracking-[0.18em] text-muted transition-colors hover:border-ink/40 hover:text-ink"

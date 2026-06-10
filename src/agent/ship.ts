@@ -31,6 +31,28 @@ function appendBridgeIfAvailable(
 }
 
 /**
+ * Append caller-supplied infrastructure mods (e.g. `modmixer.live`) after
+ * the bridge. Ids the registry can't resolve are dropped — appending a
+ * packageId with no installed mod behind it would trip RimWorld's
+ * missing-mod warning on launch.
+ */
+function appendExtraInfraMods(
+  activeMods: string[],
+  extra: string[] | undefined,
+  installedPids: Set<string>,
+): string[] {
+  if (!extra || extra.length === 0) return activeMods;
+  const out = [...activeMods];
+  for (const pid of extra) {
+    const lc = pid.toLowerCase();
+    if (out.includes(lc)) continue;
+    if (!installedPids.has(lc)) continue;
+    out.push(lc);
+  }
+  return out;
+}
+
+/**
  * Render asset-scan drift warnings into a single agent-facing line. Each
  * warning is already a complete sentence from cs-manifest's drift check —
  * we just prefix and join. Returns null when the list is empty so the
@@ -56,6 +78,16 @@ export interface ShipAndLaunchOptions {
    * (the user's real list already loads everything).
    */
   companionMods?: string[];
+  /**
+   * Infrastructure packageIds to append at the end of the active list,
+   * after the bridge — used by live sessions to co-load `modmixer.live`.
+   * Like the bridge these are appended post-autosort (so they load last)
+   * and are not reported in `added` (infrastructure, not test diff).
+   * Caller is responsible for the mod actually being installed; missing
+   * ids would just trip RimWorld's missing-mod warning, so we skip any id
+   * the registry can't see.
+   */
+  extraInfraMods?: string[];
 }
 
 export interface ShipAndLaunchDetails {
@@ -163,8 +195,18 @@ export async function shipAndLaunch(
     // Append the bridge packageId after autosort so it loads last — the
     // bridge's Harmony patches register on ModContentPack ctor, and we want
     // them to see every other mod's patches already in place when it
-    // initializes the patch graph snapshot.
-    const activeMods = appendBridgeIfAvailable(testSet.reducedActive, bridge);
+    // initializes the patch graph snapshot. Extra infra mods (live) go
+    // after the bridge for the same reason.
+    const installedPids = new Set(
+      snapshot.mods
+        .map((m) => m.about.packageIdLc)
+        .filter((p): p is string => !!p),
+    );
+    const activeMods = appendExtraInfraMods(
+      appendBridgeIfAvailable(testSet.reducedActive, bridge),
+      opts.extraInfraMods,
+      installedPids,
+    );
     // Carry over <version> and <knownExpansions> from the user's real
     // ModsConfig so DLCs the user owns stay declared in the isolated copy
     // (knownExpansions gates DLC content even though the active list also
@@ -279,7 +321,11 @@ export async function shipAndLaunch(
   // Same bridge-at-the-end story as the isolated path. We don't add the
   // bridge to `added` though — the bridge is infrastructure, not part of
   // the mod-test diff we report back to the agent.
-  const finalActiveOrder = appendBridgeIfAvailable(sorted.order, bridge);
+  const finalActiveOrder = appendExtraInfraMods(
+    appendBridgeIfAvailable(sorted.order, bridge),
+    opts.extraInfraMods,
+    new Set(installedByPid.keys()),
+  );
 
   const reordered =
     finalActiveOrder.length !== before.length ||

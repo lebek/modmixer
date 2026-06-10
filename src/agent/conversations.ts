@@ -55,6 +55,14 @@ export interface Conversation {
    */
   archivedAt?: number;
   /**
+   * True for conversations driving a live session — the in-game chat flow
+   * where prompts arrive over the Live TCP channel and changes are applied
+   * to the running game. Live chats get a restricted tool set (no bash, no
+   * run_test_cycle) and a live-mode system prompt; see agent-host's
+   * buildCustomTools and system-prompt's live section.
+   */
+  live?: boolean;
+  /**
    * Absolute paths of files/directories the user attached to this chat. The
    * files are NOT copied — only their paths are remembered, so the read-side
    * path allowlist can be rebuilt when the session is reconstructed (tab
@@ -121,6 +129,7 @@ export function addConversation(entry: {
   systemPrompt?: string;
   model?: ModelSelection;
   thinkingLevel?: ThinkingLevel;
+  live?: boolean;
 }): Conversation {
   const now = Date.now();
   const convo: Conversation = {
@@ -133,6 +142,7 @@ export function addConversation(entry: {
     systemPrompt: entry.systemPrompt,
     model: entry.model,
     thinkingLevel: entry.thinkingLevel,
+    live: entry.live,
   };
   load().conversations.push(convo);
   persist();

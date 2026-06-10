@@ -148,6 +148,9 @@ const EXCLUDE_BASENAMES = new Set<string>([
   'bin',
   'obj',
   'node_modules',
+  // Live-session build products (hot assemblies + one-shot scratch builds).
+  // Versioned per-iteration DLLs, useless to roll back and big.
+  '.live',
 ]);
 
 // =========================================================================

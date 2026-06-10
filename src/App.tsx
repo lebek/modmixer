@@ -13,7 +13,7 @@ import { ModsView } from './components/mods-view';
 import { LibraryView } from './components/library-view';
 import type { RestoreResult } from './components/saves-view';
 import { SessionRecoveryDialog } from './components/session-recovery-dialog';
-import { appAlert } from './components/app-dialog';
+import { appAlert, appConfirm } from './components/app-dialog';
 import type { BuildPanel } from './components/mod-build-sidebar';
 import {
   dropConversation,
@@ -54,6 +54,7 @@ export function App() {
   const [session, setSession] = useState<ActiveSession | null>(null);
   const [recoveryShown, setRecoveryShown] = useState(false);
   const [multiChat, setMultiChat] = useState(false);
+  const [liveSessions, setLiveSessions] = useState(false);
   const [skipPermissions, setSkipPermissions] = useState(false);
   // Bumped after a chat is created/archived/restored so the sidebar's chat
   // list re-fetches. The list also self-refreshes off agent events.
@@ -92,6 +93,7 @@ export function App() {
   const refreshSettingsFlags = useCallback(() => {
     void window.modmixer.getSettings().then((s) => {
       setMultiChat(s.multiChat);
+      setLiveSessions(s.liveSessions);
       setSkipPermissions(s.dangerouslySkipPermissions);
     });
   }, []);
@@ -558,6 +560,37 @@ export function App() {
     }
   };
 
+  // Live session: quit any running RimWorld, scaffold a session mod, launch
+  // the game with the Live in-game mod, then open the created mod the same
+  // way "+ New Mod" does (conversation resolution is automatic via
+  // resolveConversationForMod, so the returned conversationId is unused).
+  // First-ever launch shows a one-time consent dialog.
+  const launchLiveSession = async () => {
+    if (!hasAi) {
+      openSettings('providers');
+      return;
+    }
+    const consentKey = 'modmixer.live.consentShown';
+    if (!localStorage.getItem(consentKey)) {
+      const ok = await appConfirm(
+        "Modmixer will start RimWorld in a sandboxed test colony with the Modmixer Live mod installed. You prompt from a chat window inside the game, and Modmixer builds and runs code in that session without asking again. Your real saves and mod list aren't touched. In-game prompts use your AI credits like normal chat.",
+        { title: 'Launch a live session?', okLabel: 'Launch' },
+      );
+      if (!ok) return;
+      localStorage.setItem(consentKey, '1');
+    }
+    try {
+      const { folder } = await window.modmixer.launchLiveSession();
+      await refreshMods();
+      await openMod(folder);
+    } catch (err) {
+      console.error(err);
+      void appAlert(
+        err instanceof Error ? err.message : 'Failed to launch live session.',
+      );
+    }
+  };
+
   const importMod = async () => {
     try {
       const imported = await window.modmixer.importModFromFolder();
@@ -713,6 +746,8 @@ export function App() {
           onOpen={openMod}
           onNewMod={newMod}
           onImportMod={importMod}
+          liveSessions={liveSessions}
+          onLaunchLiveSession={launchLiveSession}
         />
       )}
       {settingsSection && (

@@ -3,18 +3,20 @@ import { PostHog } from 'posthog-node';
 import { loadSettings, saveSettings } from './settings.js';
 
 /**
- * Product-analytics events. Three, intentionally:
- *   - app_started   → usage / retention / version health
- *   - mod_created   → activation
- *   - mod_published → value delivered
+ * Product-analytics events. Four, intentionally:
+ *   - app_started           → usage / retention / version health
+ *   - mod_created           → activation
+ *   - mod_published         → value delivered
+ *   - live_session_launched → is the Live experiment worth graduating?
  *
- * Don't add a fourth without a specific question it answers. Properties
+ * Don't add a fifth without a specific question it answers. Properties
  * are typed so call sites can't drift.
  */
 export type TelemetryEvent =
   | { name: 'app_started'; props?: Record<string, never> }
   | { name: 'mod_created'; props?: Record<string, never> }
-  | { name: 'mod_published'; props?: Record<string, never> };
+  | { name: 'mod_published'; props?: Record<string, never> }
+  | { name: 'live_session_launched'; props?: Record<string, never> };
 
 /**
  * Configured at build time via Vite's `define`. Empty string = analytics

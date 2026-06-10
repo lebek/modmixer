@@ -42,6 +42,7 @@ export function AppSettingsDialog({
   const [multiChat, setMultiChat] = useState(false);
   const [communityLore, setCommunityLore] = useState(false);
   const [autoLaunch, setAutoLaunch] = useState(false);
+  const [liveSessions, setLiveSessions] = useState(false);
   const [skipPermissions, setSkipPermissions] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -56,6 +57,7 @@ export function AppSettingsDialog({
       setMultiChat(s.multiChat);
       setCommunityLore(s.useCommunityLore);
       setAutoLaunch(s.autoLaunch);
+      setLiveSessions(s.liveSessions);
       setSkipPermissions(s.dangerouslySkipPermissions);
       setLoaded(true);
     });
@@ -102,6 +104,11 @@ export function AppSettingsDialog({
   const changeAutoLaunch = async (next: boolean) => {
     setAutoLaunch(next);
     await window.modmixer.setAutoLaunch(next);
+  };
+
+  const changeLiveSessions = async (next: boolean) => {
+    setLiveSessions(next);
+    await window.modmixer.setLiveSessions(next);
   };
 
   const changeSkipPermissions = async (next: boolean) => {
@@ -183,6 +190,8 @@ export function AppSettingsDialog({
                 <AdvancedSection
                   multiChat={multiChat}
                   onMultiChatChange={changeMultiChat}
+                  liveSessions={liveSessions}
+                  onLiveSessionsChange={changeLiveSessions}
                   skipPermissions={skipPermissions}
                   onSkipPermissionsChange={changeSkipPermissions}
                 />
@@ -500,11 +509,15 @@ function AppearanceSection({
 function AdvancedSection({
   multiChat,
   onMultiChatChange,
+  liveSessions,
+  onLiveSessionsChange,
   skipPermissions,
   onSkipPermissionsChange,
 }: {
   multiChat: boolean;
   onMultiChatChange: (next: boolean) => void | Promise<void>;
+  liveSessions: boolean;
+  onLiveSessionsChange: (next: boolean) => void | Promise<void>;
   skipPermissions: boolean;
   onSkipPermissionsChange: (next: boolean) => void | Promise<void>;
 }) {
@@ -540,6 +553,24 @@ function AdvancedSection({
             overwrite the other's work. Keep parallel chats on separate tasks.
           </div>
         )}
+      </div>
+
+      <div className="border-t border-line pt-4">
+        <label className="flex cursor-pointer items-start gap-2">
+          <input
+            type="checkbox"
+            checked={liveSessions}
+            onChange={(e) => void onLiveSessionsChange(e.target.checked)}
+            className="mt-0.5"
+          />
+          <span className="text-sm text-ink">
+            Live Sessions (experimental)
+            <span className="mt-0.5 block text-xs text-muted">
+              Prompt Modmixer from inside RimWorld and see changes applied to
+              the running game. Toy-grade and experimental.
+            </span>
+          </span>
+        </label>
       </div>
 
       <div className="border-t border-line pt-4">

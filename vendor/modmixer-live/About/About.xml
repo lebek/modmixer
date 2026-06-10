@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ModMetaData>
+  <name>Modmixer Live</name>
+  <packageId>modmixer.live</packageId>
+  <author>Modmixer</author>
+  <description>Experimental in-game live-modding companion for the Modmixer desktop app. Adds an in-game chat window for prompting the Modmixer agent, and applies what the agent sends back — hot-loaded assemblies, one-shot C# actions, and def reloads — over a localhost connection. Requires the Modmixer app; installed automatically for live sessions.</description>
+  <supportedVersions>
+    <li>1.5</li>
+    <li>1.6</li>
+  </supportedVersions>
+</ModMetaData>

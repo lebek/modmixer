@@ -36,6 +36,8 @@ import type {
   ModsSnapshot,
   MonitorConnectionState,
 } from '../agent/monitor/protocol';
+import type { LiveConnectionState } from '../agent/live/protocol';
+import type { LiveSessionLaunch } from '../agent/live/session';
 import type {
   PublishProgressEvent,
   PublishResult,
@@ -156,6 +158,7 @@ export interface Channels {
   'modmixer:settings:set-multi-chat': (enabled: boolean) => Settings;
   'modmixer:settings:set-community-lore': (enabled: boolean) => Settings;
   'modmixer:settings:set-auto-launch': (enabled: boolean) => Settings;
+  'modmixer:settings:set-live-sessions': (enabled: boolean) => Settings;
   'modmixer:settings:set-dangerously-skip-permissions': (
     enabled: boolean,
   ) => Settings;
@@ -278,6 +281,10 @@ export interface Channels {
   'modmixer:monitor:get-state': () => MonitorConnectionState;
   'modmixer:monitor:get-snapshot': () => ModsSnapshot | null;
 
+  // Live sessions (in-game prompting)
+  'modmixer:live:launch': () => LiveSessionLaunch;
+  'modmixer:live:get-state': () => LiveConnectionState;
+
   // OAuth
   'modmixer:oauth:list': () => OAuthLink[];
   'modmixer:oauth:login': (providerId: string) => void;
@@ -398,6 +405,7 @@ export interface Events {
   'modmixer:session:changed': ActiveSession | null;
   'modmixer:monitor:state': MonitorConnectionState;
   'modmixer:monitor:message': BridgeMessage;
+  'modmixer:live:state': LiveConnectionState;
   'modmixer:workshop:progress': PublishProgressEvent;
   'modmixer:snapshots:changed': SnapshotsChangedEvent;
   'modmixer:oauth:event': OAuthEvent;

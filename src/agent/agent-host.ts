@@ -34,6 +34,14 @@ import {
 } from './monitor/error-buffer.js';
 import { getMonitorServer } from './monitor/server.js';
 import type { MonitorConnectionState } from './monitor/protocol.js';
+import { getLiveServer } from './live/server.js';
+import { removeLiveInstall } from './live/install.js';
+import type {
+  LiveConnectionState,
+  LiveUserPrompt,
+} from './live/protocol.js';
+import { createApplyLiveTool } from './tools/apply-live.js';
+import { createGameActionTool } from './tools/game-action.js';
 import { getWorkspaceMod } from './workspace.js';
 import { BRIDGE_PACKAGE_ID, removeBridgeInstall } from './bridge-install.js';
 import { getRegistry } from './registry/index.js';
@@ -137,32 +145,10 @@ export function buildCustomTools(
   getActiveScope: () => ConversationScope | null,
   getActiveModel: () => Model<Api> | null,
   getAttachmentRoots: () => string[],
+  opts?: { live?: boolean },
 ): AgentTool<any>[] {
-  return [
-    createScaffoldModTool(getActiveScope),
-    setModMetadataTool,
-    updateSchematicTool,
-    buildModTool,
-    createRunTestCycleTool(conversationId),
-    notifyTestStatusTool,
-    monitorGetErrorTool,
-    monitorPollTool,
-    listInstalledModsTool,
-    decompileDllTool,
-    renderSvgToPngTool,
-    renderPreviewTool,
-    // RimWorld source/def index — read-only lookups against $MM/index/*.
-    searchDefsTool,
-    readCsharpSymbolTool,
-    searchSourceTool,
-    readLoreTool,
-    saveLoreTool,
-    // bash is the catch-all for arbitrary shell exec. The path-policy guard
-    // is the safety net; the confirmation prompt is the user-facing brake.
-    withConfirmation(createGuardedBashTool(cwd), {
-      label: 'Run shell command',
-      summary: 'Execute a shell command in the modmixer workspace.',
-    }, (p: { command: string }) => `Run “${p.command.length > 120 ? p.command.slice(0, 119) + '…' : p.command}” in the modmixer workspace.`),
+  // Guarded path tools are common to both modes.
+  const pathTools: AgentTool<any>[] = [
     // Override pi's path-shaped built-ins with versions that enforce the
     // allowlist. Custom tools win over built-ins by name in pi's
     // `_refreshToolRegistry`, so these shadow the defaults entirely.
@@ -175,6 +161,58 @@ export function buildCustomTools(
     createGuardedGrepTool(cwd, getAttachmentRoots),
     createGuardedFindTool(cwd, getAttachmentRoots),
     createGuardedLsTool(cwd, getAttachmentRoots),
+  ];
+  // Read-only research tools, also common.
+  const researchTools: AgentTool<any>[] = [
+    listInstalledModsTool,
+    decompileDllTool,
+    // RimWorld source/def index — read-only lookups against $MM/index/*.
+    searchDefsTool,
+    readCsharpSymbolTool,
+    searchSourceTool,
+    readLoreTool,
+    saveLoreTool,
+  ];
+
+  if (opts?.live) {
+    // Live sessions: the user is in-game and cannot answer app dialogs, so
+    // every tool here must run without a confirmation prompt — which is why
+    // bash (confirmation-gated) is absent, not just discouraged. No
+    // run_test_cycle either: the game is already running, and apply_live /
+    // game_action are how changes reach it. Texture tools are out until
+    // live content reload exists.
+    return [
+      setModMetadataTool,
+      updateSchematicTool,
+      buildModTool,
+      createApplyLiveTool(conversationId, getActiveScope),
+      createGameActionTool(getActiveScope),
+      monitorGetErrorTool,
+      monitorPollTool,
+      ...researchTools,
+      ...pathTools,
+    ];
+  }
+
+  return [
+    createScaffoldModTool(getActiveScope),
+    setModMetadataTool,
+    updateSchematicTool,
+    buildModTool,
+    createRunTestCycleTool(conversationId),
+    notifyTestStatusTool,
+    monitorGetErrorTool,
+    monitorPollTool,
+    renderSvgToPngTool,
+    renderPreviewTool,
+    ...researchTools,
+    // bash is the catch-all for arbitrary shell exec. The path-policy guard
+    // is the safety net; the confirmation prompt is the user-facing brake.
+    withConfirmation(createGuardedBashTool(cwd), {
+      label: 'Run shell command',
+      summary: 'Execute a shell command in the modmixer workspace.',
+    }, (p: { command: string }) => `Run “${p.command.length > 120 ? p.command.slice(0, 119) + '…' : p.command}” in the modmixer workspace.`),
+    ...pathTools,
   ];
 }
 
@@ -624,6 +662,19 @@ export class AgentHost {
    */
   private bridgeErrorsSeen = false;
 
+  // Live session (in-game prompting over the Live TCP channel). Bound to
+  // one conversation, like monitoring: prompts typed in the in-game window
+  // route to that conversation, and its agent events are projected back as
+  // agent_busy / agent_status / agent_say pushes. Singleton by the same
+  // argument as monitoring — one game, one Live socket.
+  private liveConversationId: string | null = null;
+  private liveStateHandler: ((s: LiveConnectionState) => void) | null = null;
+  private livePromptHandler: ((p: LiveUserPrompt) => void) | null = null;
+  /** Same role as bridgeSeenConnected: teardown only fires after the game
+   *  actually connected once, so arming a session against a not-yet-started
+   *  game doesn't immediately tear itself down. */
+  private liveSeenConnected = false;
+
   /**
    * Single-flight OAuth login. A new login attempt aborts any in-flight one.
    * Anthropic's callback server is hardcoded to port 53692, so concurrent
@@ -660,17 +711,24 @@ export class AgentHost {
     this.settingsManager = SettingsManager.create(this.cwd, this.agentDir);
     // Custom tools are rebuilt per session in constructSession — their
     // closures bind to one specific conversation's scope/model. Here we only
-    // need the tool *names* for the allowlist, so a throwaway build with
-    // no-op getters is enough.
-    const toolNames = buildCustomTools(
-      this.cwd,
-      '',
-      () => null,
-      () => null,
-      () => [],
-    )
-      .map((t) => t.name)
-      .filter((n) => !BUILTIN_TOOL_NAMES.includes(n));
+    // need the tool *names* for the allowlist, so throwaway builds with
+    // no-op getters are enough. Union of both modes: the allowlist is
+    // host-wide while the actual tool set is per-session, so live-only
+    // names (apply_live, game_action) must be allowed even though regular
+    // chats never construct them.
+    const toolNames = new Set<string>();
+    for (const live of [false, true]) {
+      for (const t of buildCustomTools(
+        this.cwd,
+        '',
+        () => null,
+        () => null,
+        () => [],
+        { live },
+      )) {
+        if (!BUILTIN_TOOL_NAMES.includes(t.name)) toolNames.add(t.name);
+      }
+    }
     this.allowedToolNames = [...BUILTIN_TOOL_NAMES, ...toolNames];
   }
 
@@ -978,6 +1036,7 @@ export class AgentHost {
       () => convo.scope,
       () => sessionRef?.model ?? null,
       () => [...attachmentRoots],
+      { live: convo.live === true },
     ).map((tool) => toolDefinitionFromAgentTool(tool));
     const { session } = await createAgentSession({
       cwd: this.cwd,
@@ -1090,6 +1149,9 @@ export class AgentHost {
       event,
     });
 
+    // Mirror a live conversation's progress into the in-game window.
+    this.relayLiveEvent(conversationId, event);
+
     if (event.type === 'agent_start') {
       this.busyConversations.add(conversationId);
     } else if (event.type === 'agent_end') {
@@ -1188,6 +1250,9 @@ export class AgentHost {
     if (this.monitoringConversationId === conversationId) {
       this.stopMonitoring();
     }
+    if (this.liveConversationId === conversationId) {
+      this.stopLiveSession();
+    }
     await this.disposeSession(conversationId);
   }
 
@@ -1203,6 +1268,10 @@ export class AgentHost {
     if (!this.sessions.has(conversationId)) return;
     if (this.busyConversations.has(conversationId)) return;
     if (this.monitoringConversationId === conversationId) return;
+    // A live-bound chat must stay constructed — in-game prompts can arrive
+    // at any moment (handleLivePrompt would reconstruct, but releasing an
+    // armed session just to rebuild it on the next keystroke is churn).
+    if (this.liveConversationId === conversationId) return;
     await this.disposeSession(conversationId);
   }
 
@@ -1224,6 +1293,7 @@ export class AgentHost {
   async createConversation(
     scope: ConversationScope,
     title?: string,
+    opts?: { live?: boolean },
   ): Promise<Conversation> {
     const sm = SessionManager.create(this.cwd, this.sessionDir);
     const id = sm.getSessionId();
@@ -1251,9 +1321,10 @@ export class AgentHost {
       sessionFile,
       scope,
       title,
-      systemPrompt: buildSystemPrompt(scope),
+      systemPrompt: buildSystemPrompt(scope, { live: opts?.live }),
       model: settings.model ?? undefined,
       thinkingLevel: settings.thinkingLevel,
+      live: opts?.live,
     });
   }
 
@@ -2032,6 +2103,134 @@ export class AgentHost {
     }
   }
 
+  // =========================================================================
+  // Live sessions (in-game prompting)
+  // =========================================================================
+
+  /**
+   * Bind the Live channel to a conversation. Called by launchLiveSession
+   * right after the game is spawned. Prompts from the in-game window are
+   * steered into this conversation's session; its events flow back via
+   * relayLiveEvent. Refuses to steal an existing binding for the same
+   * reason startMonitoring does.
+   */
+  startLiveSession(conversationId: string): void {
+    if (this.liveConversationId && this.liveConversationId !== conversationId) {
+      throw new Error(
+        'Another live session is already active. Close its RimWorld instance first.',
+      );
+    }
+    this.stopLiveSession();
+    this.liveConversationId = conversationId;
+    this.liveSeenConnected = false;
+
+    const live = getLiveServer();
+    this.livePromptHandler = (p) => void this.handleLivePrompt(p, conversationId);
+    live.on('prompt', this.livePromptHandler);
+    this.liveStateHandler = (s) => this.onLiveState(s);
+    live.on('state', this.liveStateHandler);
+    if (live.getState().kind === 'connected') {
+      this.liveSeenConnected = true;
+    }
+  }
+
+  stopLiveSession(): void {
+    const live = getLiveServer();
+    if (this.livePromptHandler) {
+      live.off('prompt', this.livePromptHandler);
+      this.livePromptHandler = null;
+    }
+    if (this.liveStateHandler) {
+      live.off('state', this.liveStateHandler);
+      this.liveStateHandler = null;
+    }
+    this.liveConversationId = null;
+    this.liveSeenConnected = false;
+  }
+
+  private onLiveState(state: LiveConnectionState): void {
+    if (state.kind === 'connected') {
+      this.liveSeenConnected = true;
+      return;
+    }
+    if (!this.liveSeenConnected) return;
+    // The in-game side dropped us — the game is quitting (or crashed).
+    // Unlike the bridge (which rides along with every test cycle), Live
+    // must never linger into ordinary sessions, so the junction goes now.
+    sendToast('Modmixer', 'RimWorld closed — live session ended.');
+    this.stopLiveSession();
+    void removeLiveInstall().catch((err) => {
+      console.error('Failed to remove live install:', err);
+    });
+  }
+
+  private async handleLivePrompt(
+    prompt: LiveUserPrompt,
+    conversationId: string,
+  ): Promise<void> {
+    if (this.liveConversationId !== conversationId) return;
+    const text = prompt.text.trim();
+    if (!text) return;
+    try {
+      // The session may have been released (memory pressure, app restart
+      // mid-game) — reconstruct it rather than dropping the prompt.
+      if (!this.sessions.has(conversationId)) {
+        await this.openSession(conversationId);
+      }
+      const entry = this.sessions.get(conversationId);
+      if (!entry) return;
+      // Same steer semantics as bridge error auto-prompts: queues if a
+      // turn is in flight, starts one otherwise. The [in-game] tag tells
+      // the agent (and the transcript) where this came from.
+      await entry.session.prompt(`[in-game] ${text}`, {
+        streamingBehavior: 'steer',
+      });
+    } catch (err) {
+      console.error('Failed to prompt session with in-game message:', err);
+      getLiveServer().push({
+        type: 'agent_say',
+        text: 'Something went wrong handling that — check the Modmixer app.',
+      });
+    }
+  }
+
+  /**
+   * Project this conversation's agent events down to the in-game window's
+   * tiny vocabulary. Deliberately lossy: tool calls become one of a few
+   * friendly ticker strings, and only a turn's final assistant message
+   * becomes a chat bubble — the in-game UI is a toy, not a transcript.
+   */
+  private relayLiveEvent(
+    conversationId: string,
+    event: AgentSessionEvent,
+  ): void {
+    if (this.liveConversationId !== conversationId) return;
+    const live = getLiveServer();
+    if (!live.isConnected()) return;
+
+    if (event.type === 'agent_start') {
+      live.push({ type: 'agent_busy', busy: true });
+      live.push({ type: 'agent_status', text: 'thinking' });
+    } else if (event.type === 'agent_end') {
+      live.push({ type: 'agent_busy', busy: false });
+    } else if (event.type === 'tool_execution_start') {
+      live.push({
+        type: 'agent_status',
+        text: liveStatusForTool(event.toolName),
+      });
+    } else if (event.type === 'turn_end') {
+      const text = messageText(event.message).trim();
+      if (text) {
+        // The window renders plain wrapped labels; clamp pathological
+        // lengths rather than letting one verbose turn flood the UI.
+        live.push({
+          type: 'agent_say',
+          text: text.length > 2000 ? text.slice(0, 1999) + '…' : text,
+        });
+      }
+    }
+  }
+
   private async handleBridgeErrors(
     groups: ErrorBufferGroup[],
     runId: number,
@@ -2071,8 +2270,43 @@ export class AgentHost {
 
   async shutdown(): Promise<void> {
     this.stopMonitoring();
+    this.stopLiveSession();
     for (const id of [...this.sessions.keys()]) {
       await this.disposeSession(id);
     }
+  }
+}
+
+/**
+ * Friendly ticker strings for the in-game window. Coarse on purpose — the
+ * player should see "building…" not tool names and arguments.
+ */
+function liveStatusForTool(toolName: string): string {
+  switch (toolName) {
+    case 'write':
+    case 'edit':
+      return 'writing code';
+    case 'build_mod':
+      return 'building';
+    case 'apply_live':
+      return 'applying to your game';
+    case 'game_action':
+      return 'running it in your game';
+    case 'monitor_get_error':
+    case 'monitor_poll':
+      return 'checking for errors';
+    case 'read':
+    case 'grep':
+    case 'find':
+    case 'ls':
+    case 'search_defs':
+    case 'search_source':
+    case 'read_csharp_symbol':
+    case 'read_lore':
+    case 'decompile_dll':
+    case 'list_installed_mods':
+      return 'reading up';
+    default:
+      return 'working';
   }
 }
