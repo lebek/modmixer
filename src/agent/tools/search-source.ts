@@ -2,9 +2,9 @@ import { Type } from 'typebox';
 import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
-import path from 'node:path';
 import { getIndexPaths } from '../index/paths.js';
 import { getIndexStatus } from '../index/rebuild.js';
+import { resolveRipgrep } from '../index/ripgrep.js';
 
 const Params = Type.Object({
   query: Type.String({
@@ -31,33 +31,6 @@ const NO_INDEX_MSG =
   'RimWorld source index is not built yet (or built without C# decompile). Open Settings → RimWorld index → Rebuild.';
 
 const MAX_OUTPUT_BYTES = 64 * 1024;
-
-let cachedRgPath: string | null | undefined;
-function resolveRipgrep(): string | null {
-  if (cachedRgPath !== undefined) return cachedRgPath;
-  // Prefer the regular module require (works in dev). Fall back to the
-  // resourcesPath copy that Forge ships in packaged builds.
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const mod = require('@vscode/ripgrep') as { rgPath: string };
-    cachedRgPath = mod.rgPath;
-    return cachedRgPath;
-  } catch {
-    // try packaged path next
-  }
-  try {
-    const exe = process.platform === 'win32' ? 'rg.exe' : 'rg';
-    cachedRgPath = path.join(
-      process.resourcesPath,
-      'ripgrep',
-      'bin',
-      exe,
-    );
-  } catch {
-    cachedRgPath = null;
-  }
-  return cachedRgPath;
-}
 
 export const searchSourceTool: AgentTool<typeof Params, { matchedLines: number; truncated: boolean }> = {
   name: 'search_source',

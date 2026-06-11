@@ -7,6 +7,7 @@ import {
   type IndexStatus,
 } from './rebuild.js';
 import { resolveIlspycmd } from './ilspycmd.js';
+import { warmSearchCache } from './warm-cache.js';
 import type { IndexProgressEvent } from './progress.js';
 
 /**
@@ -58,9 +59,11 @@ export async function startRebuild(options: { force?: boolean } = {}): Promise<I
   if (isRebuilding()) return getIndexSnapshot();
   // Don't await — fire and forget so the IPC returns immediately. Progress
   // events stream over `onIndexProgress`.
-  void rebuildIndex(emit, options).catch(() => {
-    // rebuildIndex already emitted an error event for us.
-  });
+  void rebuildIndex(emit, options)
+    .then(() => warmSearchCache('rebuild'))
+    .catch(() => {
+      // rebuildIndex already emitted an error event for us.
+    });
   return getIndexSnapshot();
 }
 
@@ -91,7 +94,14 @@ export async function ensureIndexAtStartup(): Promise<void> {
     return;
   }
   const status = getIndexStatus();
-  if (status.type === 'fresh' || status.type === 'no-rimworld') return;
+  if (status.type === 'fresh') {
+    // Index is usable but the OS file cache / Defender scan cache for it may
+    // be cold (reboot, signature update, eviction) — that's a ~40s first
+    // search. Pre-pay it in the background now.
+    void warmSearchCache('startup');
+    return;
+  }
+  if (status.type === 'no-rimworld') return;
   await startRebuild();
 }
 

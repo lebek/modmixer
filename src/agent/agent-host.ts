@@ -59,6 +59,7 @@ import { renderPreviewTool } from './tools/render-preview.js';
 import { searchDefsTool } from './tools/search-defs.js';
 import { readCsharpSymbolTool } from './tools/read-csharp-symbol.js';
 import { searchSourceTool } from './tools/search-source.js';
+import { warmSearchCache } from './index/warm-cache.js';
 import { readLoreTool } from './tools/read-lore.js';
 import { saveLoreTool } from './tools/save-lore.js';
 import { createGuardedBashTool } from './tools/bash.js';
@@ -1005,6 +1006,10 @@ export class AgentHost {
   private async constructSession(
     convo: Conversation,
   ): Promise<OpenSession> {
+    // A chat is about to start issuing tool calls — pre-warm the source/defs
+    // corpus so the first search_source isn't a ~40s cold-cache hit. Fire and
+    // forget; the cooldown inside makes repeat calls free.
+    void warmSearchCache('session-open');
     const model = this.resolveModel(convo.model);
     if (!model) {
       throw new Error('No models registered in pi-ai — cannot construct session.');
@@ -1391,6 +1396,11 @@ export class AgentHost {
         this.sessions.set(conversationId, entry);
       }
     }
+    // Re-warm on every user message, not just session open: the OS evicts the
+    // source corpus within minutes under memory pressure, so a chat that sat
+    // idle would otherwise hit a cold search_source. The 5-min cooldown inside
+    // warmSearchCache keeps this to at most one background sweep per window.
+    void warmSearchCache('prompt');
     const { promptText, images } = await buildAttachedPrompt(
       entry,
       text,
