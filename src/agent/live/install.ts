@@ -46,7 +46,7 @@ export const LIVE_WORKSHOP_ID = '3742578324';
  * newer mod behavior — and prefer keeping the mod backward-compatible over
  * bumping LIVE_PROTOCOL_VERSION.
  */
-export const LIVE_REQUIRED_VERSION = '0.2.0';
+export const LIVE_REQUIRED_VERSION = '0.2.1';
 
 export const LIVE_WORKSHOP_URL_STEAM = `steam://url/CommunityFilePage/${LIVE_WORKSHOP_ID}`;
 export const LIVE_WORKSHOP_URL_WEB = `https://steamcommunity.com/sharedfiles/filedetails/?id=${LIVE_WORKSHOP_ID}`;
