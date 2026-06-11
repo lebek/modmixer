@@ -27,8 +27,8 @@ namespace ModMixer.Live
                 Settings = GetSettings<LiveSettings>();
 
                 var harmony = new Harmony(Id);
-                // Installs the PlaySettings toggle and the GenSpawn ledger
-                // patch (which skips itself if the overload isn't found).
+                // Installs the chat-input keybinding gate and the GenSpawn
+                // ledger patch (each skips itself if its target isn't found).
                 harmony.PatchAll();
 
                 Client = new LiveClient();
@@ -123,8 +123,8 @@ namespace ModMixer.Live
                 case "exec_csharp":
                 case "reload_defs":
                     // Executors run inside a LongEventHandler long event so
-                    // they get the main thread, a loading overlay, and a
-                    // paused sim.
+                    // they get the main thread and a loading overlay; the
+                    // player's time speed is left untouched.
                     LiveLoader.Enqueue(msg);
                     break;
                 default:

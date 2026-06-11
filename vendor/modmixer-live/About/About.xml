@@ -3,7 +3,7 @@
   <name>Modmixer Live</name>
   <packageId>modmixer.live</packageId>
   <author>Modmixer</author>
-  <modVersion>0.2.0</modVersion>
+  <modVersion>0.2.1</modVersion>
   <description>In-game live-modding companion for the Modmixer desktop app.
 
 Prompt the Modmixer agent from a chat window inside RimWorld and watch your ideas land in the running game: hot-loaded C# assemblies, one-shot actions, and def reloads, all over a local connection to the app.

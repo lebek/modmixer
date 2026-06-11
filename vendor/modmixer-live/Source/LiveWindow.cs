@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using HarmonyLib;
 using RimWorld;
 using UnityEngine;
@@ -39,6 +40,15 @@ namespace ModMixer.Live
     public class LiveWindow : Window
     {
         private const string InputControlName = "ModmixerLiveInput";
+
+        // True while the chat input holds IMGUI keyboard focus. Read by
+        // SearchWidgetFocusedPatch so the game treats the chat box like a
+        // vanilla search widget: keybindings (WASD camera dolly, time
+        // controls, hotkeys) stay quiet while typing and work again the
+        // moment focus is released. Static because the keybinding gate has
+        // no window instance in hand; onlyOneOfTypeAllowed keeps a single
+        // LiveWindow.
+        public static bool InputFocused;
 
         private static readonly Color DotConnected = new Color(0.35f, 0.85f, 0.35f);
         private static readonly Color DotRetrying = new Color(0.95f, 0.85f, 0.25f);
@@ -143,11 +153,49 @@ namespace ModMixer.Live
 
             var inputRect = new Rect(0f, y, inRect.width - 70f, inputH);
             var sendRect = new Rect(inRect.width - 64f, y, 64f, inputH);
+
+            // Focus release, mirroring QuickSearchWidget: Escape hands the
+            // keyboard back to the game (the window stays open — its own
+            // close-on-cancel never sees the used event), and so does a
+            // click anywhere that isn't the input row. Clicks outside the
+            // window are covered by Notify_ClickOutsideWindow.
+            bool focused = GUI.GetNameOfFocusedControl() == InputControlName;
+            if (focused && Event.current.type == EventType.KeyDown
+                && Event.current.keyCode == KeyCode.Escape)
+            {
+                UI.UnfocusCurrentControl();
+                Event.current.Use();
+            }
+            else if (focused && OriginalEventUtility.EventType == EventType.MouseDown
+                && !inputRect.Contains(Event.current.mousePosition)
+                && !sendRect.Contains(Event.current.mousePosition))
+            {
+                UI.UnfocusCurrentControl();
+            }
+
             GUI.SetNextControlName(InputControlName);
             inputText = Widgets.TextField(inputRect, inputText);
             if (Widgets.ButtonText(sendRect, "Send", true, true, connected)) submit = true;
 
+            InputFocused = GUI.GetNameOfFocusedControl() == InputControlName;
+
             if (submit && connected) Submit(client);
+        }
+
+        public override void Notify_ClickOutsideWindow()
+        {
+            base.Notify_ClickOutsideWindow();
+            // Clicking the map (or another window) releases the keyboard,
+            // like vanilla search boxes.
+            if (GUI.GetNameOfFocusedControl() == InputControlName)
+                UI.UnfocusCurrentControl();
+            InputFocused = false;
+        }
+
+        public override void PostClose()
+        {
+            base.PostClose();
+            InputFocused = false; // never leave keybindings suppressed
         }
 
         private void DrawTranscript(Rect outRect)
@@ -214,62 +262,44 @@ namespace ModMixer.Live
         }
     }
 
-    // Toggle entry point: an icon in the bottom-right play-settings strip,
-    // next to the vanilla toggles.
-    [HarmonyPatch(typeof(PlaySettings), nameof(PlaySettings.DoPlaySettingsGlobalControls))]
-    internal static class PlaySettingsTogglePatch
+    // Toggle entry point: a minimized main button on the bottom bar (the
+    // Modmixer logo, sitting with History/Factions/Menu). The def lives in
+    // Defs/MainButtonDefs/MainButtons.xml.
+    public class MainButtonWorker_ToggleLiveWindow : MainButtonWorker
     {
-        private static Texture2D icon;
-        private static bool iconResolved;
-
-        public static void Postfix(WidgetRow row, bool worldView)
+        public override void Activate()
         {
-            try
-            {
-                if (row == null || worldView) return;
+            if (Find.WindowStack.IsOpen<LiveWindow>())
+                Find.WindowStack.TryRemove(typeof(LiveWindow));
+            else
+                Find.WindowStack.Add(new LiveWindow());
+        }
+    }
 
-                bool isOpen = Find.WindowStack.IsOpen<LiveWindow>();
-                bool toggled = isOpen;
+    // While the chat input is focused, every keypress belongs to the
+    // player's prose: report it through the same WindowStack switch the
+    // vanilla QuickSearchWidget uses, which silences all KeyBindingDef
+    // checks (WASD camera dolly, time controls, hotkeys). A real
+    // QuickSearchWidget can't be used here because Window auto-draws
+    // CommonSearchWidget into the title bar, magnifier icon and all.
+    [HarmonyPatch]
+    internal static class SearchWidgetFocusedPatch
+    {
+        private static MethodBase Target()
+            => AccessTools.PropertyGetter(typeof(WindowStack), "AnySearchWidgetFocused");
 
-                var tex = ResolveIcon();
-                if (tex != null)
-                {
-                    row.ToggleableIcon(ref toggled, tex, "Modmixer Live");
-                }
-                else if (row.ButtonText("Live"))
-                {
-                    toggled = !toggled;
-                }
+        // False makes Harmony skip this class if the property ever moves.
+        public static bool Prepare() => Target() != null;
 
-                if (toggled == isOpen) return;
-                if (toggled) Find.WindowStack.Add(new LiveWindow());
-                else Find.WindowStack.TryRemove(typeof(LiveWindow));
-            }
-            catch
-            {
-                // Never break the play-settings strip for everyone else.
-            }
+        public static IEnumerable<MethodBase> TargetMethods()
+        {
+            var m = Target();
+            if (m != null) yield return m;
         }
 
-        private static Texture2D ResolveIcon()
+        public static void Postfix(ref bool __result)
         {
-            if (iconResolved) return icon;
-            iconResolved = true;
-            try
-            {
-                // TexButton's namespace has moved between Verse and RimWorld
-                // across versions; probe both rather than hard-referencing.
-                // Runs on the main thread (texture access requires it).
-                var t = AccessTools.TypeByName("Verse.TexButton")
-                        ?? AccessTools.TypeByName("RimWorld.TexButton");
-                var f = t == null ? null : AccessTools.Field(t, "Info");
-                icon = f?.GetValue(null) as Texture2D;
-            }
-            catch
-            {
-                icon = null; // fall back to the text button
-            }
-            return icon;
+            if (!__result) __result = LiveWindow.InputFocused;
         }
     }
 }

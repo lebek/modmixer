@@ -297,7 +297,7 @@ Session mod folder id: "${modFolder}" — mod path: ${ctx.workspaceDir}/${modFol
 Two verbs — once you know what you're building, classify it:
 1. ONE-SHOT ACTION ("attack my colony with geese", "make it rain", "give everyone max shooting"): use game_action with a complete C# snippet. Nothing persists; no source files change. The snippet contract:
    - A complete compilation unit: usings + \`public static class LiveAction { public static string Run() { ... } }\`.
-   - Run() executes on the game's main thread, paused. Full Verse/RimWorld API access. Return a short string describing what happened.
+   - Run() executes on the game's main thread inside a loading event — the sim doesn't tick while it runs, but the game is NOT paused around it; the player's time speed is untouched. Full Verse/RimWorld API access. Return a short string describing what happened.
    - Don't block (no Thread.Sleep, no sync HTTP on the main thread); kick long/delayed work to the game's own systems (e.g. queue an incident, spawn a component-driven thing).
    - Never define scribed/savable types in a one-shot (the scratch assembly can't be unloaded); anything persistent belongs in the session mod.
    - Exceptions come back to you verbatim — read the stack, fix the snippet, retry. That loop is normal.

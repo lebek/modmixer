@@ -7,7 +7,7 @@ import type { ConversationScope } from '../conversations.js';
 const Params = Type.Object({
   code: Type.String({
     description:
-      'A complete C# compilation unit: using directives + `public static class LiveAction { public static string Run() { ... } }`. Run() executes on the game\'s main thread with the game paused, with full Verse/RimWorld API access, and its return string is shown to you. Throwing is fine — you get the full exception + stack back to iterate on. Do not block the thread, do not start threads that touch game state, and never define scribed/savable types here (the assembly can\'t be unloaded; persistent things belong in the session mod via apply_live).',
+      'A complete C# compilation unit: using directives + `public static class LiveAction { public static string Run() { ... } }`. Run() executes on the game\'s main thread inside a loading event (the sim does not tick while it runs; the player\'s time speed is untouched), with full Verse/RimWorld API access, and its return string is shown to you. Throwing is fine — you get the full exception + stack back to iterate on. Do not block the thread, do not start threads that touch game state, and never define scribed/savable types here (the assembly can\'t be unloaded; persistent things belong in the session mod via apply_live).',
   }),
 });
 
@@ -33,7 +33,7 @@ export function createGameActionTool(
     name: 'game_action',
     label: 'Run one-shot game action',
     description:
-      'Execute a one-shot C# action in the RUNNING game, right now ("attack the colony with geese", "make it rain", "give a colonist a skill"). Compiles your snippet and invokes its static LiveAction.Run() on the main thread, paused. Nothing persists in the mod source — for behavior that should persist, edit the session mod and use apply_live instead. On exception you get the full stack back: read it, fix the snippet, retry.',
+      'Execute a one-shot C# action in the RUNNING game, right now ("attack the colony with geese", "make it rain", "give a colonist a skill"). Compiles your snippet and invokes its static LiveAction.Run() on the main thread; the game keeps its current time speed. Nothing persists in the mod source — for behavior that should persist, edit the session mod and use apply_live instead. On exception you get the full stack back: read it, fix the snippet, retry.',
     parameters: Params,
     async execute(_id, params, signal): Promise<AgentToolResult<GameActionDetails>> {
       const scope = getActiveScope();

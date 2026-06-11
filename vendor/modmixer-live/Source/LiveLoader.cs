@@ -18,10 +18,12 @@ namespace ModMixer.Live
     //                 can report what the action spawned.
     //   reload_defs — standalone vanilla def hot-reload.
     //
-    // Everything runs inside a LongEventHandler long event: main thread,
-    // loading overlay, sim paused. Every command — including ones that throw
-    // — produces exactly one cmd_result, because the app is waiting on the
-    // id.
+    // Everything runs inside a synchronous LongEventHandler long event:
+    // main thread, loading overlay, and the sim can't tick mid-mutation
+    // (the event owns the frame). The player's time speed is deliberately
+    // left alone — no pausing before or after. Every command — including
+    // ones that throw — produces exactly one cmd_result, because the app
+    // is waiting on the id.
     public static class LiveLoader
     {
         // True only while an exec_csharp Run() is on the stack. The GenSpawn
@@ -46,18 +48,6 @@ namespace ModMixer.Live
             string id = msg["id"]?.AsString() ?? "";
             try
             {
-                try
-                {
-                    // Pause first so the world doesn't tick while we mutate
-                    // code or defs under it.
-                    if (Current.ProgramState == ProgramState.Playing && Find.TickManager != null)
-                        Find.TickManager.Pause();
-                }
-                catch
-                {
-                    // Pausing is best-effort; menu screens have no TickManager.
-                }
-
                 LongEventHandler.QueueLongEvent(
                     () => Execute(type, id, msg),
                     // Shown raw — Translate() falls back to the key itself.

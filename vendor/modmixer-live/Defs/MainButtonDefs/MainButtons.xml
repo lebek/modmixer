@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Defs>
+
+  <!-- Minimized (icon-only) like History/Factions/Menu; order 110 slots it
+       between Factions (90) and Menu (500). -->
+  <MainButtonDef>
+    <defName>ModmixerLive</defName>
+    <label>Modmixer</label>
+    <description>Chat with the Modmixer agent and watch your ideas land in the running game.</description>
+    <workerClass>ModMixer.Live.MainButtonWorker_ToggleLiveWindow</workerClass>
+    <order>110</order>
+    <validWithoutMap>true</validWithoutMap>
+    <minimized>True</minimized>
+    <iconPath>UI/Buttons/MainButtons/ModmixerLive</iconPath>
+  </MainButtonDef>
+
+</Defs>
