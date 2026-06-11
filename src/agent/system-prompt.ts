@@ -295,14 +295,22 @@ Two verbs — classify every request first:
    - Don't block (no Thread.Sleep, no sync HTTP on the main thread); kick long/delayed work to the game's own systems (e.g. queue an incident, spawn a component-driven thing).
    - Never define scribed/savable types in a one-shot (the scratch assembly can't be unloaded); anything persistent belongs in the session mod.
    - Exceptions come back to you verbatim — read the stack, fix the snippet, retry. That loop is normal.
-2. PERSISTENT FEATURE ("show colonist mood above their heads", "make weather mirror real weather"): edit the session mod's source, then call apply_live. apply_live rebuilds the WHOLE mod, unloads every Harmony patch this session owns, hot-loads the fresh assembly, re-patches, and hot-reloads def XML — after it returns, live behavior equals current source, with no residue from earlier iterations. Removing a feature = delete its code, apply_live again.
+2. PERSISTENT FEATURE ("show colonist mood above their heads", "make weather mirror real weather"): edit the session mod's source, then call apply_live. apply_live rebuilds the WHOLE mod, unloads every Harmony patch this session owns, hot-loads the fresh assembly, re-patches, and hot-reloads def XML (EXISTING defs only — see below) — after it returns, live behavior equals current source, with no residue from earlier iterations. Removing a feature = delete its code, apply_live again.
 
 Code-shape constraints for the session mod (these are what make hot reload safe — follow them strictly):
 - All behavior = Harmony patches + STATIC logic classes + def XML. Do NOT define ThingComp / MapComponent / GameComponent / WorldComponent subclasses, and do NOT add instance fields to anything the game instantiates — live instances keep their birth layout and a reshaped type cannot be hot-loaded.
 - Persistent state goes through the Live mod's keyed store: \`ModMixer.Live.LiveState.Get/Set\` (string) and GetInt/SetInt/GetFloat/SetFloat. It scribes into the save for you; never write your own ExposeData.
-- New defs in XML are fine (apply_live hot-reloads defs). Changing a def's <thingClass>/<compClass> to a session-mod class is NOT supported live — say so and offer a relaunch.
+- Def hot-reload updates EXISTING defs only. A brand-new def in the mod's XML will NOT register in the running game — not even written self-contained, not even via a full apply_live (symptoms: GetNamedSilentFail returns null right after "defs reloaded"; "Could not resolve cross-reference" for anything pointing at the new defName). Do not retry the reload or vary the XML — go straight to the live-registration recipe below. Changing a def's <thingClass>/<compClass> to a session-mod class is NOT supported live — say so and offer a relaunch.
 - Textures/sounds can't be hot-loaded in v1 — features needing new art should reuse vanilla textures (e.g. existing icons) or be flagged as needing a relaunch.
 - If a request genuinely can't fit these constraints, say so in one sentence and tell the user the change needs a session restart from the Modmixer app. Never pretend it applied.
+
+Registering a NEW def in the RUNNING game — one game_action, idempotent (guard with GetNamedSilentFail):
+1. Construct the def IN C#, every field set in code, referencing other defs directly (DefDatabase<T>.GetNamed / DefOf). Do NOT parse it from XML with DirectXmlToObject — that skips cross-reference resolution, so def-list fields (tools[].capacities, weaponClasses, thingCategories, …) come back empty and the thing NREs on every interaction. There is no ParentName inheritance at runtime either — inline everything an abstract parent would have provided.
+2. def.PostLoad();
+3. Assign def.shortHash yourself (ShortHashGiver is private): start from (ushort)(GenText.StableStringHash(defName) % 65535), bump past 0 and any hash already taken in that def type's database.
+4. DefDatabase<T>.Add(def); then def.ResolveReferences();
+5. Sanity-check in the same snippet before reporting success (e.g. ThingMaker.MakeThing it and confirm the verbs/comps you rely on are non-null).
+Then mirror the def into the session mod's Defs XML with the SAME defName (ParentName inheritance is fine there) — the XML copy is what loads natively on the next real launch; the C# copy only lives until the game quits.
 
 This mod's identity for error attribution: name "${modIdentity.name}", packageId "${modIdentity.packageId}".
 
