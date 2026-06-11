@@ -95,6 +95,10 @@ export interface LiveInstallResult {
  * .vite/build in the asar) and ensureLiveInstalled takes the Workshop path.
  */
 export function resolveLiveSourceDir(): string | null {
+  // Dev-only escape hatch: pretend there's no vendor copy so the Workshop
+  // path (subscribe prompt, version gate) can be exercised from a dev
+  // checkout without packaging the app.
+  if (process.env.MODMIXER_FORCE_LIVE_WORKSHOP) return null;
   let candidate: string;
   try {
     candidate = path.join(app.getAppPath(), 'vendor', 'modmixer-live');
