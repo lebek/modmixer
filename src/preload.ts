@@ -83,8 +83,6 @@ const api = {
     invoke('modmixer:settings:set-multi-chat', enabled),
   setAutoLaunch: (enabled: boolean) =>
     invoke('modmixer:settings:set-auto-launch', enabled),
-  setLiveSessions: (enabled: boolean) =>
-    invoke('modmixer:settings:set-live-sessions', enabled),
   setDangerouslySkipPermissions: (enabled: boolean) =>
     invoke('modmixer:settings:set-dangerously-skip-permissions', enabled),
   setCommunityLore: (enabled: boolean) =>

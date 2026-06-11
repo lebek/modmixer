@@ -74,13 +74,6 @@ export function registerSettingsRoutes(ctx: RouteContext): void {
   );
 
   ipc.handle(
-    'modmixer:settings:set-live-sessions',
-    // Read live at launch time (not baked into prompts), so flipping it
-    // shows/hides the Launch Live Session flow immediately.
-    (_evt, enabled: boolean) => saveSettings({ liveSessions: enabled }),
-  );
-
-  ipc.handle(
     'modmixer:settings:set-dangerously-skip-permissions',
     (_evt, enabled: boolean) => {
       // Persist AND apply live: the gate is the single chokepoint every

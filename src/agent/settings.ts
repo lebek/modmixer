@@ -176,14 +176,6 @@ export interface Settings {
    */
   autoLaunch: boolean;
   /**
-   * Experimental: reveals the "Launch Live Session" flow — an isolated
-   * RimWorld session with the Modmixer Live in-game mod installed, where
-   * the user prompts from an in-game chat window and changes are applied
-   * to the running game (hot-loaded assemblies / one-shot C# actions).
-   * Off by default. Read live at launch time, not baked into prompts.
-   */
-  liveSessions: boolean;
-  /**
    * Advanced/dangerous: when true, the confirmation gate auto-approves every
    * sensitive agent action (file edits, deletes, shell commands, game/install
    * changes) with no prompt. Off by default. Persists across restarts — the
@@ -219,7 +211,6 @@ function computeDefaults(): Settings {
     useCommunityLore: true,
     loreLastPushedAt: null,
     autoLaunch: false,
-    liveSessions: false,
     dangerouslySkipPermissions: false,
   };
 }
@@ -319,9 +310,6 @@ function normalize(raw: unknown, defaults: Settings): Settings {
 
   const autoLaunch = readBool(obj.autoLaunch);
   if (autoLaunch !== undefined) next.autoLaunch = autoLaunch;
-
-  const liveSessions = readBool(obj.liveSessions);
-  if (liveSessions !== undefined) next.liveSessions = liveSessions;
 
   const dangerouslySkipPermissions = readBool(obj.dangerouslySkipPermissions);
   if (dangerouslySkipPermissions !== undefined) {

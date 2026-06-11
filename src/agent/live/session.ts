@@ -78,11 +78,6 @@ function sessionTitle(now = new Date()): string {
 }
 
 export async function launchLiveSession(): Promise<LiveLaunchResult> {
-  const settings = loadSettings();
-  if (!settings.liveSessions) {
-    throw new Error('Live sessions are disabled — enable the experiment in Settings first.');
-  }
-
   // The Live mod must be available before we scaffold anything — a session
   // without the in-game channel is just a confusing test cycle. Clicking
   // "Launch Live Session" again after subscribing is the retry path: the

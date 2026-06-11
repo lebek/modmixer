@@ -8,14 +8,12 @@ export function ModsView({
   onOpen,
   onNewMod,
   onImportMod,
-  liveSessions,
   onLaunchLiveSession,
 }: {
   mods: WorkspaceMod[];
   onOpen: (folder: string) => void;
   onNewMod: () => void;
   onImportMod: () => void;
-  liveSessions: boolean;
   onLaunchLiveSession: () => Promise<void>;
 }) {
   const sorted = [...mods].sort(byUpdatedDesc);
@@ -44,16 +42,23 @@ export function ModsView({
             </p>
           </div>
           <div className="flex items-center gap-2">
-            {liveSessions && (
-              <button
-                onClick={() => void launchLive()}
-                disabled={launching}
-                title="Start RimWorld in a sandboxed test colony and prompt Modmixer from inside the game. Experimental."
-                className="rounded-md border border-line bg-paper px-4 py-2 font-mono text-[11px] uppercase tracking-[0.18em] text-muted transition-colors hover:border-ink/40 hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {launching ? 'launching…' : 'launch live session'}
-              </button>
-            )}
+            <button
+              onClick={() => void launchLive()}
+              disabled={launching}
+              title="Start RimWorld in a sandboxed test colony and prompt Modmixer from inside the game. Experimental."
+              className="rounded-md border border-line bg-paper px-4 py-2 font-mono text-[11px] uppercase tracking-[0.18em] text-muted transition-colors hover:border-ink/40 hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {launching ? (
+                'launching…'
+              ) : (
+                <>
+                  launch live session{' '}
+                  <span className="ml-1 rounded-sm bg-warning/15 px-1 py-0.5 text-[9px] text-warning">
+                    experimental
+                  </span>
+                </>
+              )}
+            </button>
             <button
               onClick={onImportMod}
               className="rounded-md border border-line bg-paper px-4 py-2 font-mono text-[11px] uppercase tracking-[0.18em] text-muted transition-colors hover:border-ink/40 hover:text-ink"

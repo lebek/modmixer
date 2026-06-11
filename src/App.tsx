@@ -54,7 +54,6 @@ export function App() {
   const [session, setSession] = useState<ActiveSession | null>(null);
   const [recoveryShown, setRecoveryShown] = useState(false);
   const [multiChat, setMultiChat] = useState(false);
-  const [liveSessions, setLiveSessions] = useState(false);
   const [skipPermissions, setSkipPermissions] = useState(false);
   // Bumped after a chat is created/archived/restored so the sidebar's chat
   // list re-fetches. The list also self-refreshes off agent events.
@@ -93,7 +92,6 @@ export function App() {
   const refreshSettingsFlags = useCallback(() => {
     void window.modmixer.getSettings().then((s) => {
       setMultiChat(s.multiChat);
-      setLiveSessions(s.liveSessions);
       setSkipPermissions(s.dangerouslySkipPermissions);
     });
   }, []);
@@ -763,7 +761,6 @@ export function App() {
           onOpen={openMod}
           onNewMod={newMod}
           onImportMod={importMod}
-          liveSessions={liveSessions}
           onLaunchLiveSession={launchLiveSession}
         />
       )}
