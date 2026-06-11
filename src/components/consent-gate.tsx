@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { App } from '../App';
 import type { ThemePreference } from '../agent/settings';
 import { applyTheme, watchSystemTheme } from '../lib/theme';
-import { AppDialog } from './app-dialog';
+import { anyConversationBusy } from '../conversations-store';
+import { appConfirm, AppDialog } from './app-dialog';
 import { ConfirmModal } from './confirm-modal';
 import { OnboardingFlow } from './onboarding/onboarding-flow';
 
@@ -43,6 +44,34 @@ export function ConsentGate() {
       applyTheme(s.theme);
     });
     return watchSystemTheme(() => themePrefRef.current);
+  }, []);
+
+  // Confirm a quit only while an agent turn is in flight — closing the window
+  // aborts it. Main hands the close to us; with nothing running we let it go
+  // through immediately so idle quits aren't nagged. The ref keeps repeated
+  // window-close attempts from stacking duplicate dialogs.
+  const quitPromptOpen = useRef(false);
+  useEffect(() => {
+    return window.modmixer.onQuitRequested(() => {
+      if (!anyConversationBusy()) {
+        window.modmixer.confirmQuit();
+        return;
+      }
+      if (quitPromptOpen.current) return;
+      quitPromptOpen.current = true;
+      void appConfirm(
+        'An agent is still responding. Quitting now will end any responses in progress.',
+        {
+          title: 'Quit Modmixer?',
+          okLabel: 'Quit',
+          cancelLabel: 'Keep working',
+          tone: 'danger',
+        },
+      ).then((ok) => {
+        quitPromptOpen.current = false;
+        if (ok) window.modmixer.confirmQuit();
+      });
+    });
   }, []);
 
   if (status === 'loading') {

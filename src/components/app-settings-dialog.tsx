@@ -681,6 +681,7 @@ interface ProgressState {
   providerId: string;
   message: string;
   authUrl?: string;
+  instructions?: string;
 }
 
 function ProvidersSection() {
@@ -709,6 +710,7 @@ function ProvidersSection() {
             providerId: event.providerId,
             message: event.message,
             authUrl: event.authInfo?.url,
+            instructions: event.authInfo?.instructions,
           });
           break;
         case 'prompt-needed':
@@ -1408,6 +1410,11 @@ function ProviderRow({
       {busy && progress && !prompt && (
         <div className="rounded-md border border-line bg-surface/60 px-3 py-2 text-xs text-ink">
           {progress.message}
+          {progress.instructions && (
+            <div className="mt-1.5 font-mono text-sm font-semibold tracking-wide text-ink">
+              {progress.instructions}
+            </div>
+          )}
           {progress.authUrl && (
             <div className="mt-1 truncate font-mono text-[10px] text-muted">
               {progress.authUrl}

@@ -61,6 +61,7 @@ export function ModsView({
               import mod
             </button>
             <button
+              data-demo="new-mod"
               onClick={onNewMod}
               className="rounded-md bg-accent px-4 py-2 font-mono text-[11px] uppercase tracking-[0.18em] text-accent-foreground transition-colors hover:bg-accent-soft"
             >
@@ -115,6 +116,7 @@ function EmptyState({
       </p>
       <div className="mt-4 flex items-center justify-center gap-2">
         <button
+          data-demo="new-mod"
           onClick={onNewMod}
           className="rounded-md bg-accent px-4 py-2 font-mono text-[11px] uppercase tracking-[0.18em] text-accent-foreground transition-colors hover:bg-accent-soft"
         >

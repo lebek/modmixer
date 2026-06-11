@@ -1,7 +1,7 @@
 {
   "name": "modmixer",
   "productName": "Modmixer",
-  "version": "0.8.7",
+  "version": "0.8.9",
   "description": "Agent-driven mod creation and diagnostics for RimWorld and beyond",
   "main": ".vite/build/main.js",
   "private": true,
@@ -16,7 +16,7 @@
     "fetch:ilspycmd": "node scripts/fetch-ilspycmd.mjs",
     "fetch:tree-sitter": "node scripts/fetch-tree-sitter-csharp.mjs",
     "lint:externals": "node scripts/check-extra-resources.mjs",
-    "postinstall": "node scripts/patch-electron-name.mjs && node scripts/fetch-tree-sitter-csharp.mjs"
+    "postinstall": "patch-package && node scripts/patch-electron-name.mjs && node scripts/fetch-tree-sitter-csharp.mjs"
   },
   "keywords": [],
   "author": {
@@ -49,6 +49,7 @@
     "eslint": "^8.57.1",
     "eslint-plugin-import": "^2.32.0",
     "gifenc": "^1.0.3",
+    "patch-package": "^8.0.1",
     "sharp": "^0.34.5",
     "tailwindcss": "^4.2.4",
     "tsx": "^4.21.0",

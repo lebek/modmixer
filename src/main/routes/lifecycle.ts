@@ -19,6 +19,7 @@ import {
   getUpdaterState,
   quitAndInstall,
 } from '../../agent/updater.js';
+import { approveQuit } from '../quit-guard.js';
 import type { RouteContext } from './context.js';
 
 /**
@@ -33,6 +34,9 @@ export function registerLifecycleRoutes(ctx: RouteContext): void {
   ipc.handle('modmixer:updater:get-state', () => getUpdaterState());
   ipc.handle('modmixer:updater:check', () => checkForUpdates());
   ipc.handle('modmixer:updater:quit-and-install', () => {
+    // Skip the quit-confirm prompt — the user already chose to restart, and
+    // the confirm's preventDefault would fight quitAndInstall's app.quit().
+    approveQuit();
     quitAndInstall();
   });
 

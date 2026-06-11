@@ -2,7 +2,15 @@
 // handlers before any other module body runs. Catches startup crashes that
 // happen during bundled require() — too early for initSentry() to help.
 import { SMOKE_TEST } from './agent/early-error.js';
-import { app, BrowserWindow, ipcMain, Menu, nativeImage, nativeTheme } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  ipcMain,
+  Menu,
+  MenuItem,
+  nativeImage,
+  nativeTheme,
+} from 'electron';
 import path from 'node:path';
 import started from 'electron-squirrel-startup';
 import { initSentry } from './agent/sentry.js';
@@ -68,6 +76,7 @@ import {
   installAssetProtocolHandler,
   registerAssetSchemeAsPrivileged,
 } from './main/asset-protocol.js';
+import { approveQuit, isQuitApproved } from './main/quit-guard.js';
 
 if (started) {
   app.quit();
@@ -96,6 +105,25 @@ app.on('second-instance', () => {
 // rather than package.json's productName. Force it so the dock tooltip,
 // About menu, and userData paths match the packaged app.
 app.setName('Modmixer');
+
+// Demo-video harness (dev-only; driven externally from ~/projects/modmixer-demo).
+// MODMIXER_DEMO=1 opens a CDP port so the harness can drive the renderer, and
+// reshapes the window (createWindow below) for clean capture. Inert otherwise.
+const DEMO_MODE = process.env.MODMIXER_DEMO === '1';
+if (DEMO_MODE) {
+  app.commandLine.appendSwitch(
+    'remote-debugging-port',
+    process.env.MODMIXER_DEMO_CDP ?? '9223',
+  );
+  // Optional supersampling: render at N× device scale so post-production
+  // zooms stay sharp (captured frames come out at N× the window size).
+  if (process.env.MODMIXER_DEMO_SCALE) {
+    app.commandLine.appendSwitch(
+      'force-device-scale-factor',
+      process.env.MODMIXER_DEMO_SCALE,
+    );
+  }
+}
 
 // Hide the default Electron menu strip on Windows/Linux. The Mac menubar lives
 // in the OS chrome so it's free real estate; on other platforms it duplicates
@@ -147,11 +175,28 @@ const confirmGate = initConfirmationGate(() => {
 ipcMain.on(CONFIRM_CHANNEL_RESOLVE, (_evt, payload: unknown) => {
   confirmGate.resolveFromRenderer(payload);
 });
+// The window `close` handler defers quitting to the renderer so it can confirm
+// with the user when an agent turn is mid-flight (quitting aborts it). The
+// renderer calls back here once approved; we mark the quit and re-issue the
+// close, which now sails through the guard instead of looping back.
+ipcMain.on('modmixer:quit:confirm', () => {
+  approveQuit();
+  mainWindow?.close();
+});
 // Apply the persisted "dangerously skip permissions" bypass before the first
 // agent turn so it's in force from launch (the setting survives restarts). The
 // Advanced-settings toggle keeps the gate in sync live thereafter.
 confirmGate.setSkipPermissions(loadSettings().dangerouslySkipPermissions);
 const host = new AgentHost(getWindow);
+if (DEMO_MODE) {
+  // Demo-video harness: one-shot completions on the user's own credentials
+  // (powers the stage-1 "user-actor"). Never registered outside demo mode.
+  ipcMain.handle(
+    'modmixer:demo:complete',
+    (_event, args: { modelId: string; system: string; user: string }) =>
+      host.demoComplete(args),
+  );
+}
 // Boot the mod registry so it's primed by the time the renderer asks for a
 // snapshot. Subscribers (renderer broadcast, agent tools) attach below.
 const registry = getRegistry();
@@ -252,14 +297,95 @@ const createWindow = () => {
     (themePref === 'auto' && nativeTheme.shouldUseDarkColors);
   const bg = dark ? '#131417' : '#f4f4f0';
 
+  // Demo capture wants an exact, chrome-free canvas at a fixed content size;
+  // normal runs get the standard framed window.
+  const demoSize = DEMO_MODE
+    ? (process.env.MODMIXER_DEMO_SIZE ?? '1920x1080').split('x').map(Number)
+    : null;
+
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 800,
+    width: demoSize?.[0] || 1280,
+    height: demoSize?.[1] || 800,
+    ...(demoSize
+      ? { frame: false, resizable: false, useContentSize: true }
+      : {}),
     backgroundColor: bg,
     icon: devIconPath ?? undefined,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
     },
+  });
+
+  if (DEMO_MODE) {
+    // Let the harness's injected MediaRecorder capture the app without a
+    // source picker: grant getDisplayMedia with our own frame (tab capture —
+    // no OS chrome, immune to window occlusion).
+    mainWindow.webContents.session.setDisplayMediaRequestHandler(
+      (_request, callback) => {
+        const frame = mainWindow?.webContents.mainFrame;
+        if (frame) callback({ video: frame });
+      },
+    );
+  }
+
+  // Quitting aborts any in-flight agent turn, so defer the close to the
+  // renderer, which confirms with the user first (only when a turn is actually
+  // running). It calls back via 'modmixer:quit:confirm' to let the close
+  // proceed. A crashed/destroyed renderer can't be asked, so we let those
+  // through rather than trap the user in an unclosable window.
+  mainWindow.on('close', (event) => {
+    if (isQuitApproved()) return;
+    const wc = mainWindow?.webContents;
+    if (!wc || wc.isDestroyed() || wc.isCrashed()) return;
+    event.preventDefault();
+    wc.send('modmixer:quit:requested');
+  });
+
+  // Electron ships the spell-checker (red underlines) but no default context
+  // menu, so right-clicking a misspelled word does nothing until we build the
+  // menu ourselves from the event params. Covers any editable field, not just
+  // the chat box.
+  mainWindow.webContents.on('context-menu', (_event, params) => {
+    const menu = new Menu();
+
+    for (const suggestion of params.dictionarySuggestions) {
+      menu.append(
+        new MenuItem({
+          label: suggestion,
+          click: () => mainWindow?.webContents.replaceMisspelling(suggestion),
+        }),
+      );
+    }
+
+    if (params.misspelledWord) {
+      menu.append(
+        new MenuItem({
+          label: 'Add to dictionary',
+          click: () =>
+            mainWindow?.webContents.session.addWordToSpellCheckerDictionary(
+              params.misspelledWord,
+            ),
+        }),
+      );
+      menu.append(new MenuItem({ type: 'separator' }));
+    }
+
+    if (params.isEditable) {
+      menu.append(
+        new MenuItem({ role: 'cut', enabled: params.editFlags.canCut }),
+      );
+      menu.append(
+        new MenuItem({ role: 'copy', enabled: params.editFlags.canCopy }),
+      );
+      menu.append(
+        new MenuItem({ role: 'paste', enabled: params.editFlags.canPaste }),
+      );
+    } else if (params.editFlags.canCopy) {
+      // Non-editable selection (e.g. a model's reply) — still allow copy.
+      menu.append(new MenuItem({ role: 'copy' }));
+    }
+
+    if (menu.items.length > 0) menu.popup();
   });
 
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {

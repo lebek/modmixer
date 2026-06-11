@@ -1,0 +1,4 @@
+# patch-package diffs must stay LF: the node_modules files they apply to
+# ship LF, and a CRLF-converted patch fails the hunk match, killing
+# postinstall (and npm install) on fresh checkouts.
+patches/*.patch text eol=lf

@@ -1,0 +1,39 @@
+diff --git a/node_modules/@mariozechner/pi-ai/dist/providers/anthropic.js b/node_modules/@mariozechner/pi-ai/dist/providers/anthropic.js
+index cb1b8f0..8214add 100644
+--- a/node_modules/@mariozechner/pi-ai/dist/providers/anthropic.js
++++ b/node_modules/@mariozechner/pi-ai/dist/providers/anthropic.js
+@@ -516,8 +516,11 @@ function supportsAdaptiveThinking(modelId) {
+         modelId.includes("opus-4.6") ||
+         modelId.includes("opus-4-7") ||
+         modelId.includes("opus-4.7") ||
++        modelId.includes("opus-4-8") ||
++        modelId.includes("opus-4.8") ||
+         modelId.includes("sonnet-4-6") ||
+-        modelId.includes("sonnet-4.6"));
++        modelId.includes("sonnet-4.6") ||
++        modelId.includes("fable-5"));
+ }
+ /**
+  * Map ThinkingLevel to Anthropic effort levels for adaptive thinking.
+@@ -537,7 +540,9 @@ function mapThinkingLevelToEffort(level, modelId) {
+             if (modelId.includes("opus-4-6") || modelId.includes("opus-4.6")) {
+                 return "max";
+             }
+-            if (modelId.includes("opus-4-7") || modelId.includes("opus-4.7")) {
++            if (modelId.includes("opus-4-7") || modelId.includes("opus-4.7") ||
++                modelId.includes("opus-4-8") || modelId.includes("opus-4.8") ||
++                modelId.includes("fable-5")) {
+                 return "xhigh";
+             }
+             return "high";
+@@ -707,7 +712,9 @@ function buildParams(model, context, isOAuthToken, options) {
+                 };
+             }
+         }
+-        else if (options?.thinkingEnabled === false) {
++        else if (options?.thinkingEnabled === false && !model.id.includes("fable-5")) {
++            // Fable 5 rejects an explicit {type: "disabled"} with a 400 —
++            // thinking-off requests must omit the param entirely.
+             params.thinking = { type: "disabled" };
+         }
+     }

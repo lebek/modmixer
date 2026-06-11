@@ -223,6 +223,10 @@ export function ChatPanel({
     const staged = attachments;
     setPanelDraft(conversation.id, '');
     clearPanelAttachments(conversation.id);
+    // Demo-video replay (dev-only seam, see demo-hooks.ts): the harness
+    // swallows the send and feeds recorded agent events instead.
+    if (import.meta.env.DEV && window.__demo?.consumeSend(conversation.id, text))
+      return;
     const result = await send.run(text, staged);
     // null = the IPC threw before any agent_end event would clear busy.
     if (result === null) markIdle(conversation.id);
@@ -581,6 +585,7 @@ export function ChatPanel({
               </div>
             )}
             <textarea
+              data-demo="chat-input"
               value={draft}
               onChange={(e) => setPanelDraft(conversation.id, e.target.value)}
               onPaste={(e) => {
@@ -641,6 +646,7 @@ export function ChatPanel({
                 // textarea container doesn't grow the moment the user
                 // types the first character.
                 <button
+                  data-demo="chat-send"
                   onClick={() => void submit()}
                   aria-hidden={
                     (!draft.trim() && attachments.length === 0) || undefined
@@ -1029,6 +1035,7 @@ function MessageBubbleImpl({
     const cost = !isStreaming ? openrouterCost(message) : null;
     return (
       <div
+        data-demo="assistant-msg"
         className={cn(
           'group rounded-md border border-line bg-paper/70 p-3',
           // The streaming bubble draws a rotating accent arc around its
@@ -1154,6 +1161,7 @@ function ToolBadge({
         : 'bg-ready';
   return (
     <div
+      data-demo="tool-badge"
       className={cn(
         'mt-2 flex items-center gap-2 rounded border border-line bg-surface/60 px-2 py-1.5 font-mono text-[11px] text-muted',
         // Sliding shimmer says "this is actively running". It clears as

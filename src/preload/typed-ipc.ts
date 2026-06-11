@@ -147,6 +147,12 @@ export interface Channels {
   'modmixer:agent:get-context-usage': (
     conversationId: string,
   ) => import('@mariozechner/pi-coding-agent').ContextUsage | null;
+  // Demo-video harness only — handler registered behind MODMIXER_DEMO=1.
+  'modmixer:demo:complete': (args: {
+    modelId: string;
+    system: string;
+    user: string;
+  }) => string;
 
   // Settings
   'modmixer:settings:get': () => Settings;
@@ -412,6 +418,8 @@ export interface Events {
   'modmixer:confirm:request': ConfirmationRequest;
   'modmixer:index:progress': IndexProgressEvent;
   'modmixer:updater:state': UpdaterState;
+  /** Main asks the renderer to confirm a pending quit (payload-less). */
+  'modmixer:quit:requested': void;
 }
 
 type ChannelArgs<K extends keyof Channels> = Parameters<Channels[K]>;
