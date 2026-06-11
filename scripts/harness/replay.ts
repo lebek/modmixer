@@ -63,10 +63,10 @@ interface HarnessConfig {
   /**
    * Replay a live-session conversation: live system prompt + live tool set,
    * apply_live/game_action stubbed. In live mode the variants A/B the
-   * SYSTEM PROMPT (baseline reverts the new-def registration recipe back to
-   * the pre-fix text) instead of the launch-mode hint, and the outcome
-   * classifier looks for the def-registration recipe rather than
-   * run_test_cycle.
+   * SYSTEM PROMPT (baseline strips the "Interpret before you implement"
+   * block back to the pre-fix text) instead of the launch-mode hint, and the
+   * outcome classifier looks at WHAT the agent built (the named thing vs. a
+   * vanilla lookalike, plus drama/flavor touches) rather than run_test_cycle.
    */
   live?: boolean;
   /** Variants to run. 'fix' appends launchModeHint() to stubbed build/schematic results; 'baseline' does not. */
@@ -241,20 +241,19 @@ function makeTruncatedSession(
 }
 
 // ── Live-mode prompt variants ───────────────────────────────────────────────
-// The new-def fix lives in the live system prompt itself, so the baseline
-// variant reverts those exact edits on the freshly built prompt. Exact-string
-// surgery on purpose: if the prompt drifts and a marker stops matching, the
-// A/B is no longer testing what it claims to — fail loudly instead.
+// The change under test is the "Interpret before you implement" block in the
+// live scope prompt (plus the reworded "Two verbs" header). baseline strips
+// those exact edits from the freshly built prompt, yielding the pre-change
+// text. Exact-string surgery on purpose: if the prompt drifts and a marker
+// stops matching, the A/B is no longer testing what it claims to — fail
+// loudly instead.
 
-const FIX_QUALIFIER =
-  'hot-reloads def XML (EXISTING defs only — see below) — after it returns';
-const OLD_QUALIFIER = 'hot-reloads def XML — after it returns';
+const INTERPRET_START = '\n\nInterpret before you implement';
+const INTERPRET_END = 'note the touches you added in your report.';
 
-const FIX_BULLET = `- Def hot-reload updates EXISTING defs only. A brand-new def in the mod's XML will NOT register in the running game — not even written self-contained, not even via a full apply_live (symptoms: GetNamedSilentFail returns null right after "defs reloaded"; "Could not resolve cross-reference" for anything pointing at the new defName). Do not retry the reload or vary the XML — go straight to the live-registration recipe below. Changing a def's <thingClass>/<compClass> to a session-mod class is NOT supported live — say so and offer a relaunch.`;
-const OLD_BULLET = `- New defs in XML are fine (apply_live hot-reloads defs). Changing a def's <thingClass>/<compClass> to a session-mod class is NOT supported live — say so and offer a relaunch.`;
-
-const RECIPE_START = '\n\nRegistering a NEW def in the RUNNING game';
-const RECIPE_END = 'the C# copy only lives until the game quits.';
+const FIX_TWO_VERBS =
+  "Two verbs — once you know what you're building, classify it:";
+const OLD_TWO_VERBS = 'Two verbs — classify every request first:';
 
 function promptForVariant(
   builtPrompt: string,
@@ -262,45 +261,38 @@ function promptForVariant(
   live: boolean,
 ): string {
   if (!live || variant === 'fix') return builtPrompt;
-  const startIdx = builtPrompt.indexOf(RECIPE_START);
-  const endIdx = builtPrompt.indexOf(RECIPE_END);
-  if (
-    !builtPrompt.includes(FIX_QUALIFIER) ||
-    !builtPrompt.includes(FIX_BULLET) ||
-    startIdx < 0 ||
-    endIdx < startIdx
-  ) {
+  const startIdx = builtPrompt.indexOf(INTERPRET_START);
+  const endIdx = builtPrompt.indexOf(INTERPRET_END);
+  if (!builtPrompt.includes(FIX_TWO_VERBS) || startIdx < 0 || endIdx < startIdx) {
     throw new Error(
       'live baseline variant: fix markers not found in the built system prompt — prompt text drifted, update the markers in replay.ts',
     );
   }
   return (
     builtPrompt.slice(0, startIdx) +
-    builtPrompt.slice(endIdx + RECIPE_END.length)
-  )
-    .replace(FIX_QUALIFIER, OLD_QUALIFIER)
-    .replace(FIX_BULLET, OLD_BULLET);
+    builtPrompt.slice(endIdx + INTERPRET_END.length)
+  ).replace(FIX_TWO_VERBS, OLD_TWO_VERBS);
 }
 
 /**
- * Live-mode outcome: did the turn register the new def in C# (the recipe —
- * any game_action whose code Adds to a DefDatabase), and did it burn calls
- * re-trying the def reload first?
+ * Live-mode outcome for the interpret-block A/B (cheese-meteor replay): did
+ * the turn build the thing the user actually named (cheese), stage it with
+ * RimWorld's drama machinery (skyfaller/meteorite/incident/letter), and add a
+ * flavor touch (thought/memory/hediff) — or substitute the nearest vanilla
+ * lookalike (the gold-ore meteorite)? Matches against every string the agent
+ * sent into stubbed tools (game_action code, write/edit content, …).
  */
 function classifyLiveOutcome(calls: RecordedCall[]): string {
-  const recipeIdx = calls.findIndex(
-    (c) =>
-      c.name === 'game_action' &&
-      typeof c.params?.code === 'string' &&
-      /DefDatabase<[^>]+>\s*\.\s*Add\s*\(/.test(c.params.code as string),
-  );
-  const reloadIdx = calls.findIndex((c) => c.name === 'apply_live');
-  if (recipeIdx >= 0 && (reloadIdx < 0 || recipeIdx < reloadIdx)) {
-    return 'recipe-first';
+  const blob = calls.map((c) => JSON.stringify(c.params ?? {})).join('\n');
+  if (!blob.trim()) return 'no-action';
+  if (!/cheese/i.test(blob)) {
+    return /gold/i.test(blob) ? 'substitute-gold' : 'substitute-other';
   }
-  if (recipeIdx >= 0) return 'recipe-after-reload-retry';
-  if (reloadIdx >= 0) return 'reload-retry';
-  return 'no-decisive-action';
+  const extras = [
+    /skyfaller|meteorite|incident|letter/i.test(blob) ? 'drama' : null,
+    /thought|memory|hediff/i.test(blob) ? 'flavor' : null,
+  ].filter(Boolean);
+  return extras.length ? `cheese+${extras.join('+')}` : 'cheese-plain';
 }
 
 interface RunOutcome {
