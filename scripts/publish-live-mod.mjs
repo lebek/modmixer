@@ -126,12 +126,14 @@ async function preflight() {
   return { modVersion, name, description, tags, existingId };
 }
 
-/** Copy About/ + Assemblies/ + LICENSE into a temp dir; never Source/. */
+/** Copy the loadable mod folders + LICENSE into a temp dir; never Source/. */
 async function stageContent() {
   const stageRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'modmixer-live-publish-'));
   const dest = path.join(stageRoot, 'ModmixerLive');
-  for (const sub of ['About', 'Assemblies']) {
-    await fsp.cp(path.join(MOD_DIR, sub), path.join(dest, sub), { recursive: true });
+  for (const sub of ['About', 'Assemblies', 'Defs', 'Textures', 'Languages', 'Patches']) {
+    const src = path.join(MOD_DIR, sub);
+    if (!fs.existsSync(src)) continue;
+    await fsp.cp(src, path.join(dest, sub), { recursive: true });
   }
   const license = path.join(MOD_DIR, 'LICENSE');
   if (fs.existsSync(license)) {
