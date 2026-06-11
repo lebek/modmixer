@@ -60,6 +60,15 @@ interface HarnessConfig {
    * agent then takes its next turn from there.
    */
   untilUserText: string;
+  /**
+   * Replay a live-session conversation: live system prompt + live tool set,
+   * apply_live/game_action stubbed. In live mode the variants A/B the
+   * SYSTEM PROMPT (baseline reverts the new-def registration recipe back to
+   * the pre-fix text) instead of the launch-mode hint, and the outcome
+   * classifier looks for the def-registration recipe rather than
+   * run_test_cycle.
+   */
+  live?: boolean;
   /** Variants to run. 'fix' appends launchModeHint() to stubbed build/schematic results; 'baseline' does not. */
   variants: Array<'baseline' | 'fix'>;
   /** Times to repeat each variant (model output is stochastic). */
@@ -96,17 +105,29 @@ const STUBBED = new Set<string>([
   'search_source',
   'save_lore',
   'read_lore',
+  // Live-session tools — never talk to a real game from the harness.
+  'apply_live',
+  'game_action',
 ]);
 
 function stubText(
   name: string,
   params: Record<string, unknown>,
   variant: 'baseline' | 'fix',
+  live: boolean,
 ): string {
   const folder =
     typeof params.folder === 'string' ? params.folder : '<folder>';
-  const hint = variant === 'fix' ? launchModeHint() : '';
+  // In live mode the variant difference lives in the system prompt, not the
+  // tool-result hint — appending launchModeHint would confound the A/B.
+  const hint = variant === 'fix' && !live ? launchModeHint() : '';
   switch (name) {
+    case 'apply_live':
+      return params.defsOnly === true
+        ? 'Defs hot-reloaded in the running game. defs reloaded'
+        : 'Applied live (assembly LiveSessionHotharness1). loaded LiveSessionHotharness1: 0 methods patched, 0 static ctors run; defs reloaded';
+    case 'game_action':
+      return 'Action ran in-game. Result: done; spawned 0 things';
     case 'build_mod':
       return (
         'BUILD SUCCEEDED\n\nBuild succeeded.\n    0 Warning(s)\n    0 Error(s)' +
@@ -131,11 +152,17 @@ function stubText(
   }
 }
 
+interface RecordedCall {
+  name: string;
+  params: Record<string, unknown>;
+}
+
 /** Replace a tool's execute with a recording stub, preserving its schema. */
 function stubTool(
   tool: AgentTool<any>,
   variant: 'baseline' | 'fix',
-  record: (name: string) => void,
+  live: boolean,
+  record: (call: RecordedCall) => void,
 ): AgentTool<any> {
   return {
     ...tool,
@@ -143,8 +170,8 @@ function stubTool(
       _id: string,
       params: Record<string, unknown>,
     ): Promise<AgentToolResult<unknown>> => {
-      record(tool.name);
-      return { content: [{ type: 'text', text: stubText(tool.name, params, variant) }] };
+      record({ name: tool.name, params });
+      return { content: [{ type: 'text', text: stubText(tool.name, params, variant, live) }] };
     },
   };
 }
@@ -213,10 +240,74 @@ function makeTruncatedSession(
   return { tempFile, prompt };
 }
 
+// ── Live-mode prompt variants ───────────────────────────────────────────────
+// The new-def fix lives in the live system prompt itself, so the baseline
+// variant reverts those exact edits on the freshly built prompt. Exact-string
+// surgery on purpose: if the prompt drifts and a marker stops matching, the
+// A/B is no longer testing what it claims to — fail loudly instead.
+
+const FIX_QUALIFIER =
+  'hot-reloads def XML (EXISTING defs only — see below) — after it returns';
+const OLD_QUALIFIER = 'hot-reloads def XML — after it returns';
+
+const FIX_BULLET = `- Def hot-reload updates EXISTING defs only. A brand-new def in the mod's XML will NOT register in the running game — not even written self-contained, not even via a full apply_live (symptoms: GetNamedSilentFail returns null right after "defs reloaded"; "Could not resolve cross-reference" for anything pointing at the new defName). Do not retry the reload or vary the XML — go straight to the live-registration recipe below. Changing a def's <thingClass>/<compClass> to a session-mod class is NOT supported live — say so and offer a relaunch.`;
+const OLD_BULLET = `- New defs in XML are fine (apply_live hot-reloads defs). Changing a def's <thingClass>/<compClass> to a session-mod class is NOT supported live — say so and offer a relaunch.`;
+
+const RECIPE_START = '\n\nRegistering a NEW def in the RUNNING game';
+const RECIPE_END = 'the C# copy only lives until the game quits.';
+
+function promptForVariant(
+  builtPrompt: string,
+  variant: 'baseline' | 'fix',
+  live: boolean,
+): string {
+  if (!live || variant === 'fix') return builtPrompt;
+  const startIdx = builtPrompt.indexOf(RECIPE_START);
+  const endIdx = builtPrompt.indexOf(RECIPE_END);
+  if (
+    !builtPrompt.includes(FIX_QUALIFIER) ||
+    !builtPrompt.includes(FIX_BULLET) ||
+    startIdx < 0 ||
+    endIdx < startIdx
+  ) {
+    throw new Error(
+      'live baseline variant: fix markers not found in the built system prompt — prompt text drifted, update the markers in replay.ts',
+    );
+  }
+  return (
+    builtPrompt.slice(0, startIdx) +
+    builtPrompt.slice(endIdx + RECIPE_END.length)
+  )
+    .replace(FIX_QUALIFIER, OLD_QUALIFIER)
+    .replace(FIX_BULLET, OLD_BULLET);
+}
+
+/**
+ * Live-mode outcome: did the turn register the new def in C# (the recipe —
+ * any game_action whose code Adds to a DefDatabase), and did it burn calls
+ * re-trying the def reload first?
+ */
+function classifyLiveOutcome(calls: RecordedCall[]): string {
+  const recipeIdx = calls.findIndex(
+    (c) =>
+      c.name === 'game_action' &&
+      typeof c.params?.code === 'string' &&
+      /DefDatabase<[^>]+>\s*\.\s*Add\s*\(/.test(c.params.code as string),
+  );
+  const reloadIdx = calls.findIndex((c) => c.name === 'apply_live');
+  if (recipeIdx >= 0 && (reloadIdx < 0 || recipeIdx < reloadIdx)) {
+    return 'recipe-first';
+  }
+  if (recipeIdx >= 0) return 'recipe-after-reload-retry';
+  if (reloadIdx >= 0) return 'reload-retry';
+  return 'no-decisive-action';
+}
+
 interface RunOutcome {
   variant: 'baseline' | 'fix';
   toolSequence: string[];
   launched: boolean;
+  outcome: string;
   finalText: string;
   error?: string;
 }
@@ -236,22 +327,29 @@ async function runOneTurn(
   const tempSessionDir = path.join(tmpDir, `sessions-${runId}`);
   fs.mkdirSync(tempSessionDir, { recursive: true });
 
-  const calls: string[] = [];
+  const live = cfg.live === true;
+  const calls: RecordedCall[] = [];
   const base = buildCustomTools(
     cwd,
     `harness-${runId}`,
     () => cfg.scope,
     () => model,
     () => [],
+    { live },
   );
   const customTools = base
     .map((t) =>
-      STUBBED.has(t.name) ? stubTool(t, variant, (n) => calls.push(n)) : t,
+      STUBBED.has(t.name)
+        ? stubTool(t, variant, live, (c) => calls.push(c))
+        : t,
     )
     .map((t) => toolDefinitionFromAgentTool(t));
 
   const sessionManager = SessionManager.open(tempFile, tempSessionDir, cwd);
-  const resourceLoader = new ScopedResourceLoader(systemPrompt, []);
+  const resourceLoader = new ScopedResourceLoader(
+    promptForVariant(systemPrompt, variant, live),
+    [],
+  );
   const { session } = (await createAgentSession({
     cwd,
     agentDir,
@@ -272,8 +370,9 @@ async function runOneTurn(
   } catch (err) {
     return {
       variant,
-      toolSequence: calls,
-      launched: calls.includes('run_test_cycle'),
+      toolSequence: calls.map((c) => c.name),
+      launched: calls.some((c) => c.name === 'run_test_cycle'),
+      outcome: 'error',
       finalText: '',
       error: err instanceof Error ? err.message : String(err),
     };
@@ -293,10 +392,16 @@ async function runOneTurn(
       }
     }
   }
+  const launched = toolNames.includes('run_test_cycle');
   return {
     variant,
     toolSequence: toolNames,
-    launched: toolNames.includes('run_test_cycle'),
+    launched,
+    outcome: live
+      ? classifyLiveOutcome(calls)
+      : launched
+        ? 'launched-without-asking'
+        : 'asked/held',
     finalText: finalText.trim(),
   };
 }
@@ -330,21 +435,27 @@ async function main(): Promise<void> {
     return;
   }
 
-  const systemPrompt = buildSystemPrompt(cfg.scope);
+  const live = cfg.live === true;
+  const systemPrompt = buildSystemPrompt(cfg.scope, { live });
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mm-harness-'));
 
   if (cfg.dry) {
     const { prompt } = makeTruncatedSession(cfg, tmpDir, 'dry');
     const askFirst = !systemPrompt.includes('Launch mode — proactive');
+    // Exercise the variant transform in dry mode so a marker drift fails
+    // here, before any model spend.
+    const baselinePrompt = promptForVariant(systemPrompt, 'baseline', live);
     console.log(
       JSON.stringify(
         {
           dry: true,
+          live,
           model: `${model.provider}/${model.id}`,
           systemPromptChars: systemPrompt.length,
+          baselinePromptChars: baselinePrompt.length,
           systemPromptLaunchMode: askFirst ? 'ask-first' : 'proactive',
           replayPrompt: prompt,
-          hintFixVariant: launchModeHint().trim(),
+          hintFixVariant: live ? '(n/a in live mode)' : launchModeHint().trim(),
         },
         null,
         2,
@@ -369,16 +480,21 @@ async function main(): Promise<void> {
       );
       results.push(r);
       process.stderr.write(
-        `[harness]   → ${r.launched ? 'LAUNCHED (run_test_cycle)' : 'no launch'}; tools: [${r.toolSequence.join(', ')}]${r.error ? '; ERROR: ' + r.error : ''}\n`,
+        `[harness]   → ${r.outcome}; tools: [${r.toolSequence.join(', ')}]${r.error ? '; ERROR: ' + r.error : ''}\n`,
       );
     }
   }
 
   const summarize = (v: 'baseline' | 'fix') => {
     const rs = results.filter((r) => r.variant === v);
+    const outcomes: Record<string, number> = {};
+    for (const r of rs) {
+      outcomes[r.outcome] = (outcomes[r.outcome] ?? 0) + 1;
+    }
     return {
       variant: v,
       runs: rs.length,
+      outcomes,
       launchedWithoutAsking: rs.filter((r) => r.launched).length,
       askedOrHeld: rs.filter((r) => !r.launched && !r.error).length,
       errors: rs.filter((r) => r.error).length,
@@ -387,14 +503,16 @@ async function main(): Promise<void> {
   const summary = {
     model: `${model.provider}/${model.id}`,
     thinkingLevel: cfg.thinkingLevel ?? 'high',
+    live,
     perVariant: cfg.variants.map(summarize),
     runs: results,
   };
   console.log('\n=== HARNESS SUMMARY ===');
   for (const s of summary.perVariant) {
-    console.log(
-      `${s.variant.padEnd(9)}: launched-without-asking ${s.launchedWithoutAsking}/${s.runs}, asked/held ${s.askedOrHeld}/${s.runs}, errors ${s.errors}/${s.runs}`,
-    );
+    const tally = Object.entries(s.outcomes)
+      .map(([k, n]) => `${k} ${n}/${s.runs}`)
+      .join(', ');
+    console.log(`${s.variant.padEnd(9)}: ${tally}`);
   }
   console.log('HARNESS_RESULT ' + JSON.stringify(summary));
   app.exit(0);

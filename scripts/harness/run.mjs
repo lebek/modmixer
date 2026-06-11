@@ -77,6 +77,9 @@ if (!fs.existsSync(convo.sessionFile)) {
 const config = {
   sessionFile: convo.sessionFile,
   scope: convo.scope,
+  // Live conversations replay with the live prompt + tool set; the variants
+  // then A/B the live system prompt (see replay.ts).
+  live: convo.live === true,
   model: { provider, modelId },
   thinkingLevel,
   untilUserText,
