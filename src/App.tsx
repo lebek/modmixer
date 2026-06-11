@@ -580,9 +580,26 @@ export function App() {
       localStorage.setItem(consentKey, '1');
     }
     try {
-      const { folder } = await window.modmixer.launchLiveSession();
+      const res = await window.modmixer.launchLiveSession();
+      if (!res.ok) {
+        // Workshop-fixable gates carry the item links; everything else is a
+        // plain explanation. Relaunching after subscribing is the retry path.
+        if (res.steamUrl) {
+          const open = await appConfirm(
+            res.webUrl ? `${res.message}\n\n${res.webUrl}` : res.message,
+            {
+              title: 'Get Modmixer Live on the Steam Workshop',
+              okLabel: 'Open Workshop Page',
+            },
+          );
+          if (open) void window.modmixer.openExternal(res.steamUrl);
+        } else {
+          void appAlert(res.message);
+        }
+        return;
+      }
       await refreshMods();
-      await openMod(folder);
+      await openMod(res.folder);
     } catch (err) {
       console.error(err);
       void appAlert(

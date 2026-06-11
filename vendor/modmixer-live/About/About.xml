@@ -3,7 +3,12 @@
   <name>Modmixer Live</name>
   <packageId>modmixer.live</packageId>
   <author>Modmixer</author>
-  <description>Experimental in-game live-modding companion for the Modmixer desktop app. Adds an in-game chat window for prompting the Modmixer agent, and applies what the agent sends back — hot-loaded assemblies, one-shot C# actions, and def reloads — over a localhost connection. Requires the Modmixer app; installed automatically for live sessions.</description>
+  <modVersion>0.2.0</modVersion>
+  <description>In-game live-modding companion for the Modmixer desktop app.
+
+Prompt the Modmixer agent from a chat window inside RimWorld and watch your ideas land in the running game: hot-loaded C# assemblies, one-shot actions, and def reloads, all over a local connection to the app.
+
+REQUIRES THE MODMIXER APP — this mod does nothing on its own. Get the app free at modmixer.com, then click "Launch Live Session"; it starts RimWorld in a sandboxed test colony with this mod active. Your real saves and mod list are never touched.</description>
   <supportedVersions>
     <li>1.5</li>
     <li>1.6</li>

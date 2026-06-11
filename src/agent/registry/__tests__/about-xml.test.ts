@@ -24,6 +24,14 @@ describe('parseAboutXml', () => {
     assert.deepEqual(out.supportedVersions, ['1.5', '1.6']);
   });
 
+  it('parses modVersion and defaults it to empty', () => {
+    const out = parseAboutXml(
+      '<ModMetaData><name>V</name><modVersion>0.2.0</modVersion></ModMetaData>',
+    );
+    assert.equal(out.modVersion, '0.2.0');
+    assert.equal(parseAboutXml('<ModMetaData/>').modVersion, '');
+  });
+
   it('handles UTF-8 BOM', () => {
     const xml = '﻿<ModMetaData><name>BOM Mod</name></ModMetaData>';
     const out = parseAboutXml(xml);

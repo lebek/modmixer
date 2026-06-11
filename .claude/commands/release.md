@@ -114,6 +114,7 @@ Rules:
 
 ## Notes on edge cases
 
+- If the range includes changes under `vendor/modmixer-live/`, remind the user to publish the Live mod to the Steam Workshop alongside the app release: `npm run publish:live-mod -- --notes "v<modVersion>"` (manual, needs Steam running). The mod auto-updates for subscribers, so publish a backward-compatible mod BEFORE the app release when possible.
 - If preflight fails (dirty tree, not on main, lint/test failures): nothing was tagged or pushed. The user fixes the issue and re-runs `/release`.
 - If the build fails: the tag and version-bump commit exist. Don't auto-revert. Tell the user the run URL; they can re-run the workflow from the Actions UI after pushing a fix, or revert with `git tag -d vX.Y.Z && git push origin :refs/tags/vX.Y.Z` followed by `git revert HEAD`.
 - If `gh` complains about auth: tell the user to run `gh auth login` (interactive — they need to do it themselves).

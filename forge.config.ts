@@ -126,29 +126,6 @@ async function stageBridge() {
   }
 }
 
-// Same staging story for the Modmixer Live mod (in-game prompting /
-// hot-load command channel for live sessions). Assemblies/ is a build
-// product (`dotnet build vendor/modmixer-live/Source/ModMixerLive.csproj`)
-// that must exist before packaging — fail the package loudly rather than
-// ship an installer whose live sessions can never start (live/install.ts
-// would refuse with "not-built" at runtime).
-async function stageLive() {
-  const src = path.resolve(__dirname, 'vendor/modmixer-live');
-  const dest = path.resolve(__dirname, 'dist/modmixer-live');
-  try {
-    await fs.access(path.join(src, 'Assemblies', 'ModMixerLive.dll'));
-  } catch {
-    throw new Error(
-      'vendor/modmixer-live/Assemblies/ModMixerLive.dll is missing — build the Live mod (dotnet build vendor/modmixer-live/Source/ModMixerLive.csproj) before packaging.',
-    );
-  }
-  await fs.rm(dest, { recursive: true, force: true });
-  await fs.mkdir(dest, { recursive: true });
-  for (const sub of ['About', 'Assemblies']) {
-    await fs.cp(path.join(src, sub), path.join(dest, sub), { recursive: true });
-  }
-}
-
 // Stage steamworks.js with only the host platform's native binding subdir.
 // node_modules/steamworks.js/dist/ ships {win64, osx, linux64}; signtool
 // can only sign Windows PE binaries, so leaving Linux/macOS .node files in
@@ -255,11 +232,8 @@ const config: ForgeConfig = {
       // Mods/ during run_test_cycle when the user doesn't already have the
       // bridge installed via Workshop.
       'dist/modmixer-bridge',
-      // In-game Modmixer Live mod (experimental live sessions). Same
-      // staging story as the bridge: About/ + Assemblies/ only, junctioned
-      // into RimWorld's Mods/ by live/install.ts when a live session
-      // launches and removed when its game closes.
-      'dist/modmixer-live',
+      // The Modmixer Live mod is NOT bundled: packaged builds get it from
+      // the Steam Workshop (see live/install.ts), dev uses vendor/ directly.
       // Index engine assets. ilspycmd binaries are ~30-50 MB per platform;
       // only the matching <platform>-<arch> subdir for the build host needs
       // a binary present (see resources/ilspycmd/README.md). The tree-sitter
@@ -317,7 +291,6 @@ const config: ForgeConfig = {
       await stagePrunedSteamworks();
       await stageBetterSqlite();
       await stageBridge();
-      await stageLive();
       await stagePhotonNodeModules();
     },
   },

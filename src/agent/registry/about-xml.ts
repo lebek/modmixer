@@ -13,6 +13,8 @@ export interface AboutXml {
   packageIdLc: string;
   author: string;
   description: string;
+  /** Free-form <modVersion> string, e.g. "0.2.0". Empty when undeclared. */
+  modVersion: string;
   /** Major.Minor strings, e.g. "1.4", "1.5", "1.6". */
   supportedVersions: string[];
   /** Hard dependencies — mod won't load without these. */
@@ -43,6 +45,7 @@ const EMPTY: AboutXml = {
   packageIdLc: '',
   author: '',
   description: '',
+  modVersion: '',
   supportedVersions: [],
   modDependencies: [],
   loadAfter: [],
@@ -63,6 +66,7 @@ export function parseAboutXml(rawXml: string): AboutXml {
   const packageId = extractScalar(topLevel, 'packageId');
   const author = extractScalar(topLevel, 'author') || extractList(topLevel, 'authors').join(', ');
   const description = extractScalar(topLevel, 'description');
+  const modVersion = extractScalar(topLevel, 'modVersion');
   const supportedVersions = normalizeVersions(extractList(topLevel, 'supportedVersions'));
 
   return {
@@ -71,6 +75,7 @@ export function parseAboutXml(rawXml: string): AboutXml {
     packageIdLc: packageId.toLowerCase(),
     author,
     description,
+    modVersion,
     supportedVersions,
     modDependencies: parseDependencies(xml),
     loadAfter: parseListWithVersions(xml, 'loadAfter'),

@@ -18,6 +18,7 @@ function makeMod(packageId: string, opts: Partial<RegistryMod['about']> = {}): R
       packageIdLc: packageId.toLowerCase(),
       author: '',
       description: '',
+      modVersion: '',
       supportedVersions: [],
       modDependencies: [],
       loadAfter: [],

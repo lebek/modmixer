@@ -17,6 +17,7 @@ function mkMod(packageId: string, opts: Partial<RegistryMod['about']> = {}): Reg
       packageIdLc: packageId.toLowerCase(),
       author: '',
       description: '',
+      modVersion: '',
       supportedVersions: [],
       modDependencies: [],
       loadAfter: [],

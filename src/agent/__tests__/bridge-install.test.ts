@@ -136,6 +136,7 @@ function workshopSnapshot(): RegistrySnapshot {
           packageIdLc: BRIDGE_PACKAGE_ID,
           author: 'ModMixer',
           description: '',
+          modVersion: '',
           supportedVersions: ['1.6'],
           modDependencies: [],
           loadAfter: [],

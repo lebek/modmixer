@@ -1,17 +1,22 @@
-// Wire the Modmixer Live mod into the RimWorld install for a live session.
+// Make the Modmixer Live mod available to RimWorld for a live session.
 //
-// Same junction/symlink mechanism as the monitor bridge (see
-// bridge-install.ts, which this deliberately mirrors), with two
-// differences that keep the powerful half of the live feature opt-in:
+// Distribution is split by build flavor:
 //
-//   1. Live is installed ONLY when the user launches a live session, and
-//      removed when that session's game closes — it never rides along with
-//      ordinary test cycles the way the bridge does.
-//   2. The install refuses when the bundled mod has no built assembly
-//      (vendor/modmixer-live ships C# source; Assemblies/ is produced by
-//      `dotnet build` at package time). A source-only copy would load as a
-//      dead mod and the in-game window would simply never exist — failing
-//      here gives the launch flow a real error to surface instead.
+//   - Packaged builds: the mod is distributed ONLY via Steam Workshop (the
+//     official item, LIVE_WORKSHOP_ID). We never install anything — this
+//     module just detects the subscription and gates on its version; ship.ts
+//     enables it by packageId from the registry snapshot, and RimWorld loads
+//     Workshop content natively. Non-Steam installs can't use Live at all.
+//   - Dev (repo checkout): vendor/modmixer-live is junctioned into
+//     `<rimworld>/Mods/` exactly like the monitor bridge (bridge-install.ts),
+//     so mod iteration doesn't require publishing. The junction refuses when
+//     the vendor tree has no built assembly (Assemblies/ is produced by
+//     `dotnet build`) — a source-only copy would load as a dead mod.
+//
+// Either way Live stays opt-in: it's only wired up when the user launches a
+// live session, and the dev junction is removed when that session's game
+// closes — it never rides along with ordinary test cycles the way the
+// bridge does.
 
 import { app } from 'electron';
 import path from 'node:path';
@@ -19,9 +24,34 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import { detectRimWorldPaths } from '../paths.js';
 import type { RegistrySnapshot } from '../registry/types.js';
+import { compareDottedVersions } from './version.js';
 
 export const LIVE_PACKAGE_ID = 'modmixer.live';
-/** Folder name we use under `<rimworld>/Mods/`. Stable across versions. */
+
+/**
+ * publishedfileid of the official Modmixer Live Workshop item. The Workshop
+ * folder name IS this id, which makes it the spoof-resistant identity check
+ * (anyone can upload a mod with our packageId; nobody else gets this id).
+ *
+ * PLACEHOLDER until the one-time first publish (scripts/publish-live-mod.mjs)
+ * mints the real id — packaged Live is non-functional while this is '0'.
+ */
+export const LIVE_WORKSHOP_ID = '0';
+
+/**
+ * Minimum About.xml <modVersion> of the installed Workshop copy this app can
+ * drive. This is the pre-launch gate; the LiveHello protocol handshake
+ * (protocol.ts / server.ts) stays as the runtime backstop. Steam updates the
+ * mod automatically, so only bump this when the app genuinely depends on
+ * newer mod behavior — and prefer keeping the mod backward-compatible over
+ * bumping LIVE_PROTOCOL_VERSION.
+ */
+export const LIVE_REQUIRED_VERSION = '0.2.0';
+
+export const LIVE_WORKSHOP_URL_STEAM = `steam://url/CommunityFilePage/${LIVE_WORKSHOP_ID}`;
+export const LIVE_WORKSHOP_URL_WEB = `https://steamcommunity.com/sharedfiles/filedetails/?id=${LIVE_WORKSHOP_ID}`;
+
+/** Folder name we use under `<rimworld>/Mods/` for the dev junction. */
 const LIVE_MODS_FOLDER = 'ModmixerLive';
 /** Assembly the build must have produced for the mod to be loadable. */
 const LIVE_ASSEMBLY = path.join('Assemblies', 'ModMixerLive.dll');
@@ -31,46 +61,126 @@ export interface LiveInstallResult {
   available: boolean;
   /**
    * Why we didn't install our copy (only set when we deliberately skipped):
-   * - "workshop" — user has a Workshop subscription (future-proofing; no
-   *   Workshop release exists yet).
-   * - "local" — user has a real (non-junction) ModmixerLive folder.
+   * - "workshop" — the official Workshop item is subscribed and current
+   *   (packaged happy path), or a dev machine has a subscription that wins
+   *   over the vendor junction.
+   * - "local" — user has a real (non-junction) ModmixerLive folder (dev).
    * - "rimworld-missing" — RimWorld install not found.
-   * - "source-missing" — bundled live dir wasn't found (broken package).
-   * - "not-built" — bundled live dir exists but has no compiled assembly.
+   * - "not-built" — vendor tree exists but has no compiled assembly (dev).
+   * - "steam-required" — packaged build, but RimWorld isn't a Steam install,
+   *   so the user can't subscribe to the Workshop item.
+   * - "not-subscribed" — Steam install, but the official Workshop item isn't
+   *   on disk (not subscribed, or Steam hasn't downloaded it yet).
+   * - "stale-version" — Workshop copy is older than LIVE_REQUIRED_VERSION
+   *   (Steam hasn't delivered the update yet).
    */
-  skipReason?: 'workshop' | 'local' | 'rimworld-missing' | 'source-missing' | 'not-built';
-  /** True when we created or refreshed the junction. */
+  skipReason?:
+    | 'workshop'
+    | 'local'
+    | 'rimworld-missing'
+    | 'not-built'
+    | 'steam-required'
+    | 'not-subscribed'
+    | 'stale-version';
+  /** Installed Workshop copy's <modVersion>, set with "stale-version". */
+  installedVersion?: string;
+  /** True when we created or refreshed the dev junction. */
   installed: boolean;
 }
 
 /**
- * Resolve the on-disk bundled Live mod. Probes dev first
- * (`<repo>/vendor/modmixer-live`), then the packaged extraResource path
- * (`<resourcesPath>/modmixer-live`). Returns null if neither exists.
+ * Resolve the development copy of the Live mod (`<repo>/vendor/modmixer-live`).
+ * Packaged builds intentionally have no bundled copy — users get the mod from
+ * Steam Workshop — so this returns null there (the Vite plugin ships only
+ * .vite/build in the asar) and ensureLiveInstalled takes the Workshop path.
  */
 export function resolveLiveSourceDir(): string | null {
-  const candidates: string[] = [];
+  let candidate: string;
   try {
-    candidates.push(path.join(app.getAppPath(), 'vendor', 'modmixer-live'));
+    candidate = path.join(app.getAppPath(), 'vendor', 'modmixer-live');
   } catch {
     // app.getAppPath() throws when Electron isn't initialized (unit tests).
+    return null;
   }
-  if (process.resourcesPath) {
-    candidates.push(path.join(process.resourcesPath, 'modmixer-live'));
-  }
-  for (const c of candidates) {
-    if (fs.existsSync(path.join(c, 'About', 'About.xml'))) return c;
-  }
-  return null;
+  return fs.existsSync(path.join(candidate, 'About', 'About.xml'))
+    ? candidate
+    : null;
 }
 
 /**
- * Ensure the Live mod is loadable by RimWorld. Same shape and same safety
- * rules as ensureBridgeInstalled: respect Workshop/local installs, refresh
- * stale junctions, never throw — return a result describing what happened.
+ * Ensure the Live mod is loadable by RimWorld. Never throws — returns a
+ * result describing what happened. Branches on whether the vendor dev copy
+ * exists rather than app.isPackaged, which is unreliable under
+ * `electron-forge start` (same rationale as resolvePackagedResource in
+ * index/paths.ts).
  */
 export async function ensureLiveInstalled(
   snapshot: RegistrySnapshot,
+): Promise<LiveInstallResult> {
+  const source = resolveLiveSourceDir();
+  return source
+    ? ensureDevJunction(snapshot, source)
+    : checkWorkshopInstall(snapshot);
+}
+
+/**
+ * Packaged path: detect the official Workshop item and gate on its version.
+ * No filesystem writes except clearing a junction left by an old dev build.
+ */
+async function checkWorkshopInstall(
+  snapshot: RegistrySnapshot,
+): Promise<LiveInstallResult> {
+  const { modsDir } = detectRimWorldPaths();
+  const installRoot = path.dirname(modsDir);
+  if (!fs.existsSync(installRoot)) {
+    return { available: false, installed: false, skipReason: 'rimworld-missing' };
+  }
+
+  // Steam installs always live under .../steamapps/common/... (including
+  // custom libraries and the install-path override). GOG / DRM-free copies
+  // don't, and their users can't subscribe to Workshop items — a manually
+  // copied install inside a folder named "steamapps" would fool this, but
+  // that's an acceptable edge.
+  if (!/[\\/]steamapps[\\/]/i.test(installRoot)) {
+    return { available: false, installed: false, skipReason: 'steam-required' };
+  }
+
+  // The registry snapshot is the same lens ship.ts uses to enable mods by
+  // packageId, so "official item in the snapshot" is the real availability
+  // signal — not just a directory existing while Steam is mid-download.
+  const item = snapshot.mods.find(
+    (m) => m.source === 'workshop' && m.folder === LIVE_WORKSHOP_ID,
+  );
+  if (!item || item.about.packageIdLc !== LIVE_PACKAGE_ID) {
+    return { available: false, installed: false, skipReason: 'not-subscribed' };
+  }
+
+  const installedVersion = item.about.modVersion;
+  if (compareDottedVersions(installedVersion, LIVE_REQUIRED_VERSION) < 0) {
+    return {
+      available: false,
+      installed: false,
+      skipReason: 'stale-version',
+      installedVersion,
+    };
+  }
+
+  // A junction left at Mods/ModmixerLive by a pre-Workshop dev build would
+  // make RimWorld see two copies of modmixer.live — clear it. (Real
+  // directories are left alone, same as removeLiveInstall always did.)
+  await removeLiveInstall().catch(() => {});
+
+  return { available: true, installed: false, skipReason: 'workshop' };
+}
+
+/**
+ * Dev path: junction vendor/modmixer-live into Mods/. Same shape and same
+ * safety rules as ensureBridgeInstalled: respect Workshop/local installs,
+ * refresh stale junctions.
+ */
+async function ensureDevJunction(
+  snapshot: RegistrySnapshot,
+  source: string,
 ): Promise<LiveInstallResult> {
   const existing = snapshot.mods.find(
     (m) => m.about.packageIdLc === LIVE_PACKAGE_ID,
@@ -84,14 +194,6 @@ export async function ensureLiveInstalled(
     return { available: false, installed: false, skipReason: 'rimworld-missing' };
   }
 
-  const source = resolveLiveSourceDir();
-  if (!source) {
-    return {
-      available: existing != null,
-      installed: false,
-      skipReason: 'source-missing',
-    };
-  }
   if (!fs.existsSync(path.join(source, LIVE_ASSEMBLY))) {
     // Source tree without a build — see the header comment. A user-owned
     // copy (existing) may still be fine; ours is not installable.
@@ -142,7 +244,7 @@ export async function ensureLiveInstalled(
 /**
  * Remove the junction we created. Called when the live session's game
  * disconnects, so Live never lingers into ordinary test cycles. Leaves
- * real directories alone.
+ * real directories alone. No-op in packaged builds (nothing was installed).
  */
 export async function removeLiveInstall(): Promise<boolean> {
   const { modsDir } = detectRimWorldPaths();

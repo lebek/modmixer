@@ -19,8 +19,10 @@ good survives the session.
 
 ### Non-goals for v1
 
-- Workshop release of the Live mod (planned later — see Deferred).
-- Working inside the user's real colony / real save / real mod list.
+- Working inside the user's real colony / real save / real mod list. (The
+  Live mod IS distributed via Steam Workshop — as the install channel and
+  modmixer.com funnel — but app-launched sandboxed sessions remain the only
+  way to use it.)
 - Slash commands or a console idiom. (RimWorld has no native console; the
   chat window is the UI.)
 - Showing tool calls, file diffs, or any agent internals in-game.
@@ -36,12 +38,14 @@ junction-linked into every test session. The live engine is, by design, a
 localhost socket that accepts and executes compiled code — that capability
 must not ride along invisibly in every test session.
 
-**Modmixer Live** is a second mod in `vendor/modmixer-live/`, bundled with
-the app (extraResource, same staging pattern as the bridge in
-`forge.config.ts`), installed **only** for live sessions and removed on
-teardown. Both mods are loaded during a live session: bridge for error
-telemetry, Live for chat + commands. They share source files (TCP client,
-JSON) but connect separately.
+**Modmixer Live** is a second mod in `vendor/modmixer-live/`, distributed
+via Steam Workshop in packaged builds (the app links to the official item
+and gates on its `<modVersion>`; see `src/agent/live/install.ts` and
+`scripts/publish-live-mod.mjs`). Dev checkouts junction `vendor/` directly,
+installed **only** for live sessions and removed on teardown. Both mods are
+loaded during a live session: bridge for error telemetry, Live for chat +
+commands. They share source files (TCP client, JSON) but connect
+separately.
 
 ## Architecture
 
@@ -291,12 +295,11 @@ Rough total: **5–7 weeks**, long pole is the C# engine (workstream B).
   and method-body swaps on live types).
 - `/undo` (the spawn ledger is recorded from day one; the command comes
   later) and snapshot-restore-driven revert of features.
-- Workshop release of "Modmixer Live" (own identity/changelog; depends on
-  Pardeike's Workshop Harmony; the disconnected window doubles as the
-  modmixer.com funnel). Requires the real-colony safety work:
-  save backup before first change + scribe guard.
 - Real-colony mode (`/modmixer` in any game session, auto-created session
-  mods).
+  mods). Requires the real-colony safety work: save backup before first
+  change + scribe guard. (The Workshop release itself shipped with v1 as
+  the distribution channel; the mod still ships its own 0Harmony.dll
+  rather than depending on Pardeike's Workshop Harmony.)
 - Promotion flow: "keep this as a real mod" (move out of Live Sessions
   group, normal test/publish lifecycle).
 - Texture/audio live reload; in-game eval latency optimization.

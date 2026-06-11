@@ -28,7 +28,14 @@ import { shipAndLaunch } from '../ship.js';
 import { ensureTestSavedataPrefs } from '../test-savedata.js';
 import { prepareDebugSession } from '../prefs.js';
 import { getRegistry } from '../registry/index.js';
-import { ensureLiveInstalled, LIVE_PACKAGE_ID } from './install.js';
+import {
+  ensureLiveInstalled,
+  LIVE_PACKAGE_ID,
+  LIVE_REQUIRED_VERSION,
+  LIVE_WORKSHOP_URL_STEAM,
+  LIVE_WORKSHOP_URL_WEB,
+  type LiveInstallResult,
+} from './install.js';
 import { setActiveForMod } from '../conversations.js';
 import { track } from '../telemetry.js';
 import { getAgentHost } from '../agent-host.js';
@@ -37,6 +44,26 @@ export interface LiveSessionLaunch {
   folder: string;
   conversationId: string;
 }
+
+/**
+ * Launch outcome for the renderer. Availability gates (mod not subscribed,
+ * non-Steam install, …) come back as `ok: false` with a user-facing message
+ * — and Workshop links when subscribing/updating would fix it — because
+ * ipcMain.handle rejections only carry Error.message, not extra fields.
+ * Unexpected failures still throw and surface via the renderer's catch.
+ */
+export type LiveLaunchResult =
+  | ({ ok: true } & LiveSessionLaunch)
+  | {
+      ok: false;
+      /** skipReason from ensureLiveInstalled. */
+      reason: string;
+      message: string;
+      /** Steam-client deep link to the Workshop page, when relevant. */
+      steamUrl?: string;
+      /** Browser fallback for the same page. */
+      webUrl?: string;
+    };
 
 /**
  * Human-facing session label, e.g. "Live Session – Jun 10". Used for both
@@ -50,20 +77,31 @@ function sessionTitle(now = new Date()): string {
   return `Live Session – ${date}`;
 }
 
-export async function launchLiveSession(): Promise<LiveSessionLaunch> {
+export async function launchLiveSession(): Promise<LiveLaunchResult> {
   const settings = loadSettings();
   if (!settings.liveSessions) {
     throw new Error('Live sessions are disabled — enable the experiment in Settings first.');
   }
 
-  // The Live mod must be installable before we scaffold anything — a
-  // session without the in-game channel is just a confusing test cycle.
+  // The Live mod must be available before we scaffold anything — a session
+  // without the in-game channel is just a confusing test cycle. Clicking
+  // "Launch Live Session" again after subscribing is the retry path: the
+  // refresh below re-scans the Workshop dir.
   const registry = getRegistry();
   await registry.start();
   await registry.refresh();
   const live = await ensureLiveInstalled(registry.getSnapshot());
   if (!live.available) {
-    throw new Error(liveUnavailableMessage(live.skipReason));
+    const fixableOnWorkshop =
+      live.skipReason === 'not-subscribed' || live.skipReason === 'stale-version';
+    return {
+      ok: false,
+      reason: live.skipReason ?? 'unknown',
+      message: liveUnavailableMessage(live),
+      ...(fixableOnWorkshop
+        ? { steamUrl: LIVE_WORKSHOP_URL_STEAM, webUrl: LIVE_WORKSHOP_URL_WEB }
+        : {}),
+    };
   }
 
   // Same no-confirmation force-quit policy as run_test_cycle: live users
@@ -114,19 +152,21 @@ export async function launchLiveSession(): Promise<LiveSessionLaunch> {
   host.startLiveSession(convo.id);
   track({ name: 'live_session_launched' });
 
-  return { folder, conversationId: convo.id };
+  return { ok: true, folder, conversationId: convo.id };
 }
 
-function liveUnavailableMessage(
-  skipReason: string | undefined,
-): string {
-  switch (skipReason) {
+function liveUnavailableMessage(live: LiveInstallResult): string {
+  switch (live.skipReason) {
     case 'rimworld-missing':
       return 'RimWorld install not found — set the install path in Settings before launching a live session.';
     case 'not-built':
-      return 'The bundled Modmixer Live mod has no compiled assembly (development build without vendor/modmixer-live/Assemblies). Build it with dotnet first.';
-    case 'source-missing':
-      return 'The bundled Modmixer Live mod is missing from this install — reinstall Modmixer.';
+      return 'vendor/modmixer-live has no compiled assembly — build it with dotnet before launching a live session (dev checkout only).';
+    case 'steam-required':
+      return 'Live sessions need RimWorld installed through Steam — the Modmixer Live companion mod is distributed on the Steam Workshop, and this RimWorld install can\'t use Workshop mods.';
+    case 'not-subscribed':
+      return 'Live sessions use the Modmixer Live companion mod from the Steam Workshop. Subscribe on the Workshop page, give Steam a moment to download it, then launch again.';
+    case 'stale-version':
+      return `Modmixer Live v${live.installedVersion || '0'} is installed, but this version of Modmixer needs v${LIVE_REQUIRED_VERSION}. Steam updates Workshop mods automatically — make sure Steam is online (or restart it), then launch again.`;
     default:
       return 'The Modmixer Live in-game mod could not be installed.';
   }

@@ -14,6 +14,7 @@
     "test": "tsx --test \"src/**/__tests__/*.test.ts\"",
     "typecheck": "tsc --noEmit",
     "fetch:ilspycmd": "node scripts/fetch-ilspycmd.mjs",
+    "publish:live-mod": "node scripts/publish-live-mod.mjs",
     "fetch:tree-sitter": "node scripts/fetch-tree-sitter-csharp.mjs",
     "lint:externals": "node scripts/check-extra-resources.mjs",
     "postinstall": "patch-package && node scripts/patch-electron-name.mjs && node scripts/fetch-tree-sitter-csharp.mjs"

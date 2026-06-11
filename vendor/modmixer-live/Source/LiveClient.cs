@@ -27,6 +27,7 @@ namespace ModMixer.Live
         private readonly Thread thread;
         private volatile bool stopping;
         private volatile bool connected;
+        private volatile bool everConnected;
 
         // Parsed inbound messages, drained by LiveBehaviour.Update on the
         // main thread. server_reject is handled here and never enqueued.
@@ -37,6 +38,10 @@ namespace ModMixer.Live
         public volatile string RejectedReason;
 
         public bool Connected => connected;
+
+        // True once any connection to the app has succeeded this launch.
+        // Gates the standalone-subscriber nudge in LiveBehaviour.
+        public bool EverConnected => everConnected;
 
         // Inbound line assembly. We buffer bytes, not chars: a UTF-8 code
         // point split across two reads must not be decoded until its line
@@ -87,6 +92,7 @@ namespace ModMixer.Live
                     client.EndConnect(ar);
                     stream = client.GetStream();
                     connected = true;
+                    everConnected = true;
                     backoff = InitialBackoffMs;
                     lineLen = 0; // discard any partial line from a dead connection
 

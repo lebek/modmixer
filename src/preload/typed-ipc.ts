@@ -37,7 +37,7 @@ import type {
   MonitorConnectionState,
 } from '../agent/monitor/protocol';
 import type { LiveConnectionState } from '../agent/live/protocol';
-import type { LiveSessionLaunch } from '../agent/live/session';
+import type { LiveLaunchResult } from '../agent/live/session';
 import type {
   PublishProgressEvent,
   PublishResult,
@@ -288,7 +288,7 @@ export interface Channels {
   'modmixer:monitor:get-snapshot': () => ModsSnapshot | null;
 
   // Live sessions (in-game prompting)
-  'modmixer:live:launch': () => LiveSessionLaunch;
+  'modmixer:live:launch': () => LiveLaunchResult;
   'modmixer:live:get-state': () => LiveConnectionState;
 
   // OAuth
