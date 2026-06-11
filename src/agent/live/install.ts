@@ -53,6 +53,19 @@ export const LIVE_WORKSHOP_URL_WEB = `https://steamcommunity.com/sharedfiles/fil
 
 /** Folder name we use under `<rimworld>/Mods/` for the dev junction. */
 const LIVE_MODS_FOLDER = 'ModmixerLive';
+
+/**
+ * Monotonic count of junction (re)establishments. A live session's teardown
+ * captures this at bind time and passes it back to removeLiveInstall, so a
+ * PREVIOUS game's late disconnect (its socket dropping after quitRimWorld
+ * during a relaunch) can never delete the junction the NEW session just
+ * created — that race shipped the stale Workshop copy into fresh sessions.
+ */
+let installEpoch = 0;
+
+export function currentLiveInstallEpoch(): number {
+  return installEpoch;
+}
 /** Assembly the build must have produced for the mod to be loadable. */
 const LIVE_ASSEMBLY = path.join('Assemblies', 'ModMixerLive.dll');
 
@@ -62,8 +75,7 @@ export interface LiveInstallResult {
   /**
    * Why we didn't install our copy (only set when we deliberately skipped):
    * - "workshop" — the official Workshop item is subscribed and current
-   *   (packaged happy path), or a dev machine has a subscription that wins
-   *   over the vendor junction.
+   *   (packaged happy path).
    * - "local" — user has a real (non-junction) ModmixerLive folder (dev).
    * - "rimworld-missing" — RimWorld install not found.
    * - "not-built" — vendor tree exists but has no compiled assembly (dev).
@@ -98,7 +110,12 @@ export function resolveLiveSourceDir(): string | null {
   // Dev-only escape hatch: pretend there's no vendor copy so the Workshop
   // path (subscribe prompt, version gate) can be exercised from a dev
   // checkout without packaging the app.
-  if (process.env.MODMIXER_FORCE_LIVE_WORKSHOP) return null;
+  if (process.env.MODMIXER_FORCE_LIVE_WORKSHOP) {
+    console.warn(
+      '[live] MODMIXER_FORCE_LIVE_WORKSHOP is set — ignoring vendor/modmixer-live, using the Workshop copy.',
+    );
+    return null;
+  }
   let candidate: string;
   try {
     candidate = path.join(app.getAppPath(), 'vendor', 'modmixer-live');
@@ -186,12 +203,15 @@ async function ensureDevJunction(
   snapshot: RegistrySnapshot,
   source: string,
 ): Promise<LiveInstallResult> {
+  // A Workshop subscription may coexist with the junction. RimWorld
+  // resolves the clash itself: when a local copy and a Workshop copy share
+  // a packageId, the Workshop copy gets a "_steam" postfix appended
+  // (ModLister.TryAddMod), so the bare packageId ship.ts enables always
+  // loads the junction. Dev iteration on the vendor tree must beat the
+  // published item — a subscription only covers for an unbuilt vendor tree.
   const existing = snapshot.mods.find(
     (m) => m.about.packageIdLc === LIVE_PACKAGE_ID,
   );
-  if (existing && existing.source === 'workshop') {
-    return { available: true, installed: false, skipReason: 'workshop' };
-  }
 
   const { modsDir } = detectRimWorldPaths();
   if (!fs.existsSync(path.dirname(modsDir))) {
@@ -223,6 +243,7 @@ async function ensureDevJunction(
         return { available: true, installed: true };
       }
       if (pathsEqual(resolved, source)) {
+        installEpoch++;
         return { available: true, installed: false };
       }
       // Junction pointing somewhere else — stale from a previous install
@@ -250,7 +271,11 @@ async function ensureDevJunction(
  * disconnects, so Live never lingers into ordinary test cycles. Leaves
  * real directories alone. No-op in packaged builds (nothing was installed).
  */
-export async function removeLiveInstall(): Promise<boolean> {
+export async function removeLiveInstall(onlyIfEpoch?: number): Promise<boolean> {
+  // A stale caller (a previous session's disconnect landing mid-relaunch)
+  // passes the epoch it captured at bind time; if a newer session has
+  // (re)installed since, the junction is theirs — leave it alone.
+  if (onlyIfEpoch !== undefined && onlyIfEpoch !== installEpoch) return false;
   const { modsDir } = detectRimWorldPaths();
   if (!fs.existsSync(modsDir)) return false;
   const target = path.join(modsDir, LIVE_MODS_FOLDER);
@@ -269,6 +294,7 @@ async function createLiveLink(source: string, target: string): Promise<void> {
   await fsp.mkdir(path.dirname(target), { recursive: true });
   const type = process.platform === 'win32' ? 'junction' : 'dir';
   await fsp.symlink(source, target, type);
+  installEpoch++;
 }
 
 /** Case-insensitive on Windows — same rationale as bridge-install. */

@@ -36,7 +36,7 @@ import {
 import { getMonitorServer } from './monitor/server.js';
 import type { MonitorConnectionState } from './monitor/protocol.js';
 import { getLiveServer } from './live/server.js';
-import { removeLiveInstall } from './live/install.js';
+import { currentLiveInstallEpoch, removeLiveInstall } from './live/install.js';
 import type {
   LiveConnectionState,
   LiveUserPrompt,
@@ -709,6 +709,7 @@ export class AgentHost {
    *  actually connected once, so arming a session against a not-yet-started
    *  game doesn't immediately tear itself down. */
   private liveSeenConnected = false;
+  private liveInstallEpoch = 0;
 
   /**
    * Single-flight OAuth login. A new login attempt aborts any in-flight one.
@@ -2177,6 +2178,9 @@ export class AgentHost {
     this.stopLiveSession();
     this.liveConversationId = conversationId;
     this.liveSeenConnected = false;
+    // Snapshot which junction install this session owns — its teardown may
+    // race a newer session's launch and must not delete that one's junction.
+    this.liveInstallEpoch = currentLiveInstallEpoch();
 
     const live = getLiveServer();
     this.livePromptHandler = (p) => void this.handleLivePrompt(p, conversationId);
@@ -2212,8 +2216,9 @@ export class AgentHost {
     // Unlike the bridge (which rides along with every test cycle), Live
     // must never linger into ordinary sessions, so the junction goes now.
     sendToast('Modmixer', 'RimWorld closed — live session ended.');
+    const epoch = this.liveInstallEpoch;
     this.stopLiveSession();
-    void removeLiveInstall().catch((err) => {
+    void removeLiveInstall(epoch).catch((err) => {
       console.error('Failed to remove live install:', err);
     });
   }

@@ -87,6 +87,11 @@ export async function launchLiveSession(): Promise<LiveLaunchResult> {
   await registry.start();
   await registry.refresh();
   const live = await ensureLiveInstalled(registry.getSnapshot());
+  // One decisive line in the dev terminal: which copy of the Live mod this
+  // session will load (dev junction vs Workshop) and why.
+  console.log(
+    `[live] install: available=${live.available} installed=${live.installed} via=${live.skipReason ?? 'dev-junction'}`,
+  );
   if (!live.available) {
     const fixableOnWorkshop =
       live.skipReason === 'not-subscribed' || live.skipReason === 'stale-version';
