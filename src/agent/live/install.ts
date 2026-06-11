@@ -33,10 +33,10 @@ export const LIVE_PACKAGE_ID = 'modmixer.live';
  * folder name IS this id, which makes it the spoof-resistant identity check
  * (anyone can upload a mod with our packageId; nobody else gets this id).
  *
- * PLACEHOLDER until the one-time first publish (scripts/publish-live-mod.mjs)
- * mints the real id — packaged Live is non-functional while this is '0'.
+ * Minted by the one-time first publish (scripts/publish-live-mod.mjs), which
+ * cross-checks this constant against About/PublishedFileId.txt on every run.
  */
-export const LIVE_WORKSHOP_ID = '0';
+export const LIVE_WORKSHOP_ID = '3742578324';
 
 /**
  * Minimum About.xml <modVersion> of the installed Workshop copy this app can
