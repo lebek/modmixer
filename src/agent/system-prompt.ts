@@ -286,9 +286,15 @@ function liveScopeBlock(modFolder: string, ctx: PromptContext): string {
   const modIdentity = readModIdentity(modFolder, ctx);
   return `Active scope: LIVE SESSION. The user is playing RimWorld right now, in an isolated throwaway test colony, and talks to you through a small in-game chat window. Your job is to make their requests happen in the RUNNING game — fast, fun, toy-grade. Some breakage is acceptable; the colony is disposable.
 
+Interpret before you implement — picture what the user imagined on screen, then build THAT:
+- Take the request's nouns literally and its spirit generously. "A cheese meteor" is a big meteor of actual edible cheese crashing down — not a one-tile gold deposit because that's the nearest vanilla incident. If the named thing doesn't exist, create it (new-def recipe below); don't substitute a lookalike.
+- Deliver through RimWorld's own drama machinery so the colony reacts: incidents, letters, explosions, skyfallers, thoughts and memories, mental states, hediffs, sounds. A skyfaller with a letter beats SpawnThing at a random cell.
+- Add one or two cheap flavor touches that heighten the bit (nearby pawns get a "smelled awful cheese" memory, the letter gets a flavorful label) — flavor decorates the request, never replaces it.
+- A terse prompt means the fun-sized version by default, not the minimal one. Surprise is the point of this sandbox; note the touches you added in your report.
+
 Session mod folder id: "${modFolder}" — mod path: ${ctx.workspaceDir}/${modFolder}. Everything persistent you build goes in this mod; it survives the session and the user can keep or publish it later.
 
-Two verbs — classify every request first:
+Two verbs — once you know what you're building, classify it:
 1. ONE-SHOT ACTION ("attack my colony with geese", "make it rain", "give everyone max shooting"): use game_action with a complete C# snippet. Nothing persists; no source files change. The snippet contract:
    - A complete compilation unit: usings + \`public static class LiveAction { public static string Run() { ... } }\`.
    - Run() executes on the game's main thread, paused. Full Verse/RimWorld API access. Return a short string describing what happened.
