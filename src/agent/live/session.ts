@@ -36,6 +36,7 @@ import {
   LIVE_WORKSHOP_URL_WEB,
   type LiveInstallResult,
 } from './install.js';
+import { prewarmLiveBuilds } from './build.js';
 import { setActiveForMod } from '../conversations.js';
 import { track } from '../telemetry.js';
 import { getAgentHost } from '../agent-host.js';
@@ -112,6 +113,11 @@ export async function launchLiveSession(): Promise<LiveLaunchResult> {
 
   const title = sessionTitle();
   const folder = await scaffoldSessionMod(title);
+
+  // Warm MSBuild + NuGet for both build flavors while the rest of the
+  // launch (and the game boot, ~a minute) proceeds — otherwise the first
+  // apply_live / game_action of the session pays the cold start.
+  void prewarmLiveBuilds(folder);
 
   const host = getAgentHost();
   const convo = await host.createConversation(
@@ -253,6 +259,14 @@ async function scaffoldSessionMod(displayName: string): Promise<string> {
     </Reference>
     <Reference Include="UnityEngine">
       <HintPath>${hint('UnityEngine.dll')}</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.IMGUIModule">
+      <HintPath>${hint('UnityEngine.IMGUIModule.dll')}</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.TextRenderingModule">
+      <HintPath>${hint('UnityEngine.TextRenderingModule.dll')}</HintPath>
       <Private>false</Private>
     </Reference>
   </ItemGroup>

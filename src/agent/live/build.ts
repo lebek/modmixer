@@ -73,6 +73,28 @@ function runDotnet(
   });
 }
 
+/**
+ * Per-project-directory build serializer. MSBuild has no isolation between
+ * two concurrent builds of the same project (shared obj/, Action.cs being
+ * rewritten mid-compile), and prewarmLiveBuilds can now overlap a
+ * user-triggered apply_live / game_action. A real build that lands mid-warm
+ * just queues behind it — no worse than the cold start it replaces.
+ */
+const buildChains = new Map<string, Promise<unknown>>();
+
+function serialized<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const prev = buildChains.get(key) ?? Promise.resolve();
+  const next = prev.then(fn, fn);
+  buildChains.set(
+    key,
+    next.then(
+      () => undefined,
+      () => undefined,
+    ),
+  );
+  return next;
+}
+
 /** First .csproj under `<mod>/Source`, or null. */
 function findCsproj(sourceDir: string): string | null {
   try {
@@ -90,41 +112,43 @@ function findCsproj(sourceDir: string): string | null {
  * .csproj on disk stays publish-shaped (a normal `dotnet build` still
  * produces the normal Assemblies/<Ident>.dll).
  */
-export async function buildHotAssembly(
+export function buildHotAssembly(
   modFolder: string,
   signal?: AbortSignal,
 ): Promise<LiveBuildResult> {
   const { workspaceDir } = getWorkspacePaths();
   const modDir = path.join(workspaceDir, modFolder);
   const sourceDir = path.join(modDir, 'Source');
-  const csproj = findCsproj(sourceDir);
-  if (!csproj) {
-    return {
-      ok: false,
-      dllPath: null,
-      assemblyName: '',
-      output: `No .csproj found in ${sourceDir} — the session mod has no C# project to hot-build.`,
-    };
-  }
-  const ident = path.basename(csproj, '.csproj');
-  const assemblyName = `${ident}Hot${stamp()}`;
-  const outDir = path.join(modDir, '.live', 'hot') + path.sep;
-  const { exitCode, output } = await runDotnet(
-    [
-      'build',
-      '--nologo',
-      '-c',
-      'Debug',
-      `-p:AssemblyName=${assemblyName}`,
-      `-p:OutputPath=${outDir}`,
-      `-p:AppendTargetFrameworkToOutputPath=false`,
-    ],
-    sourceDir,
-    signal,
-  );
-  const dllPath = path.join(outDir, `${assemblyName}.dll`);
-  const ok = exitCode === 0 && fs.existsSync(dllPath);
-  return { ok, dllPath: ok ? dllPath : null, assemblyName, output };
+  return serialized(sourceDir, async () => {
+    const csproj = findCsproj(sourceDir);
+    if (!csproj) {
+      return {
+        ok: false,
+        dllPath: null,
+        assemblyName: '',
+        output: `No .csproj found in ${sourceDir} — the session mod has no C# project to hot-build.`,
+      };
+    }
+    const ident = path.basename(csproj, '.csproj');
+    const assemblyName = `${ident}Hot${stamp()}`;
+    const outDir = path.join(modDir, '.live', 'hot') + path.sep;
+    const { exitCode, output } = await runDotnet(
+      [
+        'build',
+        '--nologo',
+        '-c',
+        'Debug',
+        `-p:AssemblyName=${assemblyName}`,
+        `-p:OutputPath=${outDir}`,
+        `-p:AppendTargetFrameworkToOutputPath=false`,
+      ],
+      sourceDir,
+      signal,
+    );
+    const dllPath = path.join(outDir, `${assemblyName}.dll`);
+    const ok = exitCode === 0 && fs.existsSync(dllPath);
+    return { ok, dllPath: ok ? dllPath : null, assemblyName, output };
+  });
 }
 
 /**
@@ -133,39 +157,59 @@ export async function buildHotAssembly(
  * HintPaths are resolved at creation time) and the snippet is rewritten on
  * every call.
  */
-export async function buildActionAssembly(
+export function buildActionAssembly(
   modFolder: string,
   code: string,
   signal?: AbortSignal,
 ): Promise<LiveBuildResult> {
   const { workspaceDir } = getWorkspacePaths();
   const scratchDir = path.join(workspaceDir, modFolder, '.live', 'scratch');
-  await fsp.mkdir(scratchDir, { recursive: true });
-  const csprojPath = path.join(scratchDir, 'LiveScratch.csproj');
-  if (!fs.existsSync(csprojPath)) {
-    const { managedDir } = detectRimWorldPaths();
-    await fsp.writeFile(csprojPath, renderScratchCsproj(managedDir), 'utf8');
-  }
-  await fsp.writeFile(path.join(scratchDir, 'Action.cs'), code, 'utf8');
+  return serialized(scratchDir, async () => {
+    await fsp.mkdir(scratchDir, { recursive: true });
+    const csprojPath = path.join(scratchDir, 'LiveScratch.csproj');
+    if (!fs.existsSync(csprojPath)) {
+      const { managedDir } = detectRimWorldPaths();
+      await fsp.writeFile(csprojPath, renderScratchCsproj(managedDir), 'utf8');
+    }
+    await fsp.writeFile(path.join(scratchDir, 'Action.cs'), code, 'utf8');
 
-  const assemblyName = `LiveAction${stamp()}`;
-  const outDir = path.join(scratchDir, 'bin') + path.sep;
-  const { exitCode, output } = await runDotnet(
-    [
-      'build',
-      '--nologo',
-      '-c',
-      'Debug',
-      `-p:AssemblyName=${assemblyName}`,
-      `-p:OutputPath=${outDir}`,
-      `-p:AppendTargetFrameworkToOutputPath=false`,
-    ],
-    scratchDir,
-    signal,
-  );
-  const dllPath = path.join(outDir, `${assemblyName}.dll`);
-  const ok = exitCode === 0 && fs.existsSync(dllPath);
-  return { ok, dllPath: ok ? dllPath : null, assemblyName, output };
+    const assemblyName = `LiveAction${stamp()}`;
+    const outDir = path.join(scratchDir, 'bin') + path.sep;
+    const { exitCode, output } = await runDotnet(
+      [
+        'build',
+        '--nologo',
+        '-c',
+        'Debug',
+        `-p:AssemblyName=${assemblyName}`,
+        `-p:OutputPath=${outDir}`,
+        `-p:AppendTargetFrameworkToOutputPath=false`,
+      ],
+      scratchDir,
+      signal,
+    );
+    const dllPath = path.join(outDir, `${assemblyName}.dll`);
+    const ok = exitCode === 0 && fs.existsSync(dllPath);
+    return { ok, dllPath: ok ? dllPath : null, assemblyName, output };
+  });
+}
+
+/**
+ * Run one throwaway hot build and one scratch build so the session's first
+ * real apply_live / game_action doesn't pay MSBuild's cold start (NuGet
+ * restore + SDK resolution — a first snippet build was observed at ~38s vs
+ * ~5s warm). Called fire-and-forget at live-session launch, overlapping the
+ * game boot; the per-project serializer queues any real build that arrives
+ * mid-warm. Never rejects — a failed warm build just means the first real
+ * build is cold again.
+ */
+export async function prewarmLiveBuilds(modFolder: string): Promise<void> {
+  const snippet =
+    'public static class LiveAction { public static string Run() { return "warm"; } }\n';
+  await Promise.all([
+    buildHotAssembly(modFolder).catch(() => undefined),
+    buildActionAssembly(modFolder, snippet).catch(() => undefined),
+  ]);
 }
 
 /**
@@ -202,6 +246,14 @@ function renderScratchCsproj(managedDir: string | null): string {
     </Reference>
     <Reference Include="UnityEngine">
       <HintPath>${hint('UnityEngine.dll')}</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.IMGUIModule">
+      <HintPath>${hint('UnityEngine.IMGUIModule.dll')}</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.TextRenderingModule">
+      <HintPath>${hint('UnityEngine.TextRenderingModule.dll')}</HintPath>
       <Private>false</Private>
     </Reference>
   </ItemGroup>
