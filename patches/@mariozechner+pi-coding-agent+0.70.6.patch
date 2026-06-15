@@ -1,0 +1,48 @@
+diff --git a/node_modules/@mariozechner/pi-coding-agent/dist/core/agent-session.js b/node_modules/@mariozechner/pi-coding-agent/dist/core/agent-session.js
+index 23c6078..e8bc8af 100644
+--- a/node_modules/@mariozechner/pi-coding-agent/dist/core/agent-session.js
++++ b/node_modules/@mariozechner/pi-coding-agent/dist/core/agent-session.js
+@@ -55,6 +55,8 @@ export function parseSkillBlock(text) {
+ const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high"];
+ /** Thinking levels including xhigh (for supported models) */
+ const THINKING_LEVELS_WITH_XHIGH = ["off", "minimal", "low", "medium", "high", "xhigh"];
++/** Thinking levels including max — adaptive Anthropic models (Opus 4.6+, Sonnet 4.6, Fable 5) */
++const THINKING_LEVELS_WITH_MAX = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+ // ============================================================================
+ // AgentSession Class
+ // ============================================================================
+@@ -1172,8 +1174,25 @@ export class AgentSession {
+     getAvailableThinkingLevels() {
+         if (!this.supportsThinking())
+             return ["off"];
++        if (this.supportsMaxThinking())
++            return THINKING_LEVELS_WITH_MAX;
+         return this.supportsXhighThinking() ? THINKING_LEVELS_WITH_XHIGH : THINKING_LEVELS;
+     }
++    /**
++     * Whether the model supports the "max" effort ceiling. True for the
++     * adaptive-thinking Anthropic models (Opus 4.6+, Sonnet 4.6, Fable 5),
++     * which also support xhigh — so this list supersedes the xhigh one.
++     * pi-ai supportsXhigh() is stale for opus-4-8/sonnet-4-6/fable-5 (it would
++     * otherwise clamp even xhigh down to high on them), so detect by id here.
++     */
++    supportsMaxThinking() {
++        const id = this.model?.id ?? "";
++        return (id.includes("opus-4-6") || id.includes("opus-4.6") ||
++            id.includes("opus-4-7") || id.includes("opus-4.7") ||
++            id.includes("opus-4-8") || id.includes("opus-4.8") ||
++            id.includes("sonnet-4-6") || id.includes("sonnet-4.6") ||
++            id.includes("fable-5"));
++    }
+     /**
+      * Check if current model supports xhigh thinking level.
+      */
+@@ -1196,7 +1215,7 @@ export class AgentSession {
+         return this.thinkingLevel;
+     }
+     _clampThinkingLevel(level, availableLevels) {
+-        const ordered = THINKING_LEVELS_WITH_XHIGH;
++        const ordered = THINKING_LEVELS_WITH_MAX;
+         const available = new Set(availableLevels);
+         const requestedIndex = ordered.indexOf(level);
+         if (requestedIndex === -1) {

@@ -1,0 +1,13 @@
+diff --git a/node_modules/@mariozechner/pi-agent-core/dist/types.d.ts b/node_modules/@mariozechner/pi-agent-core/dist/types.d.ts
+index af45997..a286206 100644
+--- a/node_modules/@mariozechner/pi-agent-core/dist/types.d.ts
++++ b/node_modules/@mariozechner/pi-agent-core/dist/types.d.ts
+@@ -200,7 +200,7 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
+  * Note: "xhigh" is only supported by selected model families. Use supportsXhigh() from @mariozechner/pi-ai
+  * to detect support for a concrete model.
+  */
+-export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
++export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+ /**
+  * Extensible interface for custom app messages.
+  * Apps can extend via declaration merging:

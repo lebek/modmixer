@@ -9,6 +9,7 @@ const THINKING_LEVELS: ThinkingLevel[] = [
   'medium',
   'high',
   'xhigh',
+  'max',
 ];
 
 const LEVEL_LABELS: Record<ThinkingLevel, string> = {
@@ -18,6 +19,7 @@ const LEVEL_LABELS: Record<ThinkingLevel, string> = {
   medium: 'Medium',
   high: 'High',
   xhigh: 'Extra High',
+  max: 'Max',
 };
 
 export function ThinkingPicker({
