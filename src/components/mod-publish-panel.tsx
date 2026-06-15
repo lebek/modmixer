@@ -168,18 +168,30 @@ export function ModPublishPanel({
     setExternalUpdate(false);
   };
 
-  const publish = useAsyncAction(async (visibility: number) => {
-    setProgress(null);
-    setAgreementUrl(null);
-    // Persist any pending edits so what gets uploaded matches what's on screen.
-    if (dirty) {
-      const ok = await save.run();
-      if (ok === null) return;
-    }
-    const result = await window.modmixer.publishToWorkshop(mod.folder, visibility);
-    setPublishedUrl(result.url);
-    if (result.agreementUrl) setAgreementUrl(result.agreementUrl);
-  });
+  const publish = useAsyncAction(
+    async ({
+      visibility,
+      changeNote,
+    }: {
+      visibility: number;
+      changeNote: string;
+    }) => {
+      setProgress(null);
+      setAgreementUrl(null);
+      // Persist any pending edits so what gets uploaded matches what's on screen.
+      if (dirty) {
+        const ok = await save.run();
+        if (ok === null) return;
+      }
+      const result = await window.modmixer.publishToWorkshop(
+        mod.folder,
+        visibility,
+        changeNote,
+      );
+      setPublishedUrl(result.url);
+      if (result.agreementUrl) setAgreementUrl(result.agreementUrl);
+    },
+  );
 
   const isUpdate = mod.publishedFileId !== null;
 
@@ -357,9 +369,9 @@ export function ModPublishPanel({
         isUpdate={isUpdate}
         modName={name}
         onCancel={() => setConfirmOpen(false)}
-        onConfirm={(visibility) => {
+        onConfirm={(result) => {
           setConfirmOpen(false);
-          void publish.run(visibility);
+          void publish.run(result);
         }}
       />
     </div>
