@@ -169,7 +169,15 @@ export function ModPublishPanel({
   };
 
   const publish = useAsyncAction(
-    async (visibility: number, trackOnLeaderboard: boolean) => {
+    async ({
+      visibility,
+      changeNote,
+      trackOnLeaderboard,
+    }: {
+      visibility: number;
+      changeNote: string;
+      trackOnLeaderboard: boolean;
+    }) => {
       setProgress(null);
       setAgreementUrl(null);
       // Persist any pending edits so what gets uploaded matches what's on screen.
@@ -180,6 +188,7 @@ export function ModPublishPanel({
       const result = await window.modmixer.publishToWorkshop(
         mod.folder,
         visibility,
+        changeNote,
         trackOnLeaderboard,
       );
       setPublishedUrl(result.url);
@@ -364,9 +373,9 @@ export function ModPublishPanel({
         modName={name}
         initialTrackOnLeaderboard={mod.prefs.trackOnLeaderboard}
         onCancel={() => setConfirmOpen(false)}
-        onConfirm={(visibility, trackOnLeaderboard) => {
+        onConfirm={(result) => {
           setConfirmOpen(false);
-          void publish.run(visibility, trackOnLeaderboard);
+          void publish.run(result);
         }}
       />
     </div>

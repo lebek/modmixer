@@ -160,11 +160,13 @@ export function registerAssetsRoutes(ctx: RouteContext): void {
       _evt,
       folder: string,
       visibility?: number,
+      changeNote?: string,
       trackOnLeaderboard?: boolean,
     ) => {
       const result = await publishToWorkshop(
         folder,
         visibility,
+        changeNote,
         trackOnLeaderboard,
       );
       // First publish wrote About/PublishedFileId.txt — fan out so the panel

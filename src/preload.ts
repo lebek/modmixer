@@ -287,8 +287,16 @@ const api = {
   publishToWorkshop: (
     folder: string,
     visibility?: number,
+    changeNote?: string,
     trackOnLeaderboard?: boolean,
-  ) => invoke('modmixer:workshop:publish', folder, visibility, trackOnLeaderboard),
+  ) =>
+    invoke(
+      'modmixer:workshop:publish',
+      folder,
+      visibility,
+      changeNote,
+      trackOnLeaderboard,
+    ),
   unlinkWorkshopItem: (folder: string) =>
     invoke('modmixer:workshop:unlink', folder),
   linkWorkshopItem: (folder: string, workshopId: string) =>

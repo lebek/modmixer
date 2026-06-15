@@ -339,6 +339,7 @@ export interface Channels {
   'modmixer:workshop:publish': (
     folder: string,
     visibility?: number,
+    changeNote?: string,
     trackOnLeaderboard?: boolean,
   ) => PublishResult;
   'modmixer:workshop:unlink': (folder: string) => WorkspaceMod | null;

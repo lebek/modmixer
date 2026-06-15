@@ -36,6 +36,7 @@ export const THINKING_LEVELS: ThinkingLevel[] = [
   'medium',
   'high',
   'xhigh',
+  'max',
 ];
 
 function isThinkingLevel(value: unknown): value is ThinkingLevel {
@@ -135,8 +136,9 @@ export interface Settings {
   /**
    * User's preferred reasoning level. Surfaced as a dropdown next to the
    * model picker. Pi clamps this against the active model's capabilities
-   * (e.g. "xhigh" → "high" on anything that's not Opus 4.7), so the value
-   * here is the user's intent — not necessarily what the next turn will use.
+   * (e.g. "max" → "xhigh" on xhigh-only models like gpt-5.x, → "high" on
+   * models with neither tier; "xhigh" → "high" where unsupported), so the
+   * value here is the user's intent — not necessarily what the next turn uses.
    */
   thinkingLevel: ThinkingLevel;
   /**

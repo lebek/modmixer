@@ -31,19 +31,26 @@ export function PublishConfirmDialog({
   modName: string;
   initialTrackOnLeaderboard: boolean;
   onCancel: () => void;
-  onConfirm: (visibility: number, trackOnLeaderboard: boolean) => void;
+  onConfirm: (result: {
+    visibility: number;
+    changeNote: string;
+    trackOnLeaderboard: boolean;
+  }) => void;
 }) {
   const [visibility, setVisibility] = useState<number>(VISIBILITY_PUBLIC);
+  const [changeNote, setChangeNote] = useState('');
   const [trackOnLeaderboard, setTrackOnLeaderboard] = useState(
     initialTrackOnLeaderboard,
   );
 
-  // Visibility isn't persisted — every fresh publish starts from Public to
-  // nudge people toward shipping publicly. The leaderboard choice IS persisted
-  // per mod, so it's seeded from the saved value each time the dialog opens.
+  // Visibility isn't persisted — every fresh publish starts from Public to nudge
+  // people toward shipping publicly. Change notes are per-update, so they always
+  // start blank. The leaderboard choice IS persisted per mod, so it's seeded
+  // from the saved value each time the dialog opens.
   useEffect(() => {
     if (open) {
       setVisibility(VISIBILITY_PUBLIC);
+      setChangeNote('');
       setTrackOnLeaderboard(initialTrackOnLeaderboard);
     }
   }, [open, initialTrackOnLeaderboard]);
@@ -64,11 +71,29 @@ export function PublishConfirmDialog({
 
         <div className="space-y-3 px-4 py-3 text-sm text-ink">
           {isUpdate ? (
-            <p>
-              Push your latest changes as an update to the existing Workshop item
-              for <span className="font-medium">{modName}</span>. Its visibility
-              and any Steam-side edits are left unchanged.
-            </p>
+            <>
+              <p>
+                Push your latest changes as an update to the existing Workshop
+                item for <span className="font-medium">{modName}</span>. Its
+                visibility and any Steam-side edits are left unchanged.
+              </p>
+              <label className="block space-y-1.5">
+                <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted">
+                  Change notes
+                </span>
+                <textarea
+                  value={changeNote}
+                  onChange={(e) => setChangeNote(e.target.value)}
+                  rows={4}
+                  className="w-full resize-y rounded-md border border-line bg-paper px-2.5 py-1.5 text-sm text-ink focus:border-accent focus:outline-none"
+                  placeholder="What changed in this update?"
+                />
+                <span className="block text-xs text-muted">
+                  Posted to the item's Workshop change history. Leave blank to
+                  record a timestamp instead.
+                </span>
+              </label>
+            </>
           ) : (
             <>
               <p>
@@ -145,7 +170,9 @@ export function PublishConfirmDialog({
             Cancel
           </button>
           <button
-            onClick={() => onConfirm(visibility, trackOnLeaderboard)}
+            onClick={() =>
+              onConfirm({ visibility, changeNote, trackOnLeaderboard })
+            }
             className="rounded-md bg-ink px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-paper shadow-sm transition-opacity hover:opacity-90"
           >
             {isUpdate ? 'Publish update' : 'Publish'}

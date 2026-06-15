@@ -385,6 +385,7 @@ async function registerOnLeaderboard(itemId: string): Promise<void> {
 export async function publishToWorkshop(
   folder: string,
   visibility: number = VISIBILITY_PUBLIC,
+  changeNote?: string,
   trackOnLeaderboard: boolean = true,
 ): Promise<PublishResult> {
   // Guard a malformed value: visibility is only ever applied on the first
@@ -429,7 +430,9 @@ export async function publishToWorkshop(
   }
 
   const tags = [BASE_TAG, ...about.supportedVersions];
-  const changeNote = autoChangeNote();
+  // Use the modder's notes when they typed any; otherwise fall back to a
+  // timestamp so the Workshop change history always has a non-empty entry.
+  const note = changeNote?.trim() || autoChangeNote();
 
   const existing = await readPublishedFileId(folder);
   let needsToAcceptAgreement = false;
@@ -482,7 +485,7 @@ export async function publishToWorkshop(
     // so a modder's Steam-side edits (BBCode description, rename, tag tweaks)
     // survive a republish from Modmixer instead of being clobbered.
     const updateDetails: WorkshopUpdateDetails = {
-      changeNote,
+      changeNote: note,
       previewPath,
       contentPath: staged.contentPath,
     };
