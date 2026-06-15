@@ -5,6 +5,7 @@ import fsp from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import { detectRimWorldPaths, detectGameVersionMajorMinorSync } from './paths.js';
 import { readSchematic, type SchematicData } from './schematic.js';
+import { readModPrefs, type ModPrefs } from './mod-prefs.js';
 import { scanAssets } from './assets/scanner.js';
 import { parseAboutXml, type ModDependency } from './registry/about-xml.js';
 import { loadSettings } from './settings.js';
@@ -59,6 +60,11 @@ export interface WorkspaceMod {
    * 64-bit and can exceed JS safe-int range.
    */
   publishedFileId: string | null;
+  /**
+   * Per-mod user preferences (.modmixer/prefs.json). Always present — defaults
+   * are filled in when the sidecar is missing, so callers never branch on null.
+   */
+  prefs: ModPrefs;
   /** Workspace folder birthtime, epoch ms. */
   createdAt: number;
   /** Most-recent mtime under the workspace folder, epoch ms. */
@@ -107,6 +113,7 @@ async function buildWorkspaceMod(
     active,
     schematic,
     publishedFileId,
+    prefs,
     folderStat,
     updatedAt,
   ] = await Promise.all([
@@ -116,6 +123,7 @@ async function buildWorkspaceMod(
     isSymlinkedInto(folder, workspacePath, rimworldModsDir),
     readSchematic(folder),
     readPublishedFileId(workspacePath),
+    readModPrefs(folder),
     fsp.stat(workspacePath).catch(() => null),
     latestMtimeMs(workspacePath),
   ]);
@@ -130,6 +138,7 @@ async function buildWorkspaceMod(
     hasCSharp,
     hasDlls,
     publishedFileId,
+    prefs,
     createdAt,
     updatedAt,
   };

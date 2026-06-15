@@ -168,18 +168,24 @@ export function ModPublishPanel({
     setExternalUpdate(false);
   };
 
-  const publish = useAsyncAction(async (visibility: number) => {
-    setProgress(null);
-    setAgreementUrl(null);
-    // Persist any pending edits so what gets uploaded matches what's on screen.
-    if (dirty) {
-      const ok = await save.run();
-      if (ok === null) return;
-    }
-    const result = await window.modmixer.publishToWorkshop(mod.folder, visibility);
-    setPublishedUrl(result.url);
-    if (result.agreementUrl) setAgreementUrl(result.agreementUrl);
-  });
+  const publish = useAsyncAction(
+    async (visibility: number, trackOnLeaderboard: boolean) => {
+      setProgress(null);
+      setAgreementUrl(null);
+      // Persist any pending edits so what gets uploaded matches what's on screen.
+      if (dirty) {
+        const ok = await save.run();
+        if (ok === null) return;
+      }
+      const result = await window.modmixer.publishToWorkshop(
+        mod.folder,
+        visibility,
+        trackOnLeaderboard,
+      );
+      setPublishedUrl(result.url);
+      if (result.agreementUrl) setAgreementUrl(result.agreementUrl);
+    },
+  );
 
   const isUpdate = mod.publishedFileId !== null;
 
@@ -356,10 +362,11 @@ export function ModPublishPanel({
         open={confirmOpen}
         isUpdate={isUpdate}
         modName={name}
+        initialTrackOnLeaderboard={mod.prefs.trackOnLeaderboard}
         onCancel={() => setConfirmOpen(false)}
-        onConfirm={(visibility) => {
+        onConfirm={(visibility, trackOnLeaderboard) => {
           setConfirmOpen(false);
-          void publish.run(visibility);
+          void publish.run(visibility, trackOnLeaderboard);
         }}
       />
     </div>

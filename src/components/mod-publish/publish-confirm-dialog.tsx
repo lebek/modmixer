@@ -22,22 +22,31 @@ export function PublishConfirmDialog({
   open,
   isUpdate,
   modName,
+  initialTrackOnLeaderboard,
   onCancel,
   onConfirm,
 }: {
   open: boolean;
   isUpdate: boolean;
   modName: string;
+  initialTrackOnLeaderboard: boolean;
   onCancel: () => void;
-  onConfirm: (visibility: number) => void;
+  onConfirm: (visibility: number, trackOnLeaderboard: boolean) => void;
 }) {
   const [visibility, setVisibility] = useState<number>(VISIBILITY_PUBLIC);
+  const [trackOnLeaderboard, setTrackOnLeaderboard] = useState(
+    initialTrackOnLeaderboard,
+  );
 
-  // We don't persist the choice; every fresh publish starts from Public so the
-  // default nudges people toward shipping their work publicly.
+  // Visibility isn't persisted — every fresh publish starts from Public to
+  // nudge people toward shipping publicly. The leaderboard choice IS persisted
+  // per mod, so it's seeded from the saved value each time the dialog opens.
   useEffect(() => {
-    if (open) setVisibility(VISIBILITY_PUBLIC);
-  }, [open]);
+    if (open) {
+      setVisibility(VISIBILITY_PUBLIC);
+      setTrackOnLeaderboard(initialTrackOnLeaderboard);
+    }
+  }, [open, initialTrackOnLeaderboard]);
 
   if (!open) return null;
 
@@ -98,6 +107,34 @@ export function PublishConfirmDialog({
               </p>
             </>
           )}
+
+          <label className="flex cursor-pointer items-start gap-2 rounded-md border border-line px-2.5 py-1.5 transition-colors hover:border-ink/40">
+            <input
+              type="checkbox"
+              checked={trackOnLeaderboard}
+              onChange={(e) => setTrackOnLeaderboard(e.target.checked)}
+              className="mt-0.5 h-3 w-3"
+            />
+            <span className="text-ink">
+              Track on the{' '}
+              <a
+                href="https://modmixer.com/leaderboard"
+                onClick={(e) => {
+                  // Inside a <label>, a bare click would toggle the checkbox and
+                  // navigate the renderer window. Suppress both and hand the URL
+                  // to the OS browser instead.
+                  e.preventDefault();
+                  e.stopPropagation();
+                  void window.modmixer.openExternal(
+                    'https://modmixer.com/leaderboard',
+                  );
+                }}
+                className="text-accent underline hover:opacity-80"
+              >
+                Modmixer leaderboard
+              </a>
+            </span>
+          </label>
         </div>
 
         <div className="flex items-center justify-end gap-2 border-t border-line px-4 py-3">
@@ -108,7 +145,7 @@ export function PublishConfirmDialog({
             Cancel
           </button>
           <button
-            onClick={() => onConfirm(visibility)}
+            onClick={() => onConfirm(visibility, trackOnLeaderboard)}
             className="rounded-md bg-ink px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-paper shadow-sm transition-opacity hover:opacity-90"
           >
             {isUpdate ? 'Publish update' : 'Publish'}

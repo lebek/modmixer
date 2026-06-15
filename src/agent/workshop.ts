@@ -5,6 +5,7 @@ import fsp from 'node:fs/promises';
 import { EventEmitter } from 'node:events';
 import { app, utilityProcess, type UtilityProcess } from 'electron';
 import { getWorkspacePaths, readModAbout } from './workspace.js';
+import { writeModPrefs } from './mod-prefs.js';
 import { STEAM_PREVIEW_LIMIT_BYTES } from './assets/preview-normalize.js';
 import { commitTurn } from './snapshots.js';
 import { track } from './telemetry.js';
@@ -355,9 +356,36 @@ export interface PublishResult {
   agreementUrl?: string;
 }
 
+// Where a published mod gets registered on the Modmixer leaderboard.
+const LEADERBOARD_REGISTER_URL =
+  'https://modmixer.com/api/workshop-mods/register';
+
+/**
+ * Best-effort: add a freshly-published mod to the Modmixer leaderboard. The
+ * server validates the id against Steam, so posting just the id is enough.
+ * Fire-and-forget — a leaderboard hiccup must never fail or delay a Workshop
+ * publish, so every error is swallowed with a warning.
+ */
+async function registerOnLeaderboard(itemId: string): Promise<void> {
+  try {
+    const res = await fetch(LEADERBOARD_REGISTER_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ published_file_id: itemId }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) {
+      console.warn(`[workshop] leaderboard register failed: HTTP ${res.status}`);
+    }
+  } catch (err) {
+    console.warn('[workshop] leaderboard register failed:', err);
+  }
+}
+
 export async function publishToWorkshop(
   folder: string,
   visibility: number = VISIBILITY_PUBLIC,
+  trackOnLeaderboard: boolean = true,
 ): Promise<PublishResult> {
   // Guard a malformed value: visibility is only ever applied on the first
   // publish (see below), so a bad number would otherwise stick permanently.
@@ -376,6 +404,10 @@ export async function publishToWorkshop(
   if (!about.description.trim()) {
     throw new Error('Set a description in About.xml before publishing.');
   }
+
+  // Remember the user's leaderboard choice for next time (persist-on-publish).
+  // Written before the upload so the preference sticks even if Steam fails.
+  await writeModPrefs(folder, { trackOnLeaderboard });
 
   const { workspaceDir } = getWorkspacePaths();
   const modFolder = path.join(workspaceDir, folder);
@@ -474,6 +506,13 @@ export async function publishToWorkshop(
       url,
       agreementUrl,
     });
+
+    // Register on the Modmixer leaderboard if the user opted in. Fire-and-forget
+    // (not awaited) so it never holds up the publish — the main process stays
+    // alive long enough for the request to land.
+    if (trackOnLeaderboard) {
+      void registerOnLeaderboard(itemId.toString());
+    }
 
     track({ name: 'mod_published' });
 
