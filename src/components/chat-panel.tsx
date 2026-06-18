@@ -74,6 +74,34 @@ function formatTokens(n: number): string {
 }
 
 /**
+ * Humanized message timestamp, revealed on hover. Anchored to calendar days
+ * (not elapsed hours) so a message from 11pm reads "Yesterday" the next
+ * morning. Within the past week it names the weekday; older falls back to a
+ * dated label.
+ *   Today at 6:32 · Yesterday at 6:32 · Monday at 6:32 · Sun Jun 3 at 6:32
+ */
+function formatMessageTime(ts: number): string {
+  const d = new Date(ts);
+  const h = d.getHours() % 12 || 12;
+  const time = `${h}:${String(d.getMinutes()).padStart(2, '0')}`;
+
+  const startOfDay = (x: Date) =>
+    new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const dayDiff = Math.round((startOfDay(new Date()) - startOfDay(d)) / 86_400_000);
+
+  let label: string;
+  if (dayDiff <= 0) label = 'Today';
+  else if (dayDiff === 1) label = 'Yesterday';
+  else if (dayDiff < 7) label = d.toLocaleDateString(undefined, { weekday: 'long' });
+  else {
+    const weekday = d.toLocaleDateString(undefined, { weekday: 'short' });
+    const month = d.toLocaleDateString(undefined, { month: 'short' });
+    label = `${weekday} ${month} ${d.getDate()}`;
+  }
+  return `${label} at ${time}`;
+}
+
+/**
  * Per-character digit roll. Each glyph is rendered with a key derived
  * from its position + value, so digits that *didn't* change keep their
  * DOM node (no animation) while digits that flipped get re-mounted and
@@ -952,6 +980,25 @@ function CopyButton({
   );
 }
 
+/**
+ * Humanized send time for a message, revealed on hover alongside the copy
+ * control (the caller's container supplies the `group` for the reveal). The
+ * full localized timestamp is tucked into the tooltip for precision.
+ */
+function MessageTime({ ts, className }: { ts: number; className?: string }) {
+  return (
+    <span
+      title={new Date(ts).toLocaleString()}
+      className={cn(
+        'shrink-0 select-none whitespace-nowrap text-[11px] tabular-nums text-subtle opacity-0 transition-opacity group-hover:opacity-100',
+        className,
+      )}
+    >
+      {formatMessageTime(ts)}
+    </span>
+  );
+}
+
 type MessageBubbleProps = {
   message: AgentMessage;
   toolStates: Record<string, { name: string; status: ToolStatus }>;
@@ -990,6 +1037,7 @@ function MessageBubbleImpl({
     const images = extractImages(message.content);
     return (
       <div className="group flex items-center justify-end gap-1">
+        <MessageTime ts={message.timestamp} />
         {text && (
           <CopyButton
             text={text}
@@ -1047,19 +1095,24 @@ function MessageBubbleImpl({
           <span>
             modmixer <span className="text-subtle">·</span> {modelLabel}
           </span>
-          {cost !== null && (
-            <span className="ml-auto text-subtle">{formatCost(cost)}</span>
-          )}
-          {copyText && !isStreaming && (
-            <CopyButton
-              text={copyText}
-              iconClassName="h-3 w-3"
-              className={cn(
-                '-my-1 shrink-0 opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100',
-                cost === null && 'ml-auto',
-              )}
+          <div className="ml-auto flex items-center gap-1.5">
+            {cost !== null && (
+              <span className="text-[10px] normal-case tracking-normal text-subtle opacity-0 transition-opacity group-hover:opacity-100">
+                {formatCost(cost)}
+              </span>
+            )}
+            <MessageTime
+              ts={message.timestamp}
+              className="text-[10px] normal-case tracking-normal"
             />
-          )}
+            {copyText && !isStreaming && (
+              <CopyButton
+                text={copyText}
+                iconClassName="h-3 w-3"
+                className="-my-1 shrink-0 opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100"
+              />
+            )}
+          </div>
         </div>
         {text && <Markdown>{text}</Markdown>}
         {fallbackThinking && (
