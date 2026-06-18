@@ -421,6 +421,9 @@ export function App() {
             : t,
         ),
       );
+      // Restore pruned any post-checkpoint chats on disk — bump the rev so the
+      // sidebar list re-fetches instead of lingering until BuildView remounts.
+      setChatListRev((n) => n + 1);
     },
     [tabs, focusedFolder],
   );
