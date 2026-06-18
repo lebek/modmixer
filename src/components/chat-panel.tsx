@@ -73,6 +73,28 @@ function formatTokens(n: number): string {
   return `${(n / 1_000_000).toFixed(1)}M`;
 }
 
+// A failed turn's errorMessage is provider-shaped: Anthropic/OpenAI hand back a
+// JSON envelope ({"error":{"type","message"}}), others a plain Error string.
+// Pull out the human-readable bit, falling back to the raw text.
+function formatAgentError(raw: string | undefined): string {
+  if (!raw) return 'The model failed to respond.';
+  try {
+    const parsed = JSON.parse(raw) as {
+      error?: { type?: string; message?: string };
+      message?: string;
+      type?: string;
+    };
+    const err = parsed.error ?? parsed;
+    if (typeof err.message === 'string' && err.message.trim()) {
+      return err.message.trim();
+    }
+    if (typeof err.type === 'string' && err.type.trim()) return err.type.trim();
+  } catch {
+    // Not JSON — the raw string is already the message.
+  }
+  return raw;
+}
+
 /**
  * Humanized message timestamp, revealed on hover. Anchored to calendar days
  * (not elapsed hours) so a message from 11pm reads "Yesterday" the next
@@ -1067,6 +1089,11 @@ function MessageBubbleImpl({
   if (message.role === 'assistant') {
     const text = extractText(message.content);
     const toolCalls = extractToolCalls(message.content);
+    // A turn that ended in a provider error (e.g. 529 overloaded). Auto-retry
+    // is off, so this is terminal: we render it as an error row and the user
+    // re-sends to retry. Partial content (text/tools streamed before the
+    // failure) is still shown above the error note.
+    const isError = message.stopReason === 'error';
     const hasContent = !!text || toolCalls.length > 0;
     // Some models (e.g. Kimi K2.6 via OpenRouter) ignore reasoning=none and
     // return their entire answer inside a thinking block. Surface it instead
@@ -1085,7 +1112,8 @@ function MessageBubbleImpl({
       <div
         data-demo="assistant-msg"
         className={cn(
-          'group rounded-md border border-line bg-paper/70 p-3',
+          'group rounded-md border p-3',
+          isError ? 'border-failed/40 bg-failed/5' : 'border-line bg-paper/70',
           // The streaming bubble draws a rotating accent arc around its
           // border so the user can spot the live one at a glance.
           isStreaming && 'juicy-trace',
@@ -1129,6 +1157,7 @@ function MessageBubbleImpl({
             status={toolStates[c.id]?.status ?? 'running'}
           />
         ))}
+        {isError && <AgentErrorNote raw={message.errorMessage} />}
       </div>
     );
   }
@@ -1157,6 +1186,23 @@ function ThinkingIndicator() {
         ))}
       </span>
       <span>thinking…</span>
+    </div>
+  );
+}
+
+// Shown in place of a blank bubble when a turn ends in a provider error.
+// States the failure plainly and tells the user the recovery is to re-send —
+// there's no auto-retry, so the next message they send is the retry.
+function AgentErrorNote({ raw }: { raw: string | undefined }) {
+  return (
+    <div className="flex items-start gap-1.5 text-[13px] leading-snug text-failed">
+      <span aria-hidden className="select-none">
+        ⚠
+      </span>
+      <span>
+        {formatAgentError(raw)}{' '}
+        <span className="text-subtle">— send your message again to retry.</span>
+      </span>
     </div>
   );
 }

@@ -745,6 +745,18 @@ export class AgentHost {
     seedBridgeModels(modelsJsonPath);
     this.modelRegistry = ModelRegistry.create(this.authStorage, modelsJsonPath);
     this.settingsManager = SettingsManager.create(this.cwd, this.agentDir);
+    // ModMixer deliberately does not use the harness's app-level auto-retry.
+    // A failed turn (e.g. an Anthropic 529 "overloaded") is surfaced in the
+    // chat as an error row, and the user re-sends to retry. The auto-retry
+    // loop is worse than that here: each failed attempt lands as a blank
+    // assistant bubble, the backoff window has no Stop affordance to cancel
+    // into, and a message sent mid-backoff races the scheduled continue().
+    // The Anthropic SDK's own in-request retries stay on (configured
+    // separately under retry.provider) — only this Layer-2 loop is disabled.
+    // Guarded so we write settings.json at most once, not on every launch.
+    if (this.settingsManager.getRetryEnabled()) {
+      this.settingsManager.setRetryEnabled(false);
+    }
     // Custom tools are rebuilt per session in constructSession — their
     // closures bind to one specific conversation's scope/model. Here we only
     // need the tool *names* for the allowlist, so throwaway builds with
