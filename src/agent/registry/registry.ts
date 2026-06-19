@@ -47,13 +47,21 @@ class ModRegistry {
   private rescanTimer: NodeJS.Timeout | null = null;
   private scanInFlight: Promise<void> | null = null;
   private rescanQueued = false;
-  private started = false;
+  private startPromise: Promise<void> | null = null;
 
   async start(): Promise<void> {
-    if (this.started) return;
-    this.started = true;
-    await this.rescan();
-    this.installWatchers();
+    // Hand every caller the SAME start promise so they all await the initial
+    // scan. The earlier `started` boolean was flipped synchronously before the
+    // first rescan resolved, so a second start() (e.g. onboarding's detectEnv
+    // firing right after main.ts's fire-and-forget boot call) returned instantly
+    // and read the still-empty snapshot — Workshop/local mods showed 0 until the
+    // user hit "Re-check". Returning the in-flight promise closes that race.
+    if (this.startPromise) return this.startPromise;
+    this.startPromise = (async () => {
+      await this.rescan();
+      this.installWatchers();
+    })();
+    return this.startPromise;
   }
 
   stop(): void {
@@ -73,7 +81,7 @@ class ModRegistry {
       clearTimeout(this.rescanTimer);
       this.rescanTimer = null;
     }
-    this.started = false;
+    this.startPromise = null;
   }
 
   getSnapshot(): RegistrySnapshot {
