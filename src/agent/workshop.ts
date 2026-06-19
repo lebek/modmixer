@@ -510,6 +510,14 @@ export async function publishToWorkshop(
       agreementUrl,
     });
 
+    // Stamp the publish time so the panel can show "last published". Best-effort:
+    // the upload already succeeded, so a prefs-write hiccup must not fail it.
+    try {
+      await writeModPrefs(folder, { lastPublishedAt: Date.now() });
+    } catch (err) {
+      console.warn('[workshop] failed to record publish time:', err);
+    }
+
     // Register on the Modmixer leaderboard if the user opted in. Fire-and-forget
     // (not awaited) so it never holds up the publish — the main process stays
     // alive long enough for the request to land.

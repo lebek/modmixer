@@ -310,6 +310,7 @@ export function ModPublishPanel({
                 modFolder={mod.folder}
                 publishedFileId={mod.publishedFileId}
                 publishedUrl={publishedUrl}
+                lastPublishedAt={mod.prefs.lastPublishedAt}
                 onUnlinked={() => setPublishedUrl(null)}
               />
             ) : (

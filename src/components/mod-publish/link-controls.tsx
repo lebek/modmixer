@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useAsyncAction } from '@/lib/use-async-action';
+import { formatRelative } from '@/lib/format-date';
 import { ErrorBanner } from './ui';
 
 /**
@@ -98,11 +99,13 @@ export function UnlinkExistingControl({
   modFolder,
   publishedFileId,
   publishedUrl,
+  lastPublishedAt,
   onUnlinked,
 }: {
   modFolder: string;
   publishedFileId: string;
   publishedUrl: string | null;
+  lastPublishedAt: number | null;
   onUnlinked: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -129,6 +132,14 @@ export function UnlinkExistingControl({
             >
               {publishedUrl}
             </button>
+          )}
+          {lastPublishedAt && (
+            <div
+              className="mt-0.5 text-[11px] text-muted"
+              title={new Date(lastPublishedAt).toLocaleString()}
+            >
+              Last published {formatRelative(lastPublishedAt)}
+            </div>
           )}
         </div>
         {!open && (

@@ -17,13 +17,20 @@ export interface ModPrefs {
    * publish dialog's checkbox at publish time.
    */
   trackOnLeaderboard: boolean;
+  /**
+   * Epoch ms of the most recent successful Steam Workshop publish from
+   * Modmixer, or null if this mod has never been published here. Stamped on
+   * publish success so the publish panel can show "last published" — note it
+   * only tracks publishes made through Modmixer, not Steam-side edits.
+   */
+  lastPublishedAt: number | null;
 }
 
 const SIDECAR_DIR = '.modmixer';
 const SIDECAR_FILE = 'prefs.json';
 
 function defaults(): ModPrefs {
-  return { trackOnLeaderboard: true };
+  return { trackOnLeaderboard: true, lastPublishedAt: null };
 }
 
 function sidecarPath(folder: string): string {
@@ -39,6 +46,10 @@ function parsePrefs(raw: string): ModPrefs {
         typeof parsed.trackOnLeaderboard === 'boolean'
           ? parsed.trackOnLeaderboard
           : true,
+      lastPublishedAt:
+        typeof parsed.lastPublishedAt === 'number'
+          ? parsed.lastPublishedAt
+          : null,
     };
   } catch {
     return defaults();
@@ -72,6 +83,10 @@ export async function writeModPrefs(
       typeof patch.trackOnLeaderboard === 'boolean'
         ? patch.trackOnLeaderboard
         : current.trackOnLeaderboard,
+    lastPublishedAt:
+      'lastPublishedAt' in patch
+        ? patch.lastPublishedAt ?? null
+        : current.lastPublishedAt,
   };
   await fsp.mkdir(path.join(modDir, SIDECAR_DIR), { recursive: true });
   await fsp.writeFile(
