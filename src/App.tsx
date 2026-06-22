@@ -11,6 +11,10 @@ import { TabNav, type AppView, type ModTabDescriptor } from './components/tab-na
 import { BuildView } from './components/build-view';
 import { ModsView } from './components/mods-view';
 import { LibraryView } from './components/library-view';
+import { LibraryPlaceholder } from './components/library-placeholder';
+import { GameSelector } from './components/game-selector';
+import type { GameId } from './agent/games/types';
+import { resolveGameId } from './agent/games/registry';
 import type { RestoreResult } from './components/saves-view';
 import { SessionRecoveryDialog } from './components/session-recovery-dialog';
 import { appAlert, appConfirm } from './components/app-dialog';
@@ -42,6 +46,10 @@ interface ModTab {
 
 export function App() {
   const [view, setView] = useState<AppView>('mods');
+  // The app-level active game: a lens over Home / Library / new-mod. NOT a
+  // mode — switching it leaves open mod tabs untouched, so mods from different
+  // games can be edited side by side. Persisted as settings.selectedGameId.
+  const [activeGame, setActiveGame] = useState<GameId>('rimworld');
   const [mods, setMods] = useState<WorkspaceMod[]>([]);
   const [tabs, setTabs] = useState<ModTab[]>([]);
   const [focusedFolder, setFocusedFolder] = useState<string | null>(null);
@@ -93,7 +101,15 @@ export function App() {
     void window.modmixer.getSettings().then((s) => {
       setMultiChat(s.multiChat);
       setSkipPermissions(s.dangerouslySkipPermissions);
+      setActiveGame(resolveGameId(s.selectedGameId));
     });
+  }, []);
+
+  // Switch the active game. Persisted so the choice survives a relaunch; the
+  // view is left as-is (switching while on a mod tab keeps editing that mod).
+  const changeActiveGame = useCallback((game: GameId) => {
+    setActiveGame(game);
+    void window.modmixer.setSelectedGame(game);
   }, []);
   useEffect(() => {
     refreshSettingsFlags();
@@ -647,6 +663,7 @@ export function App() {
               </span>
             )}
           </div>
+          <GameSelector game={activeGame} onChange={changeActiveGame} />
           <TabNav
             view={view}
             focusedFolder={focusedFolder}
@@ -715,17 +732,21 @@ export function App() {
       </header>
 
       {view === 'library' ? (
-        <LibraryView
-          envelope={registryEnvelope}
-          session={session}
-          onRefresh={refreshRegistry}
-          onAutosort={applyAutosort}
-          onSetActive={setActiveMods}
-          onEnableWithDeps={enableWithDeps}
-          onStartFix={startFix}
-          onApplySession={applySession}
-          onRevertSession={revertSession}
-        />
+        activeGame === 'rimworld' ? (
+          <LibraryView
+            envelope={registryEnvelope}
+            session={session}
+            onRefresh={refreshRegistry}
+            onAutosort={applyAutosort}
+            onSetActive={setActiveMods}
+            onEnableWithDeps={enableWithDeps}
+            onStartFix={startFix}
+            onApplySession={applySession}
+            onRevertSession={revertSession}
+          />
+        ) : (
+          <LibraryPlaceholder game={activeGame} />
+        )
       ) : view === 'mod' && focusedTab ? (
         // Only the focused tab's workspace is mounted — live chat state lives
         // in the conversation store, so unmounting an inactive tab is free
@@ -760,6 +781,7 @@ export function App() {
         />
       ) : (
         <ModsView
+          game={activeGame}
           mods={mods}
           onOpen={openMod}
           onNewMod={newMod}
