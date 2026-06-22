@@ -6,6 +6,7 @@ import type {
 } from '../../agent/minecraft/modrinth';
 import { useAsyncAction } from '@/lib/use-async-action';
 import { ErrorBanner, Field, Section } from './ui';
+import { MinecraftPublishConfirmDialog } from './minecraft-publish-confirm-dialog';
 
 /** Minecraft mods publish to Modrinth (not Steam Workshop). */
 export function MinecraftPublishPanel({ mod }: { mod: WorkspaceMod }) {
@@ -26,9 +27,9 @@ export function MinecraftPublishPanel({ mod }: { mod: WorkspaceMod }) {
   const [clientSide, setClientSide] = useState<ModrinthSideSupport>('required');
   const [serverSide, setServerSide] = useState<ModrinthSideSupport>('required');
 
-  // Version metadata.
-  const [versionNumber, setVersionNumber] = useState('1.0.0');
-  const [changelog, setChangelog] = useState('');
+  // Version number + changelog are per-publish; collected in the confirm
+  // dialog (like RimWorld's change notes) rather than kept in the form.
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   const [progress, setProgress] = useState<ModrinthPublishProgressEvent | null>(null);
   const [publishedUrl, setPublishedUrl] = useState<string | null>(
@@ -58,30 +59,32 @@ export function MinecraftPublishPanel({ mod }: { mod: WorkspaceMod }) {
     }
   });
 
-  const publish = useAsyncAction(async () => {
-    setProgress(null);
-    await window.modmixer.publishToModrinth(
-      mod.folder,
-      {
-        slug: slugify(slug),
-        title,
-        summary,
-        description,
-        categories: categories
-          .split(',')
-          .map((c) => c.trim().toLowerCase())
-          .filter(Boolean),
-        license,
-        clientSide,
-        serverSide,
-      },
-      {
-        versionNumber,
-        versionType: 'release',
-        changelog,
-      },
-    );
-  });
+  const publish = useAsyncAction(
+    async (version: { versionNumber: string; changelog: string }) => {
+      setProgress(null);
+      await window.modmixer.publishToModrinth(
+        mod.folder,
+        {
+          slug: slugify(slug),
+          title,
+          summary,
+          description,
+          categories: categories
+            .split(',')
+            .map((c) => c.trim().toLowerCase())
+            .filter(Boolean),
+          license,
+          clientSide,
+          serverSide,
+        },
+        {
+          versionNumber: version.versionNumber,
+          versionType: 'release',
+          changelog: version.changelog,
+        },
+      );
+    },
+  );
 
   // The token form shows up front until a token is stored, and on demand
   // afterwards (to replace a bad one). The metadata above is always editable.
@@ -127,13 +130,6 @@ export function MinecraftPublishPanel({ mod }: { mod: WorkspaceMod }) {
                 </Field>
               </>
             )}
-
-            <Field label="Version number" hint="Semver, e.g. 1.0.0. Targets Minecraft 1.21.1 / NeoForge.">
-              <input type="text" value={versionNumber} onChange={(e) => setVersionNumber(e.target.value)} className={inputCls} />
-            </Field>
-            <Field label="Changelog">
-              <textarea value={changelog} onChange={(e) => setChangelog(e.target.value)} rows={3} className={`${inputCls} resize-y`} placeholder="What changed in this version." />
-            </Field>
 
             {progress && (
               <div className="rounded-md border border-line bg-surface/40 px-3 py-2 text-xs text-muted">
@@ -212,7 +208,7 @@ export function MinecraftPublishPanel({ mod }: { mod: WorkspaceMod }) {
                     </button>
                   </span>
                   <button
-                    onClick={() => void publish.run()}
+                    onClick={() => setConfirmOpen(true)}
                     disabled={publish.busy || !title.trim() || (!isUpdate && !slug.trim())}
                     className="rounded-md bg-ink px-3 py-1 text-[10px] uppercase tracking-[0.18em] text-paper transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
                   >
@@ -224,6 +220,18 @@ export function MinecraftPublishPanel({ mod }: { mod: WorkspaceMod }) {
           </Section>
         </div>
       </div>
+
+      <MinecraftPublishConfirmDialog
+        open={confirmOpen}
+        isUpdate={isUpdate}
+        modName={title}
+        defaultVersion="1.0.0"
+        onCancel={() => setConfirmOpen(false)}
+        onConfirm={(result) => {
+          setConfirmOpen(false);
+          void publish.run(result);
+        }}
+      />
     </div>
   );
 }
