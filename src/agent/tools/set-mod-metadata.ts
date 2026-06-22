@@ -1,7 +1,10 @@
 import { Type } from 'typebox';
+import path from 'node:path';
 import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
-import { writeAbout } from '../workspace.js';
+import { getWorkspacePaths, writeAbout } from '../workspace.js';
 import { emitModChanged } from '../mod-events.js';
+import { readModPrefs } from '../mod-prefs.js';
+import { writeMinecraftMeta } from '../minecraft/scaffold.js';
 
 const Params = Type.Object({
   folder: Type.String({
@@ -10,13 +13,14 @@ const Params = Type.Object({
   }),
   name: Type.Optional(
     Type.String({
-      description: "Mod display name shown in RimWorld's mod list.",
+      description:
+        "Mod display name/title (RimWorld: About.xml <name>; Minecraft: gradle.properties mod_name). Set this to give an untitled mod a sensible title.",
     }),
   ),
   packageId: Type.Optional(
     Type.String({
       description:
-        'Reverse-DNS package id, lowercase. Example: "alebek.helloworld". Use ${defaultAuthor}.${PascalCaseName} unless the user gave a specific id.',
+        'Mod id. RimWorld: reverse-DNS lowercase, e.g. "alebek.helloworld" (use ${defaultAuthor}.${PascalCaseName}). Minecraft: a short lowercase id (letters/digits/underscore only), e.g. "foobargreeter" — changing it rebrands the whole project (@Mod id, package, resource namespaces).',
     }),
   ),
   author: Type.Optional(
@@ -42,13 +46,42 @@ export const setModMetadataTool: AgentTool<typeof Params, SetModMetadataDetails>
   name: 'set_mod_metadata',
   label: 'Set mod metadata',
   description:
-    "Patch the active mod's About.xml (Name / PackageID / Author / Description) — these are the player-facing identity and Workshop description shown in the Settings panel. For the agent's own running notes about what the mod contains, use update_schematic instead. Requires the mod to exist; for brand-new mods, scaffold_mod first.",
+    "Set the active mod's display identity (Name / Id / Author / Description). RimWorld writes About.xml; Minecraft writes gradle.properties (and renaming the id rebrands the whole project). Use this to give a freshly-created 'Untitled Mod' a sensible name + id once you understand what the user wants. For the agent's own running notes, use update_schematic instead.",
   parameters: Params,
   async execute(
     _id,
     params,
   ): Promise<AgentToolResult<SetModMetadataDetails>> {
     const { folder, ...rest } = params;
+
+    // Minecraft mods have no About.xml — identity lives in gradle.properties.
+    // Map the canonical fields onto it (and rebrand the project when the id
+    // changes so @Mod keeps matching the manifest).
+    const prefs = await readModPrefs(folder);
+    if (prefs.game === 'minecraft') {
+      const { workspaceDir } = getWorkspacePaths();
+      const modDir = path.join(workspaceDir, folder);
+      const changed = await writeMinecraftMeta(modDir, {
+        name: rest.name,
+        author: rest.author,
+        description: rest.description,
+        modId: rest.packageId,
+      });
+      if (changed.length === 0) {
+        throw new Error('set_mod_metadata called with no fields to update.');
+      }
+      emitModChanged(folder);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Updated gradle.properties for ${folder} (${changed.join(', ')}). The mod's name/id now reflect this${changed.includes('modId') ? ' — the @Mod id, package, and resource namespaces were renamed to match' : ''}.`,
+          },
+        ],
+        details: { folder, fields: changed },
+      };
+    }
+
     const patch: Record<string, string> = {};
     for (const [k, v] of Object.entries(rest)) {
       if (typeof v === 'string') patch[k] = v;

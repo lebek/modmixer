@@ -405,7 +405,7 @@ ${pathsBlock(ctx)}`;
 // game knowledge into the prompt.
 
 const MINECRAFT_RULES = `Workspace lifecycle:
-- A Minecraft mod IS a Gradle/NeoForge project; the mod folder is the project root. Edit Java under src/main/java and data/asset JSON under src/main/resources. Identity lives in gradle.properties (mod_id, mod_name, mod_version) and src/main/resources/META-INF/neoforge.mods.toml — edit those directly to rename/version the mod.
+- A Minecraft mod IS a Gradle/NeoForge project; the mod folder is the project root (prefix every path with it). Edit Java under src/main/java and data/asset JSON under src/main/resources/{data,assets}/<modid>/. The mod's name/id/version live in gradle.properties — use set_mod_metadata to set the display name + id (it rebrands the project, @Mod + package + namespaces). The manifest at src/main/templates/META-INF/neoforge.mods.toml is GENERATED from gradle.properties; don't edit it by hand.
 - Compile with build_mod (runs ./gradlew build). The FIRST build decompiles Minecraft and can take several minutes — that is expected, not a hang.
 - Test with run_test_cycle: it launches the modded client (./gradlew runClient) with a diagnostics bridge that streams aggregated, deduped errors back to you (read them with monitor_poll / monitor_get_error). Never tell the user to drop the jar into a launcher to test — run_test_cycle handles the dev launch.
 - The shippable artifact is build/libs/<mod_id>-<version>.jar (what gets published to Modrinth).
@@ -424,14 +424,16 @@ function minecraftPathsBlock(workspaceDir: string, defaultAuthor: string): strin
   return `Workspace (cwd): ${workspaceDir}
 Target: Minecraft ${MINECRAFT_VERSION} + NeoForge ${NEOFORGE_VERSION} (Java 21, ModDevGradle).
 Default author handle: ${defaultAuthor}.
-Project layout: gradle.properties + settings.gradle + build.gradle at the project root; mod code in src/main/java/<package>/; resources (META-INF/neoforge.mods.toml, JSON data/assets) in src/main/resources/. Gradle runs via the bundled ./gradlew wrapper — build_mod / run_test_cycle invoke it for you.`;
+Project layout (all under the mod's folder): gradle.properties + settings.gradle + build.gradle at the root; Java in src/main/java/<package>/; JSON data/assets in src/main/resources/{data,assets}/<modid>/; the manifest is generated from src/main/templates/META-INF/neoforge.mods.toml (edit gradle.properties for identity, not the generated copy). Gradle runs via the bundled ./gradlew wrapper — build_mod / run_test_cycle invoke it for you.`;
 }
 
 function minecraftScopeBlock(scope: ConversationScope): string {
   if (scope.type === 'mod') {
-    return `You are working on the Minecraft mod at ${scope.modFolder} (a NeoForge ${MINECRAFT_VERSION} project). Read gradle.properties + src/main/resources/META-INF/neoforge.mods.toml to learn its id/name, then edit src/main/java and src/main/resources.`;
+    return `You are working on the Minecraft mod whose project root is the folder "${scope.modFolder}/" (relative to the workspace cwd above). EVERY path you read/edit must start with that prefix — e.g. ${scope.modFolder}/gradle.properties, ${scope.modFolder}/build.gradle, ${scope.modFolder}/src/main/java/<package>/… . There is no gradle.properties or src/ at the workspace root.
+The mod's identity (display name, id, version, authors) lives in ${scope.modFolder}/gradle.properties — there is NO hand-written mods.toml to read; the manifest is generated from src/main/templates/META-INF/neoforge.mods.toml by Gradle expanding gradle.properties.
+If the mod is still named "Untitled Mod" (id "untitledmod"), give it a sensible name + id with set_mod_metadata EARLY (name = display title, packageId = short lowercase id like "foobargreeter") once you understand what the user wants — it rebrands the project so all later work uses the right id.`;
   }
-  return `No mod is open yet. When the user describes what they want to build, create the mod (a NeoForge project is scaffolded), then fill in src/main/java and src/main/resources.`;
+  return `No mod is open yet. When the user describes what they want to build, create the mod (a NeoForge project is scaffolded under a workspace folder), name it with set_mod_metadata, then edit src/main/java and src/main/resources under that folder.`;
 }
 
 function buildMinecraftSystemPrompt(scope: ConversationScope): string {

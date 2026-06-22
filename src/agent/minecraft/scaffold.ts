@@ -160,7 +160,7 @@ export async function createMinecraftMod(
   // namespace match the new mod_id — otherwise NeoForge rejects the mod at
   // load time ("entrypoint class … for mod with id examplemod, which does not
   // exist"), even though it compiles fine.
-  await renameScaffoldedMod(modDir, modId, groupId);
+  await renameModId(modDir, EXAMPLE_ID, EXAMPLE_GROUP, modId, groupId);
 
   await appendBridgeWiring(path.join(modDir, 'build.gradle'));
 
@@ -245,33 +245,38 @@ async function pruneEmptyDirs(dir: string): Promise<void> {
 }
 
 /**
- * Rebrand the MDK's bundled example from `examplemod` / `com.example.examplemod`
- * to the scaffolded mod's id + group across all sources and resources, and move
- * the Java package + resource namespace dirs to match. This is the standard MDK
- * rename, done programmatically so a fresh mod loads instead of erroring on a
- * mod-id mismatch.
+ * Rebrand a mod's id + group across all sources and resources, moving the Java
+ * package + resource-namespace dirs to match. Used to rename the MDK's bundled
+ * example (`examplemod`) at scaffold time, and again when the user names the mod
+ * (set_mod_metadata). String-replacing the OLD id→NEW id everywhere keeps any
+ * agent-written code correct too. No-op when nothing changes.
  */
-async function renameScaffoldedMod(
+export async function renameModId(
   modDir: string,
-  modId: string,
-  groupId: string,
+  fromId: string,
+  fromGroup: string,
+  toId: string,
+  toGroup: string,
 ): Promise<void> {
   const srcDir = path.join(modDir, 'src');
   if (!fs.existsSync(srcDir)) return;
+  if (fromId === toId && fromGroup === toGroup) return;
 
   // 1. Text replacements. Replace the fully-qualified group FIRST (it contains
   //    the bare id as a substring), then the standalone mod id.
   await walkFiles(srcDir, async (file) => {
     if (!RENAME_TEXT_EXT.has(path.extname(file))) return;
     const orig = await fsp.readFile(file, 'utf8');
-    const next = orig.split(EXAMPLE_GROUP).join(groupId).split(EXAMPLE_ID).join(modId);
+    let next = orig;
+    if (fromGroup !== toGroup) next = next.split(fromGroup).join(toGroup);
+    if (fromId !== toId) next = next.split(fromId).join(toId);
     if (next !== orig) await fsp.writeFile(file, next, 'utf8');
   });
 
   // 2. Move the Java package dir to match the new group.
   const javaRoot = path.join(modDir, 'src', 'main', 'java');
-  const oldPkg = path.join(javaRoot, ...EXAMPLE_GROUP.split('.'));
-  const newPkg = path.join(javaRoot, ...groupId.split('.'));
+  const oldPkg = path.join(javaRoot, ...fromGroup.split('.'));
+  const newPkg = path.join(javaRoot, ...toGroup.split('.'));
   if (fs.existsSync(oldPkg) && path.resolve(oldPkg) !== path.resolve(newPkg)) {
     await fsp.mkdir(path.dirname(newPkg), { recursive: true });
     await fsp.rename(oldPkg, newPkg);
@@ -280,12 +285,78 @@ async function renameScaffoldedMod(
 
   // 3. Rename resource namespaces (assets/<id>, data/<id>).
   for (const kind of ['assets', 'data']) {
-    const oldNs = path.join(modDir, 'src', 'main', 'resources', kind, EXAMPLE_ID);
-    const newNs = path.join(modDir, 'src', 'main', 'resources', kind, modId);
+    const oldNs = path.join(modDir, 'src', 'main', 'resources', kind, fromId);
+    const newNs = path.join(modDir, 'src', 'main', 'resources', kind, toId);
     if (fs.existsSync(oldNs) && path.resolve(oldNs) !== path.resolve(newNs)) {
       await fsp.rename(oldNs, newNs);
     }
   }
+}
+
+export interface MinecraftMetaPatch {
+  name?: string;
+  author?: string;
+  description?: string;
+  /** New mod id (slugified). When it differs from the current id, the whole
+   *  project is renamed (Java @Mod id, package, resource namespaces). */
+  modId?: string;
+}
+
+/**
+ * Update a Minecraft mod's identity in gradle.properties — the MC analogue of
+ * patching About.xml. Renaming mod_id additionally rebrands the project so the
+ * @Mod id keeps matching the manifest. Returns the fields that changed.
+ */
+export async function writeMinecraftMeta(
+  modDir: string,
+  patch: MinecraftMetaPatch,
+): Promise<string[]> {
+  const propsPath = path.join(modDir, 'gradle.properties');
+  if (!fs.existsSync(propsPath)) {
+    throw new Error(`gradle.properties not found in ${modDir}`);
+  }
+  const current = parseGradleProps(await fsp.readFile(propsPath, 'utf8'));
+  const changed: string[] = [];
+  const values: Record<string, string> = {};
+
+  if (patch.name && patch.name !== current.mod_name) {
+    values.mod_name = patch.name;
+    changed.push('name');
+  }
+  if (patch.author && patch.author !== current.mod_authors) {
+    values.mod_authors = patch.author;
+    changed.push('author');
+  }
+  if (patch.description !== undefined) {
+    const desc = patch.description.replace(/\n/g, ' ');
+    if (desc !== current.mod_description) {
+      values.mod_description = desc;
+      changed.push('description');
+    }
+  }
+
+  // mod_id rename: rebrand the project first, then record the new id/group.
+  if (patch.modId) {
+    const newId = slugifyModId(patch.modId);
+    const fromId = current.mod_id || 'examplemod';
+    if (newId !== fromId) {
+      const fromGroup = current.mod_group_id || `com.modmixer.${fromId}`;
+      const toGroup = `com.modmixer.${newId}`;
+      await renameModId(modDir, fromId, fromGroup, newId, toGroup);
+      values.mod_id = newId;
+      values.mod_group_id = toGroup;
+      changed.push('modId');
+    }
+  }
+
+  if (Object.keys(values).length > 0) {
+    const patched = patchGradleProperties(
+      await fsp.readFile(propsPath, 'utf8'),
+      values,
+    );
+    await fsp.writeFile(propsPath, patched, 'utf8');
+  }
+  return changed;
 }
 
 /** True when the MDK template is vendored (used to gate the MC create flow). */
