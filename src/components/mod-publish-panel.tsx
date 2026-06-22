@@ -11,8 +11,24 @@ import {
 } from './mod-publish/link-controls';
 import { DangerZone } from './mod-publish/danger-zone';
 import { PublishConfirmDialog } from './mod-publish/publish-confirm-dialog';
+import { MinecraftPublishPanel } from './mod-publish/minecraft-publish-panel';
 
-export function ModPublishPanel({
+export function ModPublishPanel(props: {
+  mod: WorkspaceMod;
+  hasAi: boolean;
+  onGeneratePreview: () => void;
+  onDeleted?: () => void;
+}) {
+  // Minecraft mods publish to Modrinth, not Steam Workshop, and their identity
+  // lives in gradle.properties rather than About.xml — a separate panel. Branch
+  // here (before any hooks) so each panel keeps a stable hook order.
+  if (props.mod.prefs.game === 'minecraft') {
+    return <MinecraftPublishPanel mod={props.mod} />;
+  }
+  return <RimWorldPublishPanel {...props} />;
+}
+
+function RimWorldPublishPanel({
   mod,
   hasAi,
   onGeneratePreview,

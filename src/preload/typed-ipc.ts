@@ -43,6 +43,12 @@ import type {
   PublishProgressEvent,
   PublishResult,
 } from '../agent/workshop';
+import type {
+  ModrinthPublishMeta,
+  ModrinthVersionMeta,
+  ModrinthPublishResult,
+  ModrinthPublishProgressEvent,
+} from '../agent/minecraft/modrinth';
 import type { SaveRecord, SnapshotsChangedEvent } from '../agent/snapshots';
 import type { ConfirmationRequest } from '../agent/security/confirmation-gate';
 import type { IndexSnapshot } from '../agent/index/main-bridge';
@@ -350,6 +356,16 @@ export interface Channels {
     workshopId: string,
   ) => WorkspaceMod | null;
 
+  // Modrinth (Minecraft publishing)
+  'modmixer:modrinth:get-token': () => string | null;
+  'modmixer:modrinth:has-token': () => boolean;
+  'modmixer:modrinth:set-token': (token: string) => boolean;
+  'modmixer:modrinth:publish': (
+    folder: string,
+    meta: ModrinthPublishMeta,
+    version: ModrinthVersionMeta,
+  ) => ModrinthPublishResult;
+
   // Registry
   'modmixer:registry:get': () => RegistryEnvelope;
   'modmixer:registry:refresh': () => RegistryEnvelope;
@@ -416,6 +432,7 @@ export interface Events {
   'modmixer:monitor:message': BridgeMessage;
   'modmixer:live:state': LiveConnectionState;
   'modmixer:workshop:progress': PublishProgressEvent;
+  'modmixer:modrinth:progress': ModrinthPublishProgressEvent & { folder: string };
   'modmixer:snapshots:changed': SnapshotsChangedEvent;
   'modmixer:oauth:event': OAuthEvent;
   'modmixer:confirm:request': ConfirmationRequest;

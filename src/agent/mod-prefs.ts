@@ -33,6 +33,14 @@ export interface ModPrefs {
    * mod with no migration.
    */
   game: GameId;
+  /**
+   * Modrinth project id (Minecraft mods), stamped on first publish. Reusing it
+   * on the next publish updates the existing project (skipping re-review) rather
+   * than creating a new one. Undefined until first published to Modrinth.
+   */
+  modrinthProjectId?: string;
+  /** Modrinth project slug, for building the public URL. */
+  modrinthSlug?: string;
 }
 
 const SIDECAR_DIR = '.modmixer';
@@ -64,6 +72,12 @@ function parsePrefs(raw: string): ModPrefs {
           ? parsed.lastPublishedAt
           : null,
       game: resolveGameId(parsed.game),
+      modrinthProjectId:
+        typeof parsed.modrinthProjectId === 'string'
+          ? parsed.modrinthProjectId
+          : undefined,
+      modrinthSlug:
+        typeof parsed.modrinthSlug === 'string' ? parsed.modrinthSlug : undefined,
     };
   } catch {
     return defaults();
@@ -103,6 +117,12 @@ export async function writeModPrefs(
         : current.lastPublishedAt,
     // game is set once at creation; only overwrite when explicitly patched.
     game: patch.game ? resolveGameId(patch.game) : current.game,
+    modrinthProjectId:
+      'modrinthProjectId' in patch
+        ? patch.modrinthProjectId
+        : current.modrinthProjectId,
+    modrinthSlug:
+      'modrinthSlug' in patch ? patch.modrinthSlug : current.modrinthSlug,
   };
   await fsp.mkdir(path.join(modDir, SIDECAR_DIR), { recursive: true });
   await fsp.writeFile(

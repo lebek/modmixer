@@ -308,6 +308,24 @@ const api = {
     handler: (event: import('./agent/workshop').PublishProgressEvent) => void,
   ) => on('modmixer:workshop:progress', handler),
 
+  // Modrinth (Minecraft publishing)
+  getModrinthToken: () => invoke('modmixer:modrinth:get-token'),
+  hasModrinthToken: () => invoke('modmixer:modrinth:has-token'),
+  setModrinthToken: (token: string) =>
+    invoke('modmixer:modrinth:set-token', token),
+  publishToModrinth: (
+    folder: string,
+    meta: import('./agent/minecraft/modrinth').ModrinthPublishMeta,
+    version: import('./agent/minecraft/modrinth').ModrinthVersionMeta,
+  ) => invoke('modmixer:modrinth:publish', folder, meta, version),
+  onModrinthProgress: (
+    handler: (
+      event: import('./agent/minecraft/modrinth').ModrinthPublishProgressEvent & {
+        folder: string;
+      },
+    ) => void,
+  ) => on('modmixer:modrinth:progress', handler),
+
   // Mod registry — full system view (DLCs + local + workshop + workspace).
   getRegistry: () => invoke('modmixer:registry:get'),
   refreshRegistry: () => invoke('modmixer:registry:refresh'),
