@@ -9,7 +9,7 @@ import { setAnalyticsOptIn } from '../../agent/telemetry.js';
 import { getConfirmationGate } from '../../agent/security/confirmation-gate.js';
 import {
   clearCommunityLore,
-  seedCommunityLoreFromShipped,
+  seedAllCommunityLoreFromShipped,
 } from '../../agent/lore.js';
 import { syncCommunityLore } from '../../agent/community-lore-sync.js';
 import {
@@ -119,10 +119,10 @@ export function registerSettingsRoutes(ctx: RouteContext): void {
       const before = loadSettings().useCommunityLore;
       const next = saveSettings({ useCommunityLore: enabled });
       if (enabled && !before) {
-        // First activation: seed the cache from the shipped bundle so the
-        // agent has something to read before the first network pull lands.
+        // First activation: seed every game's cache from its shipped bundle so
+        // the agent has something to read before the first network pull lands.
         try {
-          await seedCommunityLoreFromShipped();
+          await seedAllCommunityLoreFromShipped();
         } catch (err) {
           console.error('[community-lore] seed failed:', err);
         }

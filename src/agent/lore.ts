@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import { loadSettings } from './settings.js';
 import type { GameId } from './games/types.js';
+import { listGames } from './games/registry.js';
 
 /**
  * Modmixer Lore is a knowledge base for transferable RimWorld-modding
@@ -523,11 +524,13 @@ export async function saveEntry(
  * the cache so we never clobber a freshly pulled snapshot if the user
  * toggles off-then-on after a sync.
  */
-export async function seedCommunityLoreFromShipped(): Promise<void> {
-  const src = shippedLoreDir();
-  const dst = communityLoreDir();
+export async function seedCommunityLoreFromShipped(
+  game: GameId = 'rimworld',
+): Promise<void> {
+  const src = shippedLoreDir(game);
+  const dst = communityLoreDir(game);
   await fsp.mkdir(dst, { recursive: true });
-  for (const topic of LORE_TOPICS) {
+  for (const topic of loreTopics(game)) {
     const srcFile = path.join(src, `${topic}.md`);
     const dstFile = path.join(dst, `${topic}.md`);
     if (!fs.existsSync(srcFile)) continue;
@@ -536,14 +539,23 @@ export async function seedCommunityLoreFromShipped(): Promise<void> {
   }
 }
 
+/** Seed every game's community cache from its shipped bundle (idempotent). */
+export async function seedAllCommunityLoreFromShipped(): Promise<void> {
+  for (const g of listGames()) {
+    await seedCommunityLoreFromShipped(g.id);
+  }
+}
+
 /**
  * Wipe the community-lore cache. Used when the toggle goes back off so
  * the agent reverts to the shipped bundle with no stale crowd-sourced
  * residue. Safe if the directory doesn't exist.
  */
-export async function clearCommunityLore(): Promise<void> {
-  const dir = communityLoreDir();
-  await fsp.rm(dir, { recursive: true, force: true });
+export async function clearCommunityLore(game?: GameId): Promise<void> {
+  const games = game ? [game] : listGames().map((g) => g.id);
+  for (const g of games) {
+    await fsp.rm(communityLoreDir(g), { recursive: true, force: true });
+  }
 }
 
 /**
@@ -551,10 +563,12 @@ export async function clearCommunityLore(): Promise<void> {
  * the payload for the community-lore push. Each entry retains its topic
  * and hook so the server-side row layout is straightforward.
  */
-export async function readAllUserEntries(): Promise<LoreEntry[]> {
+export async function readAllUserEntries(
+  game: GameId = 'rimworld',
+): Promise<LoreEntry[]> {
   const out: LoreEntry[] = [];
-  for (const topic of LORE_TOPICS) {
-    out.push(...(await readTopicEntries('user', topic)));
+  for (const topic of loreTopics(game)) {
+    out.push(...(await readTopicEntries('user', topic, game)));
   }
   return out;
 }
@@ -578,11 +592,12 @@ export async function readAllUserEntries(): Promise<LoreEntry[]> {
  */
 export async function deleteUserEntries(
   targets: Array<{ topic: LoreTopic; hook: string; reviewedAt?: string }>,
+  game: GameId = 'rimworld',
 ): Promise<number> {
   // hook (lowercased) -> reviewedAt date, grouped by topic.
   const byTopic = new Map<LoreTopic, Map<string, string | undefined>>();
   for (const t of targets) {
-    if (!isLoreTopic(t.topic)) continue;
+    if (!isLoreTopicForGame(t.topic, game)) continue;
     const hooks = byTopic.get(t.topic) ?? new Map();
     hooks.set(t.hook.trim().toLowerCase(), t.reviewedAt?.slice(0, 10));
     byTopic.set(t.topic, hooks);
@@ -590,7 +605,7 @@ export async function deleteUserEntries(
 
   let removed = 0;
   for (const [topic, hooks] of byTopic) {
-    const { path: file } = topicFile('user', topic);
+    const { path: file } = topicFile('user', topic, game);
     if (!fs.existsSync(file)) continue;
     const md = await fsp.readFile(file, 'utf8');
     const entries = splitEntries(md, 'user', topic);
@@ -625,8 +640,9 @@ export async function deleteUserEntries(
  */
 export async function writeCommunityLore(
   entries: Array<{ topic: LoreTopic; hook: string; markdown: string }>,
+  game: GameId = 'rimworld',
 ): Promise<void> {
-  const dir = communityLoreDir();
+  const dir = communityLoreDir(game);
   await fsp.mkdir(dir, { recursive: true });
   const grouped = new Map<LoreTopic, string[]>();
   for (const e of entries) {

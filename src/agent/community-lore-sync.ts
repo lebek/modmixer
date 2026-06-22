@@ -1,12 +1,14 @@
 import {
-  LORE_TOPICS,
   deleteUserEntries,
+  isLoreTopicForGame,
   readAllUserEntries,
-  seedCommunityLoreFromShipped,
+  seedAllCommunityLoreFromShipped,
   writeCommunityLore,
   type LoreTopic,
 } from './lore.js';
 import { loadSettings, saveSettings } from './settings.js';
+import type { GameId } from './games/types.js';
+import { isGameId, listGames } from './games/registry.js';
 
 // Publishable Supabase credentials — designed to ship in clients. Rotation
 // is independent of any user-level secret. Keep these in sync with the
@@ -18,7 +20,6 @@ interface CommunityLoreRow {
   topic: string;
   hook: string;
   markdown: string;
-  updated_at: string;
 }
 
 function authHeaders(): Record<string, string> {
@@ -31,11 +32,14 @@ function authHeaders(): Record<string, string> {
   };
 }
 
-async function pushUserLore(deviceId: string): Promise<number> {
-  const entries = await readAllUserEntries();
+async function pushUserLore(deviceId: string, game: GameId): Promise<number> {
+  const entries = await readAllUserEntries(game);
   if (entries.length === 0) return 0;
   const rows = entries.map((e) => ({
     device_id: deviceId,
+    // RimWorld and Minecraft share topic names (recipes, build, test-loop, …),
+    // so game_id is part of the row identity, not just a label.
+    game_id: game,
     topic: e.topic,
     hook: e.hook,
     markdown: e.markdown,
@@ -45,44 +49,45 @@ async function pushUserLore(deviceId: string): Promise<number> {
     // lore-review skill.
     client_model: e.clientModel ?? null,
   }));
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/lore_submissions`, {
-    method: 'POST',
-    headers: {
-      ...authHeaders(),
-      'Content-Type': 'application/json',
-      // UPSERT semantics — replace the existing row for the same
-      // (device_id, topic, hook). `return=minimal` skips the response body.
-      Prefer: 'resolution=merge-duplicates,return=minimal',
+  const res = await fetch(
+    // Target the game-aware unique index explicitly so the UPSERT keys on
+    // (device_id, game_id, topic, hook) rather than guessing a constraint.
+    `${SUPABASE_URL}/rest/v1/lore_submissions?on_conflict=device_id,game_id,topic,hook`,
+    {
+      method: 'POST',
+      headers: {
+        ...authHeaders(),
+        'Content-Type': 'application/json',
+        // UPSERT semantics — replace the existing row for the same key.
+        // `return=minimal` skips the response body.
+        Prefer: 'resolution=merge-duplicates,return=minimal',
+      },
+      body: JSON.stringify(rows),
     },
-    body: JSON.stringify(rows),
-  });
+  );
   if (!res.ok) {
     throw new Error(
-      `push failed: ${res.status} ${res.statusText} — ${await res.text()}`,
+      `push failed (${game}): ${res.status} ${res.statusText} — ${await res.text()}`,
     );
   }
   return rows.length;
 }
 
-function isLoreTopic(s: string): s is LoreTopic {
-  return (LORE_TOPICS as readonly string[]).includes(s);
-}
-
-async function pullCommunityLore(): Promise<
-  Array<{ topic: LoreTopic; hook: string; markdown: string }>
-> {
+async function pullCommunityLore(
+  game: GameId,
+): Promise<Array<{ topic: LoreTopic; hook: string; markdown: string }>> {
   const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/community_lore?select=topic,hook,markdown`,
+    `${SUPABASE_URL}/rest/v1/community_lore?game_id=eq.${game}&select=topic,hook,markdown`,
     { headers: authHeaders() },
   );
   if (!res.ok) {
     throw new Error(
-      `pull failed: ${res.status} ${res.statusText} — ${await res.text()}`,
+      `pull failed (${game}): ${res.status} ${res.statusText} — ${await res.text()}`,
     );
   }
   const rows = (await res.json()) as CommunityLoreRow[];
   return rows
-    .filter((r) => isLoreTopic(r.topic))
+    .filter((r) => isLoreTopicForGame(r.topic, game))
     .map((r) => ({
       topic: r.topic as LoreTopic,
       hook: r.hook,
@@ -98,13 +103,18 @@ async function pullCommunityLore(): Promise<
  * pull; the rest were judged not-to-be-kept); `pending` and `needs_edit`
  * are still in flight and are deliberately excluded.
  *
+ * Returns each hook's `game_id` so the prune deletes the right game's local
+ * copy — topic+hook alone is ambiguous now that the taxonomies overlap.
+ *
  * It's a SECURITY DEFINER RPC so the anon role can read its own rows'
  * status without a table-wide SELECT policy exposing every submission's
  * markdown/review_notes (see the migration that defines it).
  */
 async function fetchReviewedHooks(
   deviceId: string,
-): Promise<Array<{ topic: LoreTopic; hook: string; reviewedAt?: string }>> {
+): Promise<
+  Array<{ game: GameId; topic: LoreTopic; hook: string; reviewedAt?: string }>
+> {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/reviewed_lore_hooks`, {
     method: 'POST',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
@@ -116,13 +126,15 @@ async function fetchReviewedHooks(
     );
   }
   const rows = (await res.json()) as Array<{
+    game_id: string;
     topic: string;
     hook: string;
     reviewed_at: string | null;
   }>;
   return rows
-    .filter((r) => isLoreTopic(r.topic))
+    .filter((r) => isGameId(r.game_id) && isLoreTopicForGame(r.topic, r.game_id))
     .map((r) => ({
+      game: r.game_id as GameId,
       topic: r.topic as LoreTopic,
       hook: r.hook,
       reviewedAt: r.reviewed_at ?? undefined,
@@ -131,57 +143,81 @@ async function fetchReviewedHooks(
 
 /**
  * Push the user's local lore, then pull the curated community lore and
- * write it into the local cache. Both halves are independent — a failed
- * push doesn't block the pull and vice versa. The toggle gate is checked
- * here so callers can fire this unconditionally on startup.
+ * write it into the local cache — once per game. Each game and each half
+ * (push / pull) is independent, so one game's or one half's failure never
+ * blocks the rest. The toggle gate is checked here so callers can fire this
+ * unconditionally on startup.
  */
 export async function syncCommunityLore(): Promise<void> {
   const settings = loadSettings();
   if (!settings.useCommunityLore) return;
+  const games = listGames().map((g) => g.id);
 
-  // Make sure the cache has SOMETHING before the agent reads — covers the
-  // first-launch path (default-on) where the toggle was never explicitly
-  // flipped, plus any sync-failed-pull scenario where the cache emptied.
-  // The helper is idempotent and only writes topics missing on disk.
+  // Make sure every game's cache has SOMETHING before the agent reads —
+  // covers the first-launch path (default-on) and any emptied-cache scenario.
+  // Idempotent: only writes topics missing on disk.
   try {
-    await seedCommunityLoreFromShipped();
+    await seedAllCommunityLoreFromShipped();
   } catch (err) {
     console.error('[community-lore] seed failed:', err);
   }
 
-  try {
-    const pushed = await pushUserLore(settings.distinctId);
-    saveSettings({ loreLastPushedAt: new Date().toISOString() });
-    if (pushed > 0) {
-      console.log(`[community-lore] pushed ${pushed} entries`);
-    }
-  } catch (err) {
-    console.error('[community-lore] push failed:', err);
-  }
-
-  let pullOk = false;
-  try {
-    const rows = await pullCommunityLore();
-    await writeCommunityLore(rows);
-    pullOk = true;
-    console.log(`[community-lore] pulled ${rows.length} entries`);
-  } catch (err) {
-    console.error('[community-lore] pull failed:', err);
-  }
-
-  // Prune local lessons the reviewer has finished with — but only after a
-  // successful pull this run, so a verified entry's curated copy is in the
-  // cache before we delete the local original (a stale/failed pull could
-  // otherwise leave a gap).
-  if (pullOk) {
+  let pushedTotal = 0;
+  let pushOk = false;
+  for (const game of games) {
     try {
-      const reviewed = await fetchReviewedHooks(settings.distinctId);
-      const removed = reviewed.length ? await deleteUserEntries(reviewed) : 0;
+      pushedTotal += await pushUserLore(settings.distinctId, game);
+      pushOk = true;
+    } catch (err) {
+      console.error(`[community-lore:${game}] push failed:`, err);
+    }
+  }
+  // Stamp the timestamp only when a push actually reached the server this run —
+  // matches the original success-gated semantics, so a run where every game's
+  // push failed doesn't falsely record a successful push.
+  if (pushOk) {
+    saveSettings({ loreLastPushedAt: new Date().toISOString() });
+  }
+  if (pushedTotal > 0) {
+    console.log(`[community-lore] pushed ${pushedTotal} entries`);
+  }
+
+  // Pull per game; prune that game's reviewed local entries only after a
+  // successful pull (so the curated copy is cached before the local original
+  // is deleted). The reviewed-hooks RPC is device-scoped and returns every
+  // game, so it's fetched at most once and partitioned by game_id.
+  let reviewed: Array<{
+    game: GameId;
+    topic: LoreTopic;
+    hook: string;
+    reviewedAt?: string;
+  }> | null = null;
+
+  for (const game of games) {
+    let pullOk = false;
+    try {
+      const rows = await pullCommunityLore(game);
+      await writeCommunityLore(rows, game);
+      pullOk = true;
+      console.log(`[community-lore:${game}] pulled ${rows.length} entries`);
+    } catch (err) {
+      console.error(`[community-lore:${game}] pull failed:`, err);
+    }
+
+    if (!pullOk) continue;
+    try {
+      if (reviewed === null) reviewed = await fetchReviewedHooks(settings.distinctId);
+      const forGame = reviewed.filter((r) => r.game === game);
+      const removed = forGame.length
+        ? await deleteUserEntries(forGame, game)
+        : 0;
       if (removed > 0) {
-        console.log(`[community-lore] pruned ${removed} reviewed user entries`);
+        console.log(
+          `[community-lore:${game}] pruned ${removed} reviewed user entries`,
+        );
       }
     } catch (err) {
-      console.error('[community-lore] prune failed:', err);
+      console.error(`[community-lore:${game}] prune failed:`, err);
     }
   }
 }

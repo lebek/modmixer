@@ -1,15 +1,21 @@
-// One-off script: read shipped lore/*.md, split into entries, and emit a
-// SQL INSERT for the community_lore Supabase table. Pipe the output into
+// One-off script: read a game's shipped lore *.md, split into entries, and emit
+// a SQL INSERT for the community_lore Supabase table. Pipe the output into
 // `psql` or paste into the SQL editor / Supabase MCP execute_sql.
 //
-// Usage: node scripts/seed-community-lore.mjs > seed.sql
+// Usage: node scripts/seed-community-lore.mjs [game] > seed.sql
+//   game defaults to 'rimworld' (lore/*.md); other games live in lore/<game>/.
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const LORE_DIR = path.resolve(__dirname, '..', 'lore');
+const GAME = process.argv[2] || 'rimworld';
+// RimWorld is the legacy top-level lore dir; other games are namespaced.
+const LORE_DIR =
+  GAME === 'rimworld'
+    ? path.resolve(__dirname, '..', 'lore')
+    : path.resolve(__dirname, '..', 'lore', GAME);
 
 function splitEntries(md) {
   const lines = md.split('\n');
@@ -55,11 +61,11 @@ for (const file of fs.readdirSync(LORE_DIR).sort()) {
 const values = rows
   .map(
     (r) =>
-      `  (${sqlLiteral(r.topic)}, ${sqlLiteral(r.hook)}, ${sqlLiteral(r.markdown)})`,
+      `  (${sqlLiteral(GAME)}, ${sqlLiteral(r.topic)}, ${sqlLiteral(r.hook)}, ${sqlLiteral(r.markdown)})`,
   )
   .join(',\n');
 
-process.stdout.write(`-- ${rows.length} entries from shipped lore/\n`);
+process.stdout.write(`-- ${rows.length} ${GAME} entries from ${path.relative(path.resolve(__dirname, '..'), LORE_DIR)}/\n`);
 process.stdout.write(
-  `insert into public.community_lore (topic, hook, markdown) values\n${values}\non conflict (topic, hook) do update set markdown = excluded.markdown, updated_at = now();\n`,
+  `insert into public.community_lore (game_id, topic, hook, markdown) values\n${values}\non conflict (game_id, topic, hook) do update set markdown = excluded.markdown, updated_at = now();\n`,
 );
