@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import { detectRimWorldPaths, detectGameVersionMajorMinorSync } from './paths.js';
 import { getWorkspacePaths, parseAbout } from './workspace.js';
 import { loadSettings } from './settings.js';
-import { buildIndexSync, LORE_TOPICS } from './lore.js';
+import { buildIndexSync, LORE_TOPICS, loreTopics } from './lore.js';
 import { buildCookbookCatalogueSync } from './cookbook.js';
 import { readSchematicSync } from './schematic.js';
 import type { ConversationScope } from './conversations.js';
@@ -70,13 +70,14 @@ Draft before deep-diving. Once scaffold_mod + update_schematic have run and the 
 
 Be concise. Announce the tool you're about to use in one short sentence, then run it. After a tool runs, summarize what changed in one sentence. Before any non-trivial build (a new mod, a new feature, anything where the user's intent could be read more than one way), restate the approach in 1–2 sentences and ask any clarifying question that would change the design — wait for the user before scaffolding or making large edits. Skip this step only when the request is small and unambiguous (a typo, a one-line tweak, a clearly-specified QoL change). One short check beats a wrong scaffold.`;
 
-function loreBlock(): string {
-  const rows = buildIndexSync();
+function loreBlock(game: GameId = 'rimworld'): string {
+  const topicCount = loreTopics(game).length;
+  const rows = buildIndexSync(game);
   const populated = rows.filter(
     (r) => r.counts.repo + r.counts.user > 0,
   );
   if (populated.length === 0) {
-    return `Modding lore: no entries yet across ${LORE_TOPICS.length} topics. See the read_lore / save_lore tool descriptions for the topic catalogue. Save lessons via save_lore as you discover them.`;
+    return `Modding lore: no entries yet across ${topicCount} topics. See the read_lore / save_lore tool descriptions for the topic catalogue. Save lessons via save_lore as you discover them.`;
   }
   const lines = populated.map((r) => {
     const parts: string[] = [];
@@ -84,7 +85,7 @@ function loreBlock(): string {
     if (r.counts.user) parts.push(`user:${r.counts.user}`);
     return `- ${r.topic} (${parts.join(', ')})`;
   });
-  return `Modding lore index — call read_lore <topic> when you start work in one of these areas. Counts show entries per tier; user > repo on conflicts. ${LORE_TOPICS.length - populated.length} topics have no entries yet (full catalogue is in read_lore / save_lore tool descriptions).
+  return `Modding lore index — call read_lore <topic> when you start work in one of these areas. Counts show entries per tier; user > repo on conflicts. ${topicCount - populated.length} topics have no entries yet (full catalogue is in read_lore / save_lore tool descriptions).
 ${lines.join('\n')}`;
 }
 
@@ -442,5 +443,10 @@ function buildMinecraftSystemPrompt(scope: ConversationScope): string {
   const head = `You are an expert Minecraft (NeoForge) modding assistant, operating inside Modmixer, an application that helps people build and diagnose Minecraft Java mods.
 
 ${minecraftPathsBlock(ws.workspaceDir, defaultAuthor)}`;
-  return [head, minecraftScopeBlock(scope), MINECRAFT_RULES].join('\n\n');
+  return [
+    head,
+    minecraftScopeBlock(scope),
+    loreBlock('minecraft'),
+    MINECRAFT_RULES,
+  ].join('\n\n');
 }

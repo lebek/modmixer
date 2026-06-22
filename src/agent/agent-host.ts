@@ -60,8 +60,8 @@ import { createSearchDefsTool } from './tools/search-defs.js';
 import { createReadCsharpSymbolTool } from './tools/read-csharp-symbol.js';
 import { createSearchSourceTool } from './tools/search-source.js';
 import { warmSearchCache } from './index/warm-cache.js';
-import { readLoreTool } from './tools/read-lore.js';
-import { saveLoreTool } from './tools/save-lore.js';
+import { createReadLoreTool } from './tools/read-lore.js';
+import { createSaveLoreTool } from './tools/save-lore.js';
 import { createGuardedBashTool } from './tools/bash.js';
 import {
   createGuardedEditTool,
@@ -177,8 +177,8 @@ export function buildCustomTools(
           createSearchDefsTool(game),
           createReadCsharpSymbolTool(game),
           createSearchSourceTool(game),
-          readLoreTool,
-          saveLoreTool,
+          createReadLoreTool(game),
+          createSaveLoreTool(game),
         ]
       : [
           listInstalledModsTool,
@@ -187,8 +187,8 @@ export function buildCustomTools(
           createSearchDefsTool(game),
           createReadCsharpSymbolTool(game),
           createSearchSourceTool(game),
-          readLoreTool,
-          saveLoreTool,
+          createReadLoreTool(game),
+          createSaveLoreTool(game),
         ];
 
   if (opts?.live) {

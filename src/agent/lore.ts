@@ -3,6 +3,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import { loadSettings } from './settings.js';
+import type { GameId } from './games/types.js';
 
 /**
  * Modmixer Lore is a knowledge base for transferable RimWorld-modding
@@ -79,7 +80,9 @@ export const LORE_TOPICS = [
   // Catch-all
   'misc',
 ] as const;
-export type LoreTopic = (typeof LORE_TOPICS)[number];
+// Loosened to string: topics are now per-game (RimWorld vs Minecraft have
+// different taxonomies) and validated at runtime via isLoreTopicForGame.
+export type LoreTopic = string;
 
 export function isLoreTopic(t: string): t is LoreTopic {
   return (LORE_TOPICS as readonly string[]).includes(t);
@@ -128,9 +131,84 @@ export const LORE_TOPIC_HINTS: Record<LoreTopic, string> = {
   misc: "Anything that doesn't fit elsewhere — use sparingly. If lessons cluster here, propose a new topic.",
 };
 
+/**
+ * Minecraft (NeoForge) lore topics — a separate taxonomy from RimWorld's. Same
+ * mechanics (one markdown file per topic, `## hook` entries), but the slots
+ * reflect NeoForge concepts so the agent never sees RimWorld topics for a
+ * Minecraft mod.
+ */
+export const MINECRAFT_LORE_TOPICS = [
+  // Core
+  'registries',
+  'events',
+  'datagen',
+  'capabilities',
+  'networking',
+  // Content
+  'blocks',
+  'items',
+  'entities',
+  'recipes',
+  'loot-tables',
+  'tags',
+  'worldgen',
+  // Presentation
+  'rendering',
+  'models',
+  'lang',
+  // Advanced
+  'mixins',
+  'commands',
+  // Author workflow
+  'build',
+  'test-loop',
+  'assets',
+  'distribution',
+  'misc',
+] as const;
+
+export const MINECRAFT_LORE_TOPIC_HINTS: Record<string, string> = {
+  registries: 'DeferredRegister, Registries keys, RegisterEvent, registration timing on the mod bus.',
+  events: 'Mod bus (FMLCommonSetupEvent, register events) vs game bus (NeoForge.EVENT_BUS), @SubscribeEvent, event priorities.',
+  datagen: 'Data generators, GatherDataEvent, providers for recipes/loot/tags/models, runData task.',
+  capabilities: 'Capabilities/attachments (IItemHandler, IEnergyStorage), RegisterCapabilitiesEvent, data attachments.',
+  networking: 'Custom payloads, PayloadRegistrar, client/server packet handling, sync.',
+  blocks: 'Block + BlockBehaviour.Properties, BlockState, block entities, BlockItem pairing.',
+  items: 'Item + Item.Properties, Tiers/SimpleTier, components (DataComponents), creative tabs.',
+  entities: 'EntityType, attributes, renderers, goals/AI, spawn eggs, datafix.',
+  recipes: 'JSON recipe shapes (crafting_shaped/shapeless/smelting), RecipeType, custom serializers.',
+  'loot-tables': 'Loot table JSON, pools, entries, conditions/functions, block drops.',
+  tags: 'Tag JSON (item/block/biome…), TagKey, referencing tags in code/recipes.',
+  worldgen: 'Features, placement modifiers, biome modifiers, structures via JSON + datapack.',
+  rendering: 'Client renderers, RenderType, model layers, GUI screens, ScreenEvent.',
+  models: 'Item/block model JSON, blockstate JSON, parents (item/handheld, block/cube_all), textures.',
+  lang: 'Translation keys (item./block./itemGroup.), en_us.json, Component.translatable.',
+  mixins: 'Mixin setup, refmap, injection points; prefer events/APIs first.',
+  commands: 'Brigadier commands, RegisterCommandsEvent, argument types.',
+  build: 'gradle.properties, build.gradle (ModDevGradle), gradlew tasks, dependencies, Parchment.',
+  'test-loop': 'runClient, the diagnostics bridge, reading aggregated errors, datagen runData.',
+  assets: 'src/main/resources layout (assets/<id>, data/<id>), textures (png), placeholder strategy.',
+  distribution: 'neoforge.mods.toml, mod id/version, Modrinth publishing, loaders/game_versions.',
+  misc: "Anything that doesn't fit elsewhere — use sparingly.",
+};
+
+/** The topic catalogue for a game. */
+export function loreTopics(game: GameId): readonly string[] {
+  return game === 'minecraft' ? MINECRAFT_LORE_TOPICS : LORE_TOPICS;
+}
+
+function loreTopicHints(game: GameId): Record<string, string> {
+  return game === 'minecraft' ? MINECRAFT_LORE_TOPIC_HINTS : LORE_TOPIC_HINTS;
+}
+
+export function isLoreTopicForGame(t: string, game: GameId): boolean {
+  return loreTopics(game).includes(t);
+}
+
 /** Multi-line topic catalogue suitable for embedding in tool descriptions. */
-export function topicCatalogueText(): string {
-  const lines = LORE_TOPICS.map((t) => `  ${t}: ${LORE_TOPIC_HINTS[t]}`);
+export function topicCatalogueText(game: GameId = 'rimworld'): string {
+  const hints = loreTopicHints(game);
+  const lines = loreTopics(game).map((t) => `  ${t}: ${hints[t]}`);
   return lines.join('\n');
 }
 
@@ -184,13 +262,15 @@ export interface LoreTopicFile {
  * Only call this from the main process — `app.isPackaged` and
  * `app.getAppPath()` aren't available elsewhere.
  */
-export function shippedLoreDir(): string {
-  if (app.isPackaged) {
-    return path.join(process.resourcesPath, 'lore');
-  }
-  // app.getAppPath() during dev points at the project root that Forge
-  // serves from. The repo lore lives alongside src/ at the repo root.
-  return path.join(app.getAppPath(), 'lore');
+// Lore is per-game. RimWorld keeps the legacy flat paths (lore/, userData/lore/)
+// so existing lore isn't lost; every other game nests under a /<game>/ subdir
+// (lore/minecraft/, userData/lore/minecraft/). This is why a Minecraft
+// conversation never sees RimWorld lessons — they live in different dirs.
+export function shippedLoreDir(game: GameId = 'rimworld'): string {
+  const base = app.isPackaged
+    ? path.join(process.resourcesPath, 'lore')
+    : path.join(app.getAppPath(), 'lore');
+  return game === 'rimworld' ? base : path.join(base, game);
 }
 
 /**
@@ -198,12 +278,14 @@ export function shippedLoreDir(): string {
  * the community-lore toggle is on (push user lore, pull curated entries).
  * Empty until the first activation; deleted when the toggle goes back off.
  */
-export function communityLoreDir(): string {
-  return path.join(app.getPath('userData'), 'community-lore');
+export function communityLoreDir(game: GameId = 'rimworld'): string {
+  const base = path.join(app.getPath('userData'), 'community-lore');
+  return game === 'rimworld' ? base : path.join(base, game);
 }
 
-export function userLoreDir(): string {
-  return path.join(app.getPath('userData'), 'lore');
+export function userLoreDir(game: GameId = 'rimworld'): string {
+  const base = path.join(app.getPath('userData'), 'lore');
+  return game === 'rimworld' ? base : path.join(base, game);
 }
 
 /**
@@ -212,24 +294,29 @@ export function userLoreDir(): string {
  * community-lore cache — it's a strict swap, not a merge, because the
  * server-curated lore is expected to subsume the shipped bootstrap.
  */
-export function baseLoreDir(): string {
-  return loadSettings().useCommunityLore ? communityLoreDir() : shippedLoreDir();
+export function baseLoreDir(game: GameId = 'rimworld'): string {
+  // Community-lore sync is RimWorld-only for now, so non-RimWorld games always
+  // read their shipped bundle — otherwise the (empty) community cache would
+  // shadow the bundled starter lore when useCommunityLore is on (the default).
+  if (game !== 'rimworld') return shippedLoreDir(game);
+  return loadSettings().useCommunityLore
+    ? communityLoreDir(game)
+    : shippedLoreDir(game);
 }
 
-function tierDir(tier: LoreTier): string {
-  switch (tier) {
-    case 'repo':
-      return baseLoreDir();
-    case 'user':
-      return userLoreDir();
-  }
+function tierDir(tier: LoreTier, game: GameId): string {
+  return tier === 'repo' ? baseLoreDir(game) : userLoreDir(game);
 }
 
-export function topicFile(tier: LoreTier, topic: LoreTopic): LoreTopicFile {
+export function topicFile(
+  tier: LoreTier,
+  topic: LoreTopic,
+  game: GameId = 'rimworld',
+): LoreTopicFile {
   return {
     tier,
     topic,
-    path: path.join(tierDir(tier), `${topic}.md`),
+    path: path.join(tierDir(tier, game), `${topic}.md`),
   };
 }
 
@@ -276,8 +363,9 @@ function splitEntries(md: string, tier: LoreTier, topic: LoreTopic): LoreEntry[]
 async function readTopicEntries(
   tier: LoreTier,
   topic: LoreTopic,
+  game: GameId = 'rimworld',
 ): Promise<LoreEntry[]> {
-  const { path: file } = topicFile(tier, topic);
+  const { path: file } = topicFile(tier, topic, game);
   if (!fs.existsSync(file)) return [];
   try {
     const md = await fsp.readFile(file, 'utf8');
@@ -291,11 +379,14 @@ async function readTopicEntries(
  * Read a single topic across both tiers. Tier order is repo → user,
  * mirroring precedence (later tier wins).
  */
-export async function readTopic(topic: LoreTopic): Promise<LoreEntry[]> {
+export async function readTopic(
+  topic: LoreTopic,
+  game: GameId = 'rimworld',
+): Promise<LoreEntry[]> {
   const tiers: LoreTier[] = ['repo', 'user'];
   const out: LoreEntry[] = [];
   for (const tier of tiers) {
-    out.push(...(await readTopicEntries(tier, topic)));
+    out.push(...(await readTopicEntries(tier, topic, game)));
   }
   return out;
 }
@@ -311,13 +402,13 @@ export interface LoreIndexRow {
  * `buildSystemPrompt`) that need to render the index inside non-async
  * code paths. Reads the same files as the async version.
  */
-export function buildIndexSync(): LoreIndexRow[] {
+export function buildIndexSync(game: GameId = 'rimworld'): LoreIndexRow[] {
   const rows: LoreIndexRow[] = [];
   const tiers: LoreTier[] = ['repo', 'user'];
-  for (const topic of LORE_TOPICS) {
+  for (const topic of loreTopics(game)) {
     const counts: Record<LoreTier, number> = { repo: 0, user: 0 };
     for (const tier of tiers) {
-      const { path: file } = topicFile(tier, topic);
+      const { path: file } = topicFile(tier, topic, game);
       if (!fs.existsSync(file)) continue;
       try {
         const md = fs.readFileSync(file, 'utf8');
@@ -335,12 +426,12 @@ export function buildIndexSync(): LoreIndexRow[] {
  * Cheap index of how many entries each tier has per topic. Used to
  * render the lore block in the system prompt without dumping content.
  */
-export async function buildIndex(): Promise<LoreIndexRow[]> {
+export async function buildIndex(game: GameId = 'rimworld'): Promise<LoreIndexRow[]> {
   const rows: LoreIndexRow[] = [];
-  for (const topic of LORE_TOPICS) {
+  for (const topic of loreTopics(game)) {
     const counts: Record<LoreTier, number> = { repo: 0, user: 0 };
-    counts.repo = (await readTopicEntries('repo', topic)).length;
-    counts.user = (await readTopicEntries('user', topic)).length;
+    counts.repo = (await readTopicEntries('repo', topic, game)).length;
+    counts.user = (await readTopicEntries('user', topic, game)).length;
     rows.push({ topic, counts });
   }
   return rows;
@@ -360,7 +451,10 @@ export interface SaveLoreInput {
  * exists, that entry is replaced; otherwise the new entry is appended
  * to the topic file (creating the file if needed).
  */
-export async function saveEntry(input: SaveLoreInput): Promise<{
+export async function saveEntry(
+  input: SaveLoreInput,
+  game: GameId = 'rimworld',
+): Promise<{
   file: string;
   action: 'created' | 'updated' | 'appended';
 }> {
@@ -376,7 +470,7 @@ export async function saveEntry(input: SaveLoreInput): Promise<{
     : `<sub>updated ${stamp}</sub>`;
   const entryBlock = `## ${cleanedHook}\n\n${trimmedBody}\n\n${footer}\n`;
 
-  const { path: file } = topicFile('user', topic);
+  const { path: file } = topicFile('user', topic, game);
   await fsp.mkdir(path.dirname(file), { recursive: true });
 
   let existing = '';
