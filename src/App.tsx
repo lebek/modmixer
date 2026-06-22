@@ -55,7 +55,6 @@ export function App() {
   const [recoveryShown, setRecoveryShown] = useState(false);
   const [multiChat, setMultiChat] = useState(false);
   const [skipPermissions, setSkipPermissions] = useState(false);
-  const [minecraftEnabled, setMinecraftEnabled] = useState(false);
   // Bumped after a chat is created/archived/restored so the sidebar's chat
   // list re-fetches. The list also self-refreshes off agent events.
   const [chatListRev, setChatListRev] = useState(0);
@@ -94,7 +93,6 @@ export function App() {
     void window.modmixer.getSettings().then((s) => {
       setMultiChat(s.multiChat);
       setSkipPermissions(s.dangerouslySkipPermissions);
-      setMinecraftEnabled(s.minecraftEnabled);
     });
   }, []);
   useEffect(() => {
@@ -767,7 +765,6 @@ export function App() {
           onNewMod={newMod}
           onImportMod={importMod}
           onLaunchLiveSession={launchLiveSession}
-          minecraftEnabled={minecraftEnabled}
         />
       )}
       {settingsSection && (

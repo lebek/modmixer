@@ -73,14 +73,12 @@ export function listGames(): GameDefinition[] {
 }
 
 /**
- * Games a user may currently pick in onboarding/settings/library. Beta games
- * only appear when their flag is on, so RimWorld-only users never see Minecraft
- * until we enable it for them.
+ * Games a user may pick when creating a mod / in onboarding. All games are
+ * always available — there is no per-game enable flag. A game that hasn't been
+ * set up yet (paths discovered, index built) is set up lazily the first time
+ * the user makes a mod for it, or manually from Settings → Games. The `beta`
+ * flag is surfaced as a label, not a gate.
  */
-export function getSelectableGames(flags: {
-  minecraftEnabled: boolean;
-}): GameDefinition[] {
-  return listGames().filter(
-    (g) => !g.beta || (g.id === 'minecraft' && flags.minecraftEnabled),
-  );
+export function getSelectableGames(): GameDefinition[] {
+  return listGames();
 }

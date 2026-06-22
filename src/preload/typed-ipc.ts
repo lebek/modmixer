@@ -49,6 +49,7 @@ import type {
   ModrinthPublishResult,
   ModrinthPublishProgressEvent,
 } from '../agent/minecraft/modrinth';
+import type { MinecraftIndexStatus } from '../agent/index/rebuild-minecraft';
 import type { SaveRecord, SnapshotsChangedEvent } from '../agent/snapshots';
 import type { ConfirmationRequest } from '../agent/security/confirmation-gate';
 import type { IndexSnapshot } from '../agent/index/main-bridge';
@@ -170,6 +171,8 @@ export interface Channels {
   'modmixer:settings:set-thinking-level': (level: ThinkingLevel) => Settings;
   'modmixer:settings:set-multi-chat': (enabled: boolean) => Settings;
   'modmixer:settings:set-minecraft-enabled': (enabled: boolean) => Settings;
+  'modmixer:minecraft:index-status': () => MinecraftIndexStatus;
+  'modmixer:minecraft:index-rebuild': () => MinecraftIndexStatus;
   'modmixer:settings:set-community-lore': (enabled: boolean) => Settings;
   'modmixer:settings:set-auto-launch': (enabled: boolean) => Settings;
   'modmixer:settings:set-dangerously-skip-permissions': (

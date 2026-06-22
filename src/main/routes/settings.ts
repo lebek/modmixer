@@ -12,6 +12,11 @@ import {
   seedCommunityLoreFromShipped,
 } from '../../agent/lore.js';
 import { syncCommunityLore } from '../../agent/community-lore-sync.js';
+import {
+  getMinecraftIndexStatus,
+  ensureMinecraftIndexInBackground,
+  type MinecraftIndexStatus,
+} from '../../agent/index/rebuild-minecraft.js';
 import type { RouteContext } from './context.js';
 
 /**
@@ -69,6 +74,18 @@ export function registerSettingsRoutes(ctx: RouteContext): void {
     'modmixer:settings:set-minecraft-enabled',
     (_evt, enabled: boolean) => saveSettings({ minecraftEnabled: enabled }),
   );
+
+  // Minecraft "setup" = building its source index (which also auto-provisions
+  // Java 21 + vendors the toolchain). Status drives the Settings → Games page;
+  // rebuild kicks the build off in the background.
+  ipc.handle(
+    'modmixer:minecraft:index-status',
+    (): MinecraftIndexStatus => getMinecraftIndexStatus(),
+  );
+  ipc.handle('modmixer:minecraft:index-rebuild', (): MinecraftIndexStatus => {
+    ensureMinecraftIndexInBackground();
+    return getMinecraftIndexStatus();
+  });
 
   ipc.handle(
     'modmixer:settings:set-auto-launch',

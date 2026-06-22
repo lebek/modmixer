@@ -83,6 +83,8 @@ const api = {
     invoke('modmixer:settings:set-multi-chat', enabled),
   setMinecraftEnabled: (enabled: boolean) =>
     invoke('modmixer:settings:set-minecraft-enabled', enabled),
+  getMinecraftIndexStatus: () => invoke('modmixer:minecraft:index-status'),
+  rebuildMinecraftIndex: () => invoke('modmixer:minecraft:index-rebuild'),
   setAutoLaunch: (enabled: boolean) =>
     invoke('modmixer:settings:set-auto-launch', enabled),
   setDangerouslySkipPermissions: (enabled: boolean) =>

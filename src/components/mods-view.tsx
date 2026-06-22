@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { WorkspaceMod } from '../agent/workspace';
 import type { GameId } from '../agent/games/types';
+import { getSelectableGames } from '../agent/games/registry';
 import { ModTile } from './mod-tile';
 import { byUpdatedDesc } from '@/lib/sort-mods';
 
@@ -10,14 +11,12 @@ export function ModsView({
   onNewMod,
   onImportMod,
   onLaunchLiveSession,
-  minecraftEnabled = false,
 }: {
   mods: WorkspaceMod[];
   onOpen: (folder: string) => void;
   onNewMod: (game?: GameId) => void;
   onImportMod: () => void;
   onLaunchLiveSession: () => Promise<void>;
-  minecraftEnabled?: boolean;
 }) {
   const sorted = [...mods].sort(byUpdatedDesc);
   // Launching quits/starts RimWorld in the main process and takes several
@@ -68,16 +67,12 @@ export function ModsView({
             >
               import mod
             </button>
-            <NewModButton onNewMod={onNewMod} minecraftEnabled={minecraftEnabled} />
+            <NewModButton onNewMod={onNewMod} />
           </div>
         </div>
 
         {mods.length === 0 ? (
-          <EmptyState
-            onNewMod={onNewMod}
-            onImportMod={onImportMod}
-            minecraftEnabled={minecraftEnabled}
-          />
+          <EmptyState onNewMod={onNewMod} onImportMod={onImportMod} />
         ) : (
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             {sorted.map((m) => (
@@ -85,7 +80,7 @@ export function ModsView({
                 key={m.folder}
                 mod={m}
                 onClick={() => onOpen(m.folder)}
-                showGameBadge={minecraftEnabled}
+                showGameBadge
               />
             ))}
           </div>
@@ -106,27 +101,15 @@ export function ModsView({
 }
 
 /**
- * "+ new mod" — a plain button for a single game, or a small game-picker menu
- * when Minecraft is enabled so the user chooses which game the mod targets
- * (each mod is for exactly one game).
+ * "+ new mod" — a menu over every available game (each mod targets one game).
+ * All games are always offered; a game that hasn't been set up yet kicks off
+ * its setup the first time you create a mod for it. Beta games are labelled.
  */
-function NewModButton({
-  onNewMod,
-  minecraftEnabled,
-}: {
-  onNewMod: (game?: GameId) => void;
-  minecraftEnabled: boolean;
-}) {
+function NewModButton({ onNewMod }: { onNewMod: (game?: GameId) => void }) {
   const [open, setOpen] = useState(false);
+  const games = getSelectableGames();
   const btnClass =
     'rounded-md bg-accent px-4 py-2 font-mono text-[11px] uppercase tracking-[0.18em] text-accent-foreground transition-colors hover:bg-accent-soft';
-  if (!minecraftEnabled) {
-    return (
-      <button data-demo="new-mod" onClick={() => onNewMod()} className={btnClass}>
-        + new mod
-      </button>
-    );
-  }
   const pick = (game: GameId) => {
     setOpen(false);
     onNewMod(game);
@@ -143,19 +126,21 @@ function NewModButton({
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 z-20 mt-1 w-44 overflow-hidden rounded-md border border-line bg-paper shadow-lg">
-            <button
-              onClick={() => pick('rimworld')}
-              className="block w-full px-3 py-2 text-left text-sm text-ink transition-colors hover:bg-surface"
-            >
-              RimWorld mod
-            </button>
-            <button
-              onClick={() => pick('minecraft')}
-              className="block w-full px-3 py-2 text-left text-sm text-ink transition-colors hover:bg-surface"
-            >
-              Minecraft mod
-            </button>
+          <div className="absolute right-0 z-20 mt-1 w-52 overflow-hidden rounded-md border border-line bg-paper shadow-lg">
+            {games.map((g) => (
+              <button
+                key={g.id}
+                onClick={() => pick(g.id)}
+                className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm text-ink transition-colors hover:bg-surface"
+              >
+                <span>{g.displayName} mod</span>
+                {g.beta && (
+                  <span className="rounded-sm bg-warning/15 px-1 py-0.5 text-[9px] uppercase tracking-wide text-warning">
+                    beta
+                  </span>
+                )}
+              </button>
+            ))}
           </div>
         </>
       )}
@@ -166,11 +151,9 @@ function NewModButton({
 function EmptyState({
   onNewMod,
   onImportMod,
-  minecraftEnabled = false,
 }: {
   onNewMod: (game?: GameId) => void;
   onImportMod: () => void;
-  minecraftEnabled?: boolean;
 }) {
   return (
     <div className="rounded-lg border border-dashed border-line bg-surface/30 p-10 text-center">
@@ -182,7 +165,7 @@ function EmptyState({
         import an existing mod folder.
       </p>
       <div className="mt-4 flex items-center justify-center gap-2">
-        <NewModButton onNewMod={onNewMod} minecraftEnabled={minecraftEnabled} />
+        <NewModButton onNewMod={onNewMod} />
         <button
           onClick={onImportMod}
           className="rounded-md border border-line bg-paper px-4 py-2 font-mono text-[11px] uppercase tracking-[0.18em] text-muted transition-colors hover:border-ink/40 hover:text-ink"

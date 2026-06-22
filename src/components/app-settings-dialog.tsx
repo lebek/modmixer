@@ -41,7 +41,6 @@ export function AppSettingsDialog({
   const [defaultThinking, setDefaultThinking] =
     useState<ThinkingLevel>('medium');
   const [multiChat, setMultiChat] = useState(false);
-  const [minecraftEnabled, setMinecraftEnabled] = useState(false);
   const [communityLore, setCommunityLore] = useState(false);
   const [autoLaunch, setAutoLaunch] = useState(false);
   const [skipPermissions, setSkipPermissions] = useState(false);
@@ -56,7 +55,6 @@ export function AppSettingsDialog({
       setDefaultModel(s.model);
       setDefaultThinking(s.thinkingLevel);
       setMultiChat(s.multiChat);
-      setMinecraftEnabled(s.minecraftEnabled);
       setCommunityLore(s.useCommunityLore);
       setAutoLaunch(s.autoLaunch);
       setSkipPermissions(s.dangerouslySkipPermissions);
@@ -95,11 +93,6 @@ export function AppSettingsDialog({
   const changeMultiChat = async (next: boolean) => {
     setMultiChat(next);
     await window.modmixer.setMultiChat(next);
-  };
-
-  const changeMinecraftEnabled = async (next: boolean) => {
-    setMinecraftEnabled(next);
-    await window.modmixer.setMinecraftEnabled(next);
   };
 
   const changeCommunityLore = async (next: boolean) => {
@@ -191,15 +184,7 @@ export function AppSettingsDialog({
               <AppearanceSection theme={theme} onChange={changeTheme} />
             )}
             {section === 'index' && <IndexSection />}
-            {section === 'games' &&
-              (!loaded ? (
-                <p className="text-sm text-muted">Loading…</p>
-              ) : (
-                <GamesSection
-                  minecraftEnabled={minecraftEnabled}
-                  onMinecraftEnabledChange={changeMinecraftEnabled}
-                />
-              ))}
+            {section === 'games' && <GamesSection />}
             {section === 'advanced' &&
               (!loaded ? (
                 <p className="text-sm text-muted">Loading…</p>
@@ -521,47 +506,92 @@ function AppearanceSection({
   );
 }
 
-function GamesSection({
-  minecraftEnabled,
-  onMinecraftEnabledChange,
-}: {
-  minecraftEnabled: boolean;
-  onMinecraftEnabledChange: (next: boolean) => void | Promise<void>;
-}) {
+function GamesSection() {
+  const [mcStatus, setMcStatus] = useState<
+    'absent' | 'fresh' | 'stale' | 'building' | null
+  >(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const tick = () =>
+      void window.modmixer.getMinecraftIndexStatus().then((s) => {
+        if (!cancelled) setMcStatus(s);
+      });
+    tick();
+    // Poll while a build is running so the status updates without reopening.
+    const id = window.setInterval(tick, 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, []);
+
+  const mcLabel =
+    mcStatus === 'fresh'
+      ? 'Ready'
+      : mcStatus === 'building'
+        ? 'Setting up…'
+        : mcStatus === 'stale'
+          ? 'Update available'
+          : 'Not set up';
+
+  const setupMc = () => {
+    void window.modmixer.rebuildMinecraftIndex().then(setMcStatus);
+  };
+
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted">
-        Modmixer supports more than one game. RimWorld is always on; enable
-        another game here, then pick which game a new mod targets from the
-        “+ new mod” menu on the home screen.
+        Every game is available. A game is “set up” once Modmixer has discovered
+        its install and built its code index. Setup starts automatically the
+        first time you create a mod for a game, or you can trigger it here.
       </p>
-      <div className="border-t border-line pt-4">
-        <label className="flex cursor-pointer items-start gap-2">
-          <input
-            type="checkbox"
-            checked={minecraftEnabled}
-            onChange={(e) => void onMinecraftEnabledChange(e.target.checked)}
-            className="mt-0.5"
-          />
-          <span className="text-sm text-ink">
-            Minecraft (NeoForge 1.21.1){' '}
-            <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-warning">
-              Beta
+
+      <div className="space-y-3">
+        <div className="rounded-md border border-line bg-surface/30 px-4 py-3">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-medium text-ink">RimWorld</span>
+            <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted">
+              Default
             </span>
-            <span className="mt-0.5 block text-xs text-muted">
-              Create and test Minecraft Java mods with NeoForge. Modmixer
-              provisions Java 21 and the Gradle toolchain automatically — you
-              don’t need anything installed. The first build/test does a
-              one-time Minecraft decompile that can take a few minutes.
-            </span>
-          </span>
-        </label>
-        {minecraftEnabled && (
-          <div className="mt-2 rounded-md border border-line bg-surface/40 px-3 py-2 text-xs text-muted">
-            “Minecraft” now appears in the “+ new mod” menu. To publish, add a
-            Modrinth token from a Minecraft mod’s Publish panel.
           </div>
-        )}
+          <p className="mt-1 text-xs text-muted">
+            Install detection + the source index are managed on the “RimWorld
+            index” tab.
+          </p>
+        </div>
+
+        <div className="rounded-md border border-line bg-surface/30 px-4 py-3">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-sm font-medium text-ink">
+              Minecraft (NeoForge 1.21.1){' '}
+              <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-warning">
+                Beta
+              </span>
+            </span>
+            <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted">
+              {mcStatus === null ? '…' : mcLabel}
+            </span>
+          </div>
+          <p className="mt-1 text-xs text-muted">
+            Modmixer auto-provisions Java 21 + the Gradle toolchain. Setup builds
+            the Minecraft/NeoForge source index (a one-time decompile that can
+            take a few minutes).
+          </p>
+          <div className="mt-2 flex justify-end">
+            <button
+              onClick={setupMc}
+              disabled={mcStatus === 'building' || mcStatus === null}
+              className="rounded-md border border-line bg-paper px-3 py-1 text-[10px] uppercase tracking-[0.18em] text-muted transition-colors hover:border-ink/40 hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {mcStatus === 'building'
+                ? 'Setting up…'
+                : mcStatus === 'fresh'
+                  ? 'Rebuild index'
+                  : 'Set up Minecraft'}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );
