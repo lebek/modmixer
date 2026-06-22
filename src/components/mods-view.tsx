@@ -85,6 +85,7 @@ export function ModsView({
                 key={m.folder}
                 mod={m}
                 onClick={() => onOpen(m.folder)}
+                showGameBadge={minecraftEnabled}
               />
             ))}
           </div>
