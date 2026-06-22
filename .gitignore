@@ -112,3 +112,6 @@ obj/
 
 # headless verification harness build output
 scripts/harness/.out/
+
+# Fetched NeoForge MDK template (vendored at build time; npm run fetch:neoforge-mdk)
+vendor/neoforge-mdk/

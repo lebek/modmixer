@@ -113,6 +113,8 @@ export async function createMinecraftMod(
   });
   await fsp.writeFile(propsPath, patched, 'utf8');
 
+  await appendBridgeWiring(path.join(modDir, 'build.gradle'));
+
   // The POSIX wrapper must stay executable; a copy can drop the bit.
   if (process.platform !== 'win32') {
     try {
@@ -121,6 +123,48 @@ export async function createMinecraftMod(
       /* best effort */
     }
   }
+}
+
+/**
+ * Append the ModMixer diagnostics-bridge wiring to a scaffolded mod's
+ * build.gradle. It is inert during a normal `gradlew build` and only activates
+ * for the test loop's `runClient -PmodmixerBridgeJar=<jar> -Dmodmixer.port=…`:
+ *  - the bridge jar (a real FML mod) is put on the run's runtime classpath so
+ *    NeoForge discovers and loads it alongside the user's mod; and
+ *  - the `modmixer.*` system properties are forwarded to the game JVM so the
+ *    bridge can connect back to ModMixer's monitor.
+ * Idempotent — skips if the marker is already present.
+ */
+const BRIDGE_WIRING_MARKER = '// --- ModMixer diagnostics bridge';
+
+async function appendBridgeWiring(buildGradlePath: string): Promise<void> {
+  if (!fs.existsSync(buildGradlePath)) return;
+  const existing = await fsp.readFile(buildGradlePath, 'utf8');
+  if (existing.includes(BRIDGE_WIRING_MARKER)) return;
+  const snippet = `
+
+${BRIDGE_WIRING_MARKER} (added by Modmixer) -----------------
+// Loaded only for the agent test loop:
+//   gradlew runClient -PmodmixerBridgeJar=<jar> -Dmodmixer.port=<port>
+if (project.hasProperty('modmixerBridgeJar')) {
+    dependencies {
+        localRuntime files(project.property('modmixerBridgeJar'))
+    }
+}
+neoForge {
+    runs {
+        client {
+            ['port', 'token', 'testTimeoutMs', 'reportFile'].each { k ->
+                def v = System.getProperty("modmixer.\${k}")
+                if (v != null) {
+                    systemProperty("modmixer.\${k}", v)
+                }
+            }
+        }
+    }
+}
+`;
+  await fsp.writeFile(buildGradlePath, existing + snippet, 'utf8');
 }
 
 /** True when the MDK template is vendored (used to gate the MC create flow). */
