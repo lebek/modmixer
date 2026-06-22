@@ -1,4 +1,6 @@
 import { cn } from '@/lib/cn';
+import type { GameId } from '../agent/games/types';
+import { GameIcon } from './game-icon';
 import { useConversationRuntime } from '../conversations-store';
 
 /** Home, Library, or a focused mod tab. */
@@ -9,6 +11,7 @@ export interface ModTabDescriptor {
   folder: string;
   conversationId: string;
   title: string;
+  game: GameId;
 }
 
 export function TabNav({
@@ -49,6 +52,7 @@ export function TabNav({
           <ModTabButton
             key={t.folder}
             title={t.title}
+            game={t.game}
             conversationId={t.conversationId}
             active={view === 'mod' && focusedFolder === t.folder}
             onSelect={() => onSelectTab(t.folder)}
@@ -103,12 +107,14 @@ function TabButton({
  */
 function ModTabButton({
   title,
+  game,
   conversationId,
   active,
   onSelect,
   onClose,
 }: {
   title: string;
+  game: GameId;
   conversationId: string;
   active: boolean;
   onSelect: () => void;
@@ -132,8 +138,11 @@ function ModTabButton({
         onClick={onSelect}
         title={title}
         aria-label={busy ? `${title}, agent working` : undefined}
-        className="flex min-w-0 items-center gap-1.5 py-1 pl-2.5 focus:outline-none"
+        className="flex min-w-0 items-center gap-1.5 py-1 pl-2 focus:outline-none"
       >
+        {/* Which game this mod targets — leads the tab so cross-game tabs are
+            distinguishable at a glance. */}
+        <GameIcon game={game} className="h-3.5 w-3.5" />
         {/* Status dot — accent + pulse while this mod's agent is working
             (mirrors the Library session dot), a dim idle dot otherwise so
             the slot is never empty white space and the tab never changes

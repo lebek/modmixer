@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { GameId } from '@/agent/games/types';
 import { getSelectableGames } from '@/agent/games/registry';
 import { cn } from '@/lib/cn';
+import { GameIcon } from '../../game-icon';
 import { OnboardingStep } from '../onboarding-shell';
 
 const BLURB: Record<GameId, string> = {
@@ -57,6 +58,7 @@ export function GamePickerStep({
               onChange={() => setGame(g.id)}
               className="mt-1"
             />
+            <GameIcon game={g.id} className="mt-0.5 h-6 w-6" />
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 text-sm font-medium text-ink">
                 {g.displayName}

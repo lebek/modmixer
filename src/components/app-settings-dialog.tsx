@@ -16,6 +16,7 @@ import type { UpdaterState } from '@/agent/updater';
 import { applyTheme } from '@/lib/theme';
 import { ModelPicker } from './model-picker';
 import { ThinkingPicker } from './thinking-picker';
+import { GameIcon } from './game-icon';
 
 export type SettingsSection =
   | 'providers'
@@ -550,7 +551,10 @@ function GamesSection() {
       <div className="space-y-3">
         <div className="rounded-md border border-line bg-surface/30 px-4 py-3">
           <div className="flex items-center justify-between">
-            <span className="text-sm font-medium text-ink">RimWorld</span>
+            <span className="flex items-center gap-2 text-sm font-medium text-ink">
+              <GameIcon game="rimworld" className="h-5 w-5" />
+              RimWorld
+            </span>
             <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted">
               Default
             </span>
@@ -563,7 +567,8 @@ function GamesSection() {
 
         <div className="rounded-md border border-line bg-surface/30 px-4 py-3">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-sm font-medium text-ink">
+            <span className="flex items-center gap-2 text-sm font-medium text-ink">
+              <GameIcon game="minecraft" className="h-5 w-5" />
               Minecraft (NeoForge 1.21.1){' '}
               <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-warning">
                 Beta

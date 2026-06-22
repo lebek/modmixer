@@ -19,6 +19,7 @@
     "fetch:tree-sitter-java": "node scripts/fetch-tree-sitter-java.mjs",
     "fetch:neoforge-mdk": "node scripts/fetch-neoforge-mdk.mjs",
     "build:bridge": "node scripts/build-bridge.mjs",
+    "build:game-icons": "node scripts/build-game-icons.mjs",
     "lint:externals": "node scripts/check-extra-resources.mjs",
     "postinstall": "patch-package && node scripts/patch-electron-name.mjs && node scripts/fetch-tree-sitter-csharp.mjs"
   },

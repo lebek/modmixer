@@ -645,6 +645,7 @@ export function App() {
       folder: t.folder,
       conversationId: t.conversation.id,
       title: mod?.about.name || t.conversation.title || t.folder,
+      game: resolveGameId(mod?.prefs.game),
     };
   });
 
