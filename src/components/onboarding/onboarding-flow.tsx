@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Consent, Settings } from '@/agent/settings';
 import type { EnvSnapshot } from '@/agent/env-detect';
+import type { GameId } from '@/agent/games/types';
 import { ConsentStep } from './steps/consent';
+import { GamePickerStep } from './steps/game-picker';
 import { RimWorldStep } from './steps/rimworld';
 import { ToolsStep } from './steps/tools';
 import { IndexStep } from './steps/index';
@@ -9,9 +11,11 @@ import { AiStep } from './steps/ai';
 import { CommunityLoreStep } from './steps/community-lore';
 import { AuthorStep } from './steps/author';
 
-/** Stable step ids — the array index in `STEPS` is what we render against. */
+/** Stable step ids — the array index in the computed step list is what we
+ *  render against. The list is game-dependent (see buildSteps). */
 type StepId =
   | 'consent'
+  | 'game-picker'
   | 'rimworld'
   | 'tools'
   | 'index'
@@ -19,15 +23,16 @@ type StepId =
   | 'community-lore'
   | 'author';
 
-const STEPS: StepId[] = [
-  'consent',
-  'rimworld',
-  'tools',
-  'index',
-  'ai',
-  'community-lore',
-  'author',
-];
+/**
+ * The onboarding flow after the game picker is game-specific: RimWorld needs
+ * install detection + .NET tools + the source index; Minecraft auto-provisions
+ * its toolchain and indexes lazily, so it skips straight to the shared steps.
+ */
+function buildSteps(game: GameId): StepId[] {
+  const gameSteps: StepId[] =
+    game === 'minecraft' ? [] : ['rimworld', 'tools', 'index'];
+  return ['consent', 'game-picker', ...gameSteps, 'ai', 'community-lore', 'author'];
+}
 
 export function OnboardingFlow({ onComplete }: { onComplete: () => void }) {
   const [stepId, setStepId] = useState<StepId>('consent');
@@ -35,6 +40,9 @@ export function OnboardingFlow({ onComplete }: { onComplete: () => void }) {
   const [consent, setConsent] = useState<Consent | null>(null);
   const [needsConsent, setNeedsConsent] = useState(true);
   const [env, setEnv] = useState<EnvSnapshot | null>(null);
+  // The game being set up — drives which steps appear. Defaults to RimWorld
+  // until the user picks on the game-picker step.
+  const [pickedGame, setPickedGame] = useState<GameId>('rimworld');
 
   // Hydrate settings + consent state once. After consent is checked we may
   // skip the consent step automatically — the user already accepted on a
@@ -48,6 +56,7 @@ export function OnboardingFlow({ onComplete }: { onComplete: () => void }) {
       ]);
       if (cancelled) return;
       setSettings(s);
+      setPickedGame(s.selectedGameId);
       setConsent(c.accepted);
       const accepted = c.accepted !== null && c.accepted.version === c.required;
       setNeedsConsent(!accepted);
@@ -56,7 +65,7 @@ export function OnboardingFlow({ onComplete }: { onComplete: () => void }) {
       void window.modmixer.detectEnv().then((next) => {
         if (!cancelled) setEnv(next);
       });
-      if (accepted) setStepId('rimworld');
+      if (accepted) setStepId('game-picker');
     })();
     return () => {
       cancelled = true;
@@ -71,35 +80,48 @@ export function OnboardingFlow({ onComplete }: { onComplete: () => void }) {
   }, []);
 
   const goNext = useCallback(() => {
-    const idx = STEPS.indexOf(stepId);
-    const next = STEPS[idx + 1];
+    const steps = buildSteps(pickedGame);
+    const idx = steps.indexOf(stepId);
+    const next = steps[idx + 1];
     if (!next) {
       void window.modmixer.completeOnboarding().then(onComplete);
       return;
     }
     setStepId(next);
-  }, [stepId, onComplete]);
+  }, [stepId, onComplete, pickedGame]);
 
   const goBack = useCallback(() => {
-    const idx = STEPS.indexOf(stepId);
-    const prev = STEPS[idx - 1];
+    const steps = buildSteps(pickedGame);
+    const idx = steps.indexOf(stepId);
+    const prev = steps[idx - 1];
     if (!prev) return;
     if (prev === 'consent' && !needsConsent) {
       // Don't bounce the user back to a step they already cleared on a
       // previous run — fall through to the next-prev.
-      const grandPrev = STEPS[idx - 2];
+      const grandPrev = steps[idx - 2];
       if (grandPrev) setStepId(grandPrev);
       return;
     }
     setStepId(prev);
-  }, [stepId, needsConsent]);
+  }, [stepId, needsConsent, pickedGame]);
+
+  // Picking a game recomputes the step list; advance using the NEW list so the
+  // transition is immediate (state updates are async).
+  const onPickGame = useCallback((game: GameId) => {
+    setPickedGame(game);
+    void window.modmixer.setSelectedGame(game);
+    const steps = buildSteps(game);
+    const idx = steps.indexOf('game-picker');
+    setStepId(steps[idx + 1]);
+  }, []);
 
   const finish = useCallback(() => {
     void window.modmixer.completeOnboarding().then(onComplete);
   }, [onComplete]);
 
-  const stepIndex = STEPS.indexOf(stepId) + 1;
-  const total = STEPS.length;
+  const steps = buildSteps(pickedGame);
+  const stepIndex = steps.indexOf(stepId) + 1;
+  const total = steps.length;
 
   if (!settings) {
     return <div className="fixed inset-0 bg-paper" />;
@@ -117,6 +139,16 @@ export function OnboardingFlow({ onComplete }: { onComplete: () => void }) {
             setNeedsConsent(false);
             goNext();
           }}
+        />
+      );
+    case 'game-picker':
+      return (
+        <GamePickerStep
+          stepIndex={stepIndex}
+          total={total}
+          initial={pickedGame}
+          onPick={onPickGame}
+          onBack={needsConsent ? goBack : undefined}
         />
       );
     case 'rimworld':

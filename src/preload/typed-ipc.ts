@@ -173,6 +173,7 @@ export interface Channels {
   'modmixer:settings:set-minecraft-enabled': (enabled: boolean) => Settings;
   'modmixer:minecraft:index-status': () => MinecraftIndexStatus;
   'modmixer:minecraft:index-rebuild': () => MinecraftIndexStatus;
+  'modmixer:settings:set-selected-game': (game: GameId) => Settings;
   'modmixer:settings:set-community-lore': (enabled: boolean) => Settings;
   'modmixer:settings:set-auto-launch': (enabled: boolean) => Settings;
   'modmixer:settings:set-dangerously-skip-permissions': (

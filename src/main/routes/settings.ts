@@ -17,6 +17,8 @@ import {
   ensureMinecraftIndexInBackground,
   type MinecraftIndexStatus,
 } from '../../agent/index/rebuild-minecraft.js';
+import { resolveGameId } from '../../agent/games/registry.js';
+import type { GameId } from '../../agent/games/types.js';
 import type { RouteContext } from './context.js';
 
 /**
@@ -86,6 +88,10 @@ export function registerSettingsRoutes(ctx: RouteContext): void {
     ensureMinecraftIndexInBackground();
     return getMinecraftIndexStatus();
   });
+
+  ipc.handle('modmixer:settings:set-selected-game', (_evt, game: GameId) =>
+    saveSettings({ selectedGameId: resolveGameId(game) }),
+  );
 
   ipc.handle(
     'modmixer:settings:set-auto-launch',

@@ -85,6 +85,8 @@ const api = {
     invoke('modmixer:settings:set-minecraft-enabled', enabled),
   getMinecraftIndexStatus: () => invoke('modmixer:minecraft:index-status'),
   rebuildMinecraftIndex: () => invoke('modmixer:minecraft:index-rebuild'),
+  setSelectedGame: (game: 'rimworld' | 'minecraft') =>
+    invoke('modmixer:settings:set-selected-game', game),
   setAutoLaunch: (enabled: boolean) =>
     invoke('modmixer:settings:set-auto-launch', enabled),
   setDangerouslySkipPermissions: (enabled: boolean) =>
