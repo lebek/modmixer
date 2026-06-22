@@ -7,6 +7,11 @@ import { buildIndexSync, LORE_TOPICS } from './lore.js';
 import { buildCookbookCatalogueSync } from './cookbook.js';
 import { readSchematicSync } from './schematic.js';
 import type { ConversationScope } from './conversations.js';
+import type { GameId } from './games/types.js';
+import {
+  MINECRAFT_VERSION,
+  NEOFORGE_VERSION,
+} from './minecraft/versions.js';
 
 interface PromptContext {
   workspaceDir: string;
@@ -358,8 +363,15 @@ After scaffold_mod runs, the conversation rescopes to the new mod. Immediately c
  */
 export function buildSystemPrompt(
   scope: ConversationScope,
-  opts?: { live?: boolean },
+  opts?: { live?: boolean; game?: GameId },
 ): string {
+  // Minecraft mods take a completely separate prompt. RimWorld (the default)
+  // falls through to the original code path UNCHANGED, so its output stays
+  // byte-for-byte identical and the prompt-cache invariant above holds for
+  // every existing conversation.
+  if (opts?.game === 'minecraft') {
+    return buildMinecraftSystemPrompt(scope);
+  }
   const ctx = gatherContext();
   const head = `You are an expert RimWorld modding assistant, operating inside Modmixer, an application that helps people build and diagnose RimWorld mods.
 
@@ -384,4 +396,49 @@ ${pathsBlock(ctx)}`;
     ...(cookbook ? [cookbook] : []),
     live ? LIVE_SHARED_RULES : SHARED_RULES,
   ].join('\n\n');
+}
+
+// --- Minecraft (NeoForge) prompt ------------------------------------------
+// Kept deliberately short, per the "open interface" philosophy: give the agent
+// the project layout + the build/test/search workflow and let it reason over
+// the decompiled mojmap+Parchment source index rather than hard-coding deep
+// game knowledge into the prompt.
+
+const MINECRAFT_RULES = `Workspace lifecycle:
+- A Minecraft mod IS a Gradle/NeoForge project; the mod folder is the project root. Edit Java under src/main/java and data/asset JSON under src/main/resources. Identity lives in gradle.properties (mod_id, mod_name, mod_version) and src/main/resources/META-INF/neoforge.mods.toml — edit those directly to rename/version the mod.
+- Compile with build_mod (runs ./gradlew build). The FIRST build decompiles Minecraft and can take several minutes — that is expected, not a hang.
+- Test with run_test_cycle: it launches the modded client (./gradlew runClient) with a diagnostics bridge that streams aggregated, deduped errors back to you (read them with monitor_poll / monitor_get_error). Never tell the user to drop the jar into a launcher to test — run_test_cycle handles the dev launch.
+- The shippable artifact is build/libs/<mod_id>-<version>.jar (what gets published to Modrinth).
+
+File-tool conventions:
+- Prefer grep/find/ls over bash for exploration. Use read to examine files instead of cat/sed.
+- Batch multiple edits to one file into a single edit call (each oldText matches the ORIGINAL file). Keep oldText minimal but unique.
+
+Source index: search the decompiled Minecraft + NeoForge sources with search_source (ripgrep) and read symbols with read_csharp_symbol (it resolves Java types/methods too, against the indexed sources). Use these to find the exact registry, event, or vanilla class you need — DeferredRegister / RegisterEvent for registration; the mod bus (FMLCommonSetupEvent, register events) vs the game bus (NeoForge.EVENT_BUS) for events. The sources are mojmap + Parchment, so names and parameters are human-readable.
+
+Draft before deep-diving. Once the project is scaffolded, write the first round of Java + JSON speculatively — half-right code that build_mod catches is cheaper than reading large swathes of engine source. Reserve search_source / read_csharp_symbol for the specific signature the draft needs.
+
+Be concise. Announce the tool you're about to use in one short sentence, then run it. Before any non-trivial build, restate the approach in 1–2 sentences and ask any clarifying question that would change the design — wait for the user before scaffolding or large edits.`;
+
+function minecraftPathsBlock(workspaceDir: string, defaultAuthor: string): string {
+  return `Workspace (cwd): ${workspaceDir}
+Target: Minecraft ${MINECRAFT_VERSION} + NeoForge ${NEOFORGE_VERSION} (Java 21, ModDevGradle).
+Default author handle: ${defaultAuthor}.
+Project layout: gradle.properties + settings.gradle + build.gradle at the project root; mod code in src/main/java/<package>/; resources (META-INF/neoforge.mods.toml, JSON data/assets) in src/main/resources/. Gradle runs via the bundled ./gradlew wrapper — build_mod / run_test_cycle invoke it for you.`;
+}
+
+function minecraftScopeBlock(scope: ConversationScope): string {
+  if (scope.type === 'mod') {
+    return `You are working on the Minecraft mod at ${scope.modFolder} (a NeoForge ${MINECRAFT_VERSION} project). Read gradle.properties + src/main/resources/META-INF/neoforge.mods.toml to learn its id/name, then edit src/main/java and src/main/resources.`;
+  }
+  return `No mod is open yet. When the user describes what they want to build, create the mod (a NeoForge project is scaffolded), then fill in src/main/java and src/main/resources.`;
+}
+
+function buildMinecraftSystemPrompt(scope: ConversationScope): string {
+  const ws = getWorkspacePaths();
+  const defaultAuthor = loadSettings().defaultAuthor;
+  const head = `You are an expert Minecraft (NeoForge) modding assistant, operating inside Modmixer, an application that helps people build and diagnose Minecraft Java mods.
+
+${minecraftPathsBlock(ws.workspaceDir, defaultAuthor)}`;
+  return [head, minecraftScopeBlock(scope), MINECRAFT_RULES].join('\n\n');
 }

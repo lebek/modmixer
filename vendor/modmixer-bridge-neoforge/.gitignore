@@ -1,0 +1,23 @@
+# Gradle / build output
+.gradle/
+build/
+out/
+bin/
+
+# ModDevGradle / NeoForge dev workspace artifacts
+run/
+runs/
+.neoforge/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.settings/
+.classpath
+.project
+*.ipr
+*.iws
+
+# OS cruft
+.DS_Store

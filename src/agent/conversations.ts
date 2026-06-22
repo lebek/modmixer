@@ -3,6 +3,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import type { ThinkingLevel } from '@mariozechner/pi-agent-core';
 import type { ModelSelection } from './settings.js';
+import type { GameId } from './games/types.js';
 
 export type ConversationScope =
   | { type: 'new' }
@@ -70,6 +71,14 @@ export interface Conversation {
    * attachment in a later turn instead of only the turn it arrived in.
    */
   attachmentPaths?: string[];
+  /**
+   * Which game this conversation targets. Resolved once at creation from the
+   * mod's prefs (mod scope) or the active game (new scope), then frozen — the
+   * system prompt + tool behaviour are game-specific, so this must not drift.
+   * Missing on conversations created before multi-game support, read back as
+   * 'rimworld'.
+   */
+  game?: GameId;
 }
 
 interface Persisted {
@@ -130,6 +139,7 @@ export function addConversation(entry: {
   model?: ModelSelection;
   thinkingLevel?: ThinkingLevel;
   live?: boolean;
+  game?: GameId;
 }): Conversation {
   const now = Date.now();
   const convo: Conversation = {
@@ -143,6 +153,7 @@ export function addConversation(entry: {
     model: entry.model,
     thinkingLevel: entry.thinkingLevel,
     live: entry.live,
+    game: entry.game,
   };
   load().conversations.push(convo);
   persist();

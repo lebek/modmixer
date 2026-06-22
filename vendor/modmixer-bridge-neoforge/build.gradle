@@ -1,0 +1,103 @@
+// ModMixer NeoForge bridge — build script.
+//
+// Uses ModDevGradle (MDG), the modern NeoForge dev plugin, on the ~2.0.x line.
+// MDG replaces the legacy ForgeGradle/NeoGradle stack: it wires up the
+// `neoForge { ... }` block, the `runs { client {} server {} }` blocks, and the
+// Parchment-mapped, decompiled Minecraft dependency.
+
+plugins {
+    id 'java-library'
+    // ModDevGradle. 2.0.x is the stable line for the NeoForge 21.x era.
+    // VERIFY against 21.1.x sources: the latest 2.0.x patch (e.g. 2.0.78+) is
+    // fine; pin a concrete patch in CI if reproducibility matters.
+    id 'net.neoforged.moddev' version '2.0.78'
+}
+
+version = "${mod_version}"
+group = "${mod_group_id}"
+
+base {
+    archivesName = "${mod_id}"
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(java_version as int)
+    }
+}
+
+repositories {
+    mavenCentral()
+    maven { url = 'https://maven.neoforged.net/releases' }
+}
+
+neoForge {
+    // The NeoForge version to compile/run against.
+    version = "${neo_version}"
+
+    // Parchment param-names + javadocs in the dev workspace. Purely a
+    // developer-experience aid; it does not affect the produced jar.
+    parchment {
+        minecraftVersion = "${parchment_minecraft_version}"
+        mappingsVersion = "${parchment_mappings_version}"
+    }
+
+    // Bind our compiled source set to the mod id for the DEV runtime so the
+    // running game treats these classes as belonging to `modmixerbridge`. This
+    // does NOT replace neoforge.mods.toml — that file is still the production
+    // manifest; this is the standard MDK pairing.
+    mods {
+        "${mod_id}" {
+            sourceSet sourceSets.main
+        }
+    }
+
+    runs {
+        // These run configs are mostly for *standalone* testing of the bridge.
+        // In production ModMixer invokes the user mod project's own runClient
+        // with this mod merged in (or on the classpath), passing the
+        // -Dmodmixer.* system properties as Gradle `-D` args, which MDG forwards
+        // to the game JVM.
+        client {
+            client()
+            // Example only — real values come from ModMixer at launch:
+            // jvmArguments.addAll '-Dmodmixer.port=13371', '-Dmodmixer.testTimeoutMs=120000'
+        }
+        server {
+            server()
+        }
+    }
+}
+
+dependencies {
+    // No third-party deps: Log4j2 (org.apache.logging.log4j) and the NeoForge
+    // client classes are all provided transitively by the `neoForge` dependency
+    // that MDG injects into the `implementation`/compile classpath.
+}
+
+tasks.named('processResources', ProcessResources).configure {
+    // Token-substitute @token@ markers in neoforge.mods.toml from
+    // gradle.properties. We deliberately use @...@ rather than Groovy's ${...}
+    // expand(): the loader's mods.toml has its own ${file.jarVersion}-style
+    // placeholders that NeoForge resolves at runtime, and expand() would try to
+    // (and fail to) evaluate those at build time.
+    var replaceProperties = [
+        mod_id           : mod_id,
+        mod_name         : mod_name,
+        mod_version      : mod_version,
+        mod_authors      : mod_authors,
+        mod_license      : mod_license,
+        minecraft_version: minecraft_version,
+        neo_version      : neo_version,
+        java_version     : java_version,
+    ]
+    inputs.properties replaceProperties
+    filesMatching('META-INF/neoforge.mods.toml') {
+        filter(org.apache.tools.ant.filters.ReplaceTokens, tokens: replaceProperties)
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = java_version as int
+}

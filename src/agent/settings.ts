@@ -5,6 +5,8 @@ import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import type { ThinkingLevel } from '@mariozechner/pi-agent-core';
 import { sanitizeAuthorHandle } from '../lib/identifiers.js';
+import type { GameId } from './games/types.js';
+import { resolveGameId } from './games/registry.js';
 
 export interface ModelSelection {
   provider: string;
@@ -119,6 +121,25 @@ export interface Settings {
    */
   rimworldInstallOverride: string | null;
   /**
+   * User-supplied path to a Minecraft game directory, mirroring
+   * rimworldInstallOverride. Used when locating the user's Minecraft to deploy
+   * a built jar; the agent's test loop launches via gradlew runClient and does
+   * not need this. Null until the user sets up Minecraft.
+   */
+  minecraftInstallOverride: string | null;
+  /**
+   * Feature flag for Minecraft (NeoForge) support. Off by default so existing
+   * RimWorld users never see Minecraft in onboarding/settings/library pickers
+   * until we enable it for the beta cohort. RimWorld is unaffected either way.
+   */
+  minecraftEnabled: boolean;
+  /**
+   * The game that new mods default to and that onboarding set up first.
+   * Defaults to 'rimworld'; becomes 'minecraft' only once the user enables and
+   * sets up Minecraft. Per-mod game is still stored on each mod (ModPrefs.game).
+   */
+  selectedGameId: GameId;
+  /**
    * OpenRouter model slugs the user has saved (e.g. "anthropic/claude-sonnet-4.5",
    * "qwen/qwen3-coder"). Surfaces these in the model picker as additional
    * options when an OpenRouter API key is stored. The API key itself lives
@@ -206,6 +227,9 @@ function computeDefaults(): Settings {
     theme: 'dark',
     onboarding: null,
     rimworldInstallOverride: null,
+    minecraftInstallOverride: null,
+    minecraftEnabled: false,
+    selectedGameId: 'rimworld',
     openrouterModels: [],
     localProviders: [],
     thinkingLevel: 'xhigh',
@@ -274,6 +298,18 @@ function normalize(raw: unknown, defaults: Settings): Settings {
   const rimworldInstallOverride = readString(obj.rimworldInstallOverride);
   if (rimworldInstallOverride !== undefined) {
     next.rimworldInstallOverride = rimworldInstallOverride;
+  }
+
+  const minecraftInstallOverride = readString(obj.minecraftInstallOverride);
+  if (minecraftInstallOverride !== undefined) {
+    next.minecraftInstallOverride = minecraftInstallOverride;
+  }
+
+  const minecraftEnabled = readBool(obj.minecraftEnabled);
+  if (minecraftEnabled !== undefined) next.minecraftEnabled = minecraftEnabled;
+
+  if (obj.selectedGameId !== undefined) {
+    next.selectedGameId = resolveGameId(obj.selectedGameId);
   }
 
   if (Array.isArray(obj.openrouterModels)) {

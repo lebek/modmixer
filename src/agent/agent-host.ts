@@ -98,6 +98,8 @@ import {
   type SaveRecord,
 } from './snapshots.js';
 import { buildSystemPrompt } from './system-prompt.js';
+import { readModPrefs } from './mod-prefs.js';
+import type { GameId } from './games/types.js';
 import type { Extension } from '@mariozechner/pi-coding-agent';
 import {
   addAttachmentPaths,
@@ -1047,7 +1049,7 @@ export class AgentHost {
     // first rehydration so they get the same stickiness from then on.
     let systemPrompt = convo.systemPrompt;
     if (systemPrompt === undefined) {
-      systemPrompt = buildSystemPrompt(convo.scope);
+      systemPrompt = buildSystemPrompt(convo.scope, { game: convo.game });
       setSystemPrompt(convo.id, systemPrompt);
     }
     if (!this.stripThinkingExtension) {
@@ -1255,7 +1257,12 @@ export class AgentHost {
         // the freshly-reconstructed session is actually running with. This
         // upgrade is a deliberate, one-time hash change per conversation —
         // sticky routing re-picks here and then holds.
-        setSystemPrompt(conversationId, buildSystemPrompt(nextScope));
+        setSystemPrompt(
+          conversationId,
+          buildSystemPrompt(nextScope, {
+            game: getConversation(conversationId)?.game,
+          }),
+        );
         setActiveForMod(folder, conversationId);
         scaffoldEntry.pendingScopeReload = nextScope;
         // Tell the renderer to re-hydrate the active conversation since the
@@ -1368,15 +1375,23 @@ export class AgentHost {
     // level; from here they're the chat's own and the settings default only
     // affects subsequently-created chats.
     const settings = loadSettings();
+    // Resolve the conversation's game once, here: a mod chat inherits the mod's
+    // game; a new-scope chat uses the active game. Frozen onto the record so
+    // the prompt + tools stay game-stable for the chat's life.
+    const game: GameId =
+      scope.type === 'mod'
+        ? (await readModPrefs(scope.modFolder)).game
+        : settings.selectedGameId;
     return addConversation({
       id,
       sessionFile,
       scope,
       title,
-      systemPrompt: buildSystemPrompt(scope, { live: opts?.live }),
+      systemPrompt: buildSystemPrompt(scope, { live: opts?.live, game }),
       model: settings.model ?? undefined,
       thinkingLevel: settings.thinkingLevel,
       live: opts?.live,
+      game,
     });
   }
 

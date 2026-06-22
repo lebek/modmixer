@@ -1,0 +1,21 @@
+// ModMixer NeoForge bridge — standalone Gradle project.
+//
+// At test time ModMixer either builds this as a separate jar dropped into the
+// user mod's runClient classpath, or (more commonly) merges these sources into
+// the scaffolded mod project. Either way the plugin + repositories below are
+// what the ModDevGradle (MDG) plugin needs to resolve NeoForge.
+
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+        maven { url = 'https://maven.neoforged.net/releases' }
+    }
+}
+
+plugins {
+    // Toolchain auto-provisioning so a host without a JDK 21 can still build.
+    // Optional; harmless if the host already has Java 21 on PATH.
+    id 'org.gradle.toolchains.foojay-resolver-convention' version '0.8.0'
+}
+
+rootProject.name = 'modmixerbridge'

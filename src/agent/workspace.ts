@@ -5,7 +5,13 @@ import fsp from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import { detectRimWorldPaths, detectGameVersionMajorMinorSync } from './paths.js';
 import { readSchematic, type SchematicData } from './schematic.js';
-import { readModPrefs, type ModPrefs } from './mod-prefs.js';
+import { readModPrefs, writeModPrefs, type ModPrefs } from './mod-prefs.js';
+import type { GameId } from './games/types.js';
+import { DEFAULT_GAME_ID } from './games/registry.js';
+import {
+  createMinecraftMod,
+  isMinecraftTemplateAvailable,
+} from './minecraft/scaffold.js';
 import { scanAssets } from './assets/scanner.js';
 import { parseAboutXml, type ModDependency } from './registry/about-xml.js';
 import { loadSettings } from './settings.js';
@@ -506,30 +512,51 @@ export async function importModFromFolder(
  * to rename folders, so the on-disk identifier stays stable for the mod's
  * entire life and the user-facing name lives in About.xml's <name>.
  */
-export async function createUntitledMod(): Promise<{
+export async function createUntitledMod(
+  game: GameId = DEFAULT_GAME_ID,
+): Promise<{
   folder: string;
   workspacePath: string;
+  game: GameId;
 }> {
   const { workspaceDir } = getWorkspacePaths();
   const folder = mintWorkspaceFolderId(workspaceDir);
   const modPath = path.join(workspaceDir, folder);
-  const subdirs = ['About', 'Defs', 'Patches', 'Source', 'Textures'];
   await fsp.mkdir(modPath, { recursive: true });
-  await Promise.all(
-    subdirs.map((d) => fsp.mkdir(path.join(modPath, d), { recursive: true })),
-  );
   const author = loadSettings().defaultAuthor || 'Modmixer User';
-  const aboutXml = renderFreshAboutXml({
-    ...emptyAbout('Untitled Mod'),
-    author,
-  });
-  await fsp.writeFile(
-    path.join(modPath, 'About', 'About.xml'),
-    aboutXml,
-    'utf8',
-  );
+  if (game === 'rimworld') {
+    const subdirs = ['About', 'Defs', 'Patches', 'Source', 'Textures'];
+    await Promise.all(
+      subdirs.map((d) => fsp.mkdir(path.join(modPath, d), { recursive: true })),
+    );
+    const aboutXml = renderFreshAboutXml({
+      ...emptyAbout('Untitled Mod'),
+      author,
+    });
+    await fsp.writeFile(
+      path.join(modPath, 'About', 'About.xml'),
+      aboutXml,
+      'utf8',
+    );
+  } else if (game === 'minecraft' && isMinecraftTemplateAvailable()) {
+    // A Minecraft mod IS a Gradle/NeoForge project — lay down a buildable one
+    // from the vendored MDK so the agent edits a working project from message
+    // zero. If the template isn't vendored yet we leave an empty folder; the
+    // build/test tools surface a clear "run fetch:neoforge-mdk" error.
+    await createMinecraftMod(modPath, {
+      modId: 'untitledmod',
+      modName: 'Untitled Mod',
+      author,
+      description: '',
+    });
+  }
+  // Record the target game immediately so the agent session bound to this mod
+  // targets the right toolchain from message zero. Minecraft mods get their
+  // Gradle/NeoForge project scaffolded by the agent's game-specific tool; the
+  // untitled shell is just the folder + prefs until then.
+  await writeModPrefs(folder, { game });
   track({ name: 'mod_created' });
-  return { folder, workspacePath: modPath };
+  return { folder, workspacePath: modPath, game };
 }
 
 /**

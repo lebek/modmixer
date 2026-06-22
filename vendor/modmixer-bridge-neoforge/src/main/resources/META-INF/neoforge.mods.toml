@@ -1,0 +1,46 @@
+# ModMixer NeoForge bridge — mod manifest.
+#
+# @token@ markers are substituted at build time by processResources from
+# gradle.properties (see build.gradle). The ${...} placeholders below are
+# resolved by the NeoForge loader itself at runtime — leave them as-is.
+
+# javafml is the FML/Java loader. Version range "[4,)" matches the NeoForge
+# 21.1.x line (FML loader major 4). VERIFY against 21.1.x sources if the
+# loader rejects it; the canonical MDK value for 1.21.1 is "[4,)".
+modLoader = "javafml"
+loaderVersion = "[4,)"
+
+license = "@mod_license@"
+issueTrackerURL = "https://github.com/modmixer/modmixer"
+
+[[mods]]
+modId = "@mod_id@"
+version = "@mod_version@"
+displayName = "@mod_name@"
+authors = "@mod_authors@"
+description = '''
+Live diagnostic bridge to ModMixer. Captures errors and mod-loading failures
+inside the running Minecraft client and streams them as structured JSON to the
+ModMixer desktop app over a localhost TCP connection. Does not modify gameplay.
+'''
+
+# --- Dependencies -----------------------------------------------------------
+# Both deps are mandatory and scoped to BOTH sides (client+server) so the mod
+# loads in any run. The bridge only does interesting client-side work, but
+# declaring it everywhere keeps the manifest honest and dedicated-server-safe.
+
+[[dependencies.@mod_id@]]
+modId = "neoforge"
+type = "required"
+# Accept any 21.1.x. VERIFY: the canonical MDK form is versionRange = "[21.1.0,)".
+versionRange = "[21.1.0,)"
+ordering = "NONE"
+side = "BOTH"
+
+[[dependencies.@mod_id@]]
+modId = "minecraft"
+type = "required"
+# Pin to 1.21.1 (allow patch wiggle up to, but not including, 1.22).
+versionRange = "[1.21.1,1.22)"
+ordering = "NONE"
+side = "BOTH"

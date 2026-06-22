@@ -12,6 +12,8 @@ import {
 } from '../build-error-hints.js';
 import { DOTNET_NOT_FOUND_MESSAGE, resolveDotnet } from '../dotnet.js';
 import { launchModeHint } from '../launch-mode.js';
+import { readModPrefs } from '../mod-prefs.js';
+import { buildMod as buildMinecraftMod } from '../minecraft/gradle.js';
 
 const Params = Type.Object({
   modFolder: Type.String({
@@ -42,11 +44,15 @@ export const buildModTool: AgentTool<typeof Params, BuildModDetails> = {
   name: 'build_mod',
   label: 'Build mod',
   description:
-    "Run `dotnet build` in the mod's Source/ directory. Returns the full build output (errors, warnings, success summary) so you can read compile errors and fix them. Requires .NET SDK to be installed and a .csproj to exist in Source/.",
+    "Compile the mod and return the full build output (errors, warnings, success summary) so you can read compile errors and fix them. RimWorld mods run `dotnet build` in Source/ (needs the .NET SDK + a .csproj). Minecraft (NeoForge) mods run `./gradlew build` in the project root (the first build decompiles Minecraft and can take several minutes).",
   parameters: Params,
   async execute(_id, params, signal): Promise<AgentToolResult<BuildModDetails>> {
     const { workspaceDir } = getWorkspacePaths();
     const modDir = path.join(workspaceDir, params.modFolder);
+    const prefs = await readModPrefs(params.modFolder);
+    if (prefs.game === 'minecraft') {
+      return buildMinecraftWithGradle(modDir, signal);
+    }
     const sourceDir = path.join(modDir, 'Source');
     if (!fs.existsSync(sourceDir)) {
       throw new Error(
@@ -105,6 +111,41 @@ export const buildModTool: AgentTool<typeof Params, BuildModDetails> = {
     };
   },
 };
+
+/**
+ * Minecraft mods are Gradle/NeoForge projects: the mod folder *is* the Gradle
+ * project root (no Source/ subdir), built with `./gradlew build`. The first
+ * build decompiles Minecraft and can take many minutes — that's expected.
+ */
+async function buildMinecraftWithGradle(
+  modDir: string,
+  signal?: AbortSignal,
+): Promise<AgentToolResult<BuildModDetails>> {
+  const hasWrapper =
+    fs.existsSync(path.join(modDir, 'gradlew')) ||
+    fs.existsSync(path.join(modDir, 'gradlew.bat'));
+  if (!hasWrapper) {
+    throw new Error(
+      `No Gradle wrapper in ${modDir}. Use scaffold_mod to lay down the NeoForge project first.`,
+    );
+  }
+  const result = await buildMinecraftMod(modDir, undefined, signal);
+  const exitCode = result.ok ? 0 : 1;
+  const status = result.ok
+    ? `BUILD SUCCEEDED${result.jarPath ? ` → ${result.jarPath}` : ''}`
+    : 'BUILD FAILED';
+  return {
+    content: [{ type: 'text', text: `${status}\n\n${result.output}` }],
+    details: {
+      exitCode,
+      stdout: result.output,
+      stderr: '',
+      sourceDir: modDir,
+      lintFindings: [],
+      errorHints: [],
+    },
+  };
+}
 
 function runCommand(
   cmd: string,

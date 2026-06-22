@@ -2,6 +2,8 @@ import path from 'node:path';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import { getWorkspacePaths } from './workspace.js';
+import type { GameId } from './games/types.js';
+import { DEFAULT_GAME_ID, resolveGameId } from './games/registry.js';
 
 /**
  * Per-mod *user* preferences. Unlike the Schematic (agent-owned and rewritten
@@ -24,13 +26,24 @@ export interface ModPrefs {
    * only tracks publishes made through Modmixer, not Steam-side edits.
    */
   lastPublishedAt: number | null;
+  /**
+   * Which game this mod targets. Set once at creation and never changed (a mod
+   * is for exactly one game). Missing on mods created before multi-game support,
+   * which read back as 'rimworld' — so every pre-existing mod stays a RimWorld
+   * mod with no migration.
+   */
+  game: GameId;
 }
 
 const SIDECAR_DIR = '.modmixer';
 const SIDECAR_FILE = 'prefs.json';
 
 function defaults(): ModPrefs {
-  return { trackOnLeaderboard: true, lastPublishedAt: null };
+  return {
+    trackOnLeaderboard: true,
+    lastPublishedAt: null,
+    game: DEFAULT_GAME_ID,
+  };
 }
 
 function sidecarPath(folder: string): string {
@@ -50,6 +63,7 @@ function parsePrefs(raw: string): ModPrefs {
         typeof parsed.lastPublishedAt === 'number'
           ? parsed.lastPublishedAt
           : null,
+      game: resolveGameId(parsed.game),
     };
   } catch {
     return defaults();
@@ -87,6 +101,8 @@ export async function writeModPrefs(
       'lastPublishedAt' in patch
         ? patch.lastPublishedAt ?? null
         : current.lastPublishedAt,
+    // game is set once at creation; only overwrite when explicitly patched.
+    game: patch.game ? resolveGameId(patch.game) : current.game,
   };
   await fsp.mkdir(path.join(modDir, SIDECAR_DIR), { recursive: true });
   await fsp.writeFile(
