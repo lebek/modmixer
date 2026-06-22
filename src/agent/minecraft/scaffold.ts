@@ -140,6 +140,7 @@ export async function createMinecraftMod(
   const propsPath = path.join(modDir, 'gradle.properties');
   const props = await fsp.readFile(propsPath, 'utf8');
   const modId = slugifyModId(identity.modId || identity.modName || 'untitledmod');
+  const groupId = identity.groupId ?? `com.modmixer.${modId}`;
   const patched = patchGradleProperties(props, {
     minecraft_version: MINECRAFT_VERSION,
     neo_version: NEOFORGE_VERSION,
@@ -148,12 +149,18 @@ export async function createMinecraftMod(
     mod_id: modId,
     mod_name: identity.modName || 'Untitled Mod',
     mod_version: identity.version ?? '0.1.0',
-    mod_group_id: identity.groupId ?? `com.modmixer.${modId}`,
+    mod_group_id: groupId,
     mod_authors: identity.author || 'Modmixer User',
     mod_description: (identity.description || '').replace(/\n/g, ' '),
     mod_license: 'MIT',
   });
   await fsp.writeFile(propsPath, patched, 'utf8');
+
+  // Rename the MDK's bundled example so the @Mod id + package + resource
+  // namespace match the new mod_id — otherwise NeoForge rejects the mod at
+  // load time ("entrypoint class … for mod with id examplemod, which does not
+  // exist"), even though it compiles fine.
+  await renameScaffoldedMod(modDir, modId, groupId);
 
   await appendBridgeWiring(path.join(modDir, 'build.gradle'));
 
@@ -207,6 +214,78 @@ neoForge {
 }
 `;
   await fsp.writeFile(buildGradlePath, existing + snippet, 'utf8');
+}
+
+// The MDK example mod's identity, which we rename to the scaffolded mod's.
+const EXAMPLE_GROUP = 'com.example.examplemod';
+const EXAMPLE_ID = 'examplemod';
+const RENAME_TEXT_EXT = new Set(['.java', '.json', '.toml', '.mcmeta', '.txt', '.cfg']);
+
+async function walkFiles(dir: string, cb: (file: string) => Promise<void>): Promise<void> {
+  let entries: fs.Dirent[];
+  try {
+    entries = await fsp.readdir(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) await walkFiles(full, cb);
+    else await cb(full);
+  }
+}
+
+/** Recursively remove directories left empty after a move. */
+async function pruneEmptyDirs(dir: string): Promise<void> {
+  if (!fs.existsSync(dir)) return;
+  for (const e of await fsp.readdir(dir, { withFileTypes: true })) {
+    if (e.isDirectory()) await pruneEmptyDirs(path.join(dir, e.name));
+  }
+  if ((await fsp.readdir(dir)).length === 0) await fsp.rmdir(dir);
+}
+
+/**
+ * Rebrand the MDK's bundled example from `examplemod` / `com.example.examplemod`
+ * to the scaffolded mod's id + group across all sources and resources, and move
+ * the Java package + resource namespace dirs to match. This is the standard MDK
+ * rename, done programmatically so a fresh mod loads instead of erroring on a
+ * mod-id mismatch.
+ */
+async function renameScaffoldedMod(
+  modDir: string,
+  modId: string,
+  groupId: string,
+): Promise<void> {
+  const srcDir = path.join(modDir, 'src');
+  if (!fs.existsSync(srcDir)) return;
+
+  // 1. Text replacements. Replace the fully-qualified group FIRST (it contains
+  //    the bare id as a substring), then the standalone mod id.
+  await walkFiles(srcDir, async (file) => {
+    if (!RENAME_TEXT_EXT.has(path.extname(file))) return;
+    const orig = await fsp.readFile(file, 'utf8');
+    const next = orig.split(EXAMPLE_GROUP).join(groupId).split(EXAMPLE_ID).join(modId);
+    if (next !== orig) await fsp.writeFile(file, next, 'utf8');
+  });
+
+  // 2. Move the Java package dir to match the new group.
+  const javaRoot = path.join(modDir, 'src', 'main', 'java');
+  const oldPkg = path.join(javaRoot, ...EXAMPLE_GROUP.split('.'));
+  const newPkg = path.join(javaRoot, ...groupId.split('.'));
+  if (fs.existsSync(oldPkg) && path.resolve(oldPkg) !== path.resolve(newPkg)) {
+    await fsp.mkdir(path.dirname(newPkg), { recursive: true });
+    await fsp.rename(oldPkg, newPkg);
+    await pruneEmptyDirs(path.join(javaRoot, 'com'));
+  }
+
+  // 3. Rename resource namespaces (assets/<id>, data/<id>).
+  for (const kind of ['assets', 'data']) {
+    const oldNs = path.join(modDir, 'src', 'main', 'resources', kind, EXAMPLE_ID);
+    const newNs = path.join(modDir, 'src', 'main', 'resources', kind, modId);
+    if (fs.existsSync(oldNs) && path.resolve(oldNs) !== path.resolve(newNs)) {
+      await fsp.rename(oldNs, newNs);
+    }
+  }
 }
 
 /** True when the MDK template is vendored (used to gate the MC create flow). */
