@@ -4,8 +4,29 @@ import path from 'node:path';
 import fsp from 'node:fs/promises';
 import { openIndexDb } from '../index/db.js';
 import { getIndexStatus } from '../index/rebuild.js';
+import {
+  getMinecraftIndexStatus,
+  ensureMinecraftIndexInBackground,
+} from '../index/rebuild-minecraft.js';
 import { getIndexPaths } from '../index/paths.js';
 import { resolveSymbol, type SymbolMatch } from '../index/resolve-symbol.js';
+import type { GameId } from '../games/types.js';
+
+/** Game-aware "index not ready" message; lazily triggers the MC build. */
+function symbolIndexNotReady(game: GameId): string | null {
+  if (game === 'minecraft') {
+    const status = ensureMinecraftIndexInBackground();
+    if (status === 'fresh') return null;
+    if (status === 'building')
+      return 'The Minecraft code index is still building (one-time decompile, a few minutes). Try again shortly.';
+    return "The Minecraft code index isn't built yet — I just started it in the background. Try again shortly.";
+  }
+  const status = getIndexStatus();
+  if (status.type === 'absent' || status.type === 'no-rimworld') {
+    return 'RimWorld source index is not built yet. Open Settings → RimWorld index → Rebuild.';
+  }
+  return null;
+}
 
 const Params = Type.Object({
   name: Type.String({
@@ -43,34 +64,33 @@ interface ResolveOnlyDetails {
   matches: SymbolMatch[];
 }
 
-const NO_INDEX_MSG =
-  'RimWorld source index is not built yet. Open Settings → RimWorld index → Rebuild.';
-
 // When a bare short name hits a small handful of distinct FQNs, inline every
 // candidate's body instead of returning a list the agent must re-query one
 // FQN at a time. Past either bound, fall back to the disambiguation list.
 const INLINE_FQN_LIMIT = 3;
 const INLINE_BYTE_BUDGET = 6144;
 
-export const readCsharpSymbolTool: AgentTool<
-  typeof Params,
-  { hits: SymbolHit[]; matches?: SymbolMatch[] }
-> = {
+export function createReadCsharpSymbolTool(
+  game: GameId = 'rimworld',
+): AgentTool<typeof Params, { hits: SymbolHit[]; matches?: SymbolMatch[] }> {
+  const isMc = game === 'minecraft';
+  return {
   name: 'read_csharp_symbol',
-  label: 'Read C# symbol',
-  description:
-    "Look up a C# type or member in the decompiled RimWorld source. Handles both 'what is this and where does it live' and 'show me the body' in one call:\n\n• Pass a bare short name (\"DrawAt\", \"WorkTypeDef\") → returns the body when one symbol matches, or every candidate body inlined when only a few symbols share the name (no follow-up call needed). When many symbols share the name, returns the symbol-table entries instead — namespace, kind, FQN, signature — so you can pick one.\n• Pass a partial FQN (\"LetterMaker.MakeLetter\") or full FQN (\"RimWorld.LetterMaker.MakeLetter\") → returns the symbol body. All overloads are returned together when ambiguous.\n\nFor textual occurrences (call sites, string literals), use search_source. For XML def lookup, use search_defs.",
+  label: isMc ? 'Read Java symbol' : 'Read C# symbol',
+  description: isMc
+    ? "Look up a Java type or member in the decompiled Minecraft + NeoForge source (mojmap + Parchment names). Pass a bare short name (\"DeferredRegister\", \"RegisterEvent\", \"BlockBehaviour\") → returns the body when one symbol matches, or candidate bodies inlined when a few share the name; pass a partial/full FQN (\"net.neoforged.neoforge.registries.DeferredRegister\") → returns that body. For textual occurrences (call sites, usages) use search_source."
+    : "Look up a C# type or member in the decompiled RimWorld source. Handles both 'what is this and where does it live' and 'show me the body' in one call:\n\n• Pass a bare short name (\"DrawAt\", \"WorkTypeDef\") → returns the body when one symbol matches, or every candidate body inlined when only a few symbols share the name (no follow-up call needed). When many symbols share the name, returns the symbol-table entries instead — namespace, kind, FQN, signature — so you can pick one.\n• Pass a partial FQN (\"LetterMaker.MakeLetter\") or full FQN (\"RimWorld.LetterMaker.MakeLetter\") → returns the symbol body. All overloads are returned together when ambiguous.\n\nFor textual occurrences (call sites, string literals), use search_source. For XML def lookup, use search_defs.",
   parameters: Params,
   async execute(_id, params): Promise<AgentToolResult<{ hits: SymbolHit[]; matches?: SymbolMatch[] }>> {
-    const status = getIndexStatus();
-    if (status.type === 'absent' || status.type === 'no-rimworld') {
+    const notReady = symbolIndexNotReady(game);
+    if (notReady) {
       return {
-        content: [{ type: 'text', text: NO_INDEX_MSG }],
+        content: [{ type: 'text', text: notReady }],
         details: { hits: [] },
       };
     }
 
-    const { sourceRoot } = getIndexPaths();
+    const { sourceRoot } = getIndexPaths(game);
 
     // Bare short name (no dots) routes through `resolveSymbol` to pick out the
     // distinct FQNs that share this short name. If there's exactly one logical
@@ -81,7 +101,7 @@ export const readCsharpSymbolTool: AgentTool<
     // repeatedly in run 2.
     let lookupName = params.name;
     if (!params.name.includes('.')) {
-      const rawMatches = resolveSymbol(params.name, { kind: params.kind });
+      const rawMatches = resolveSymbol(params.name, { kind: params.kind, game });
       if (rawMatches.length === 0) {
         return {
           content: [
@@ -120,7 +140,7 @@ export const readCsharpSymbolTool: AgentTool<
     }
 
     // Dotted (or single-match bare) name → body-read mode.
-    const db = openIndexDb();
+    const db = openIndexDb(game);
     const cap = Math.min(Math.max(params.maxBytes ?? 4096, 256), 32768);
     const kindArgs: Record<string, unknown> = params.kind
       ? { kind: params.kind }
@@ -167,7 +187,7 @@ export const readCsharpSymbolTool: AgentTool<
       // disambiguation. Catches "Effecter.Spawn" when the actual FQN is
       // "Verse.EffecterDef.Spawn" — the agent typed off a (wrong) memory.
       const tail = lookupName.split('.').pop() ?? lookupName;
-      const rawMatches = resolveSymbol(tail, { kind: params.kind });
+      const rawMatches = resolveSymbol(tail, { kind: params.kind, game });
       if (rawMatches.length > 0) {
         const matches: SymbolMatch[] = rawMatches.map((m) => ({
           ...m,
@@ -251,7 +271,8 @@ export const readCsharpSymbolTool: AgentTool<
       details: { hits },
     };
   },
-};
+  };
+}
 
 /**
  * Read and inline the bodies of a small set of disambiguation candidates so

@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
 import { openIndexDb } from './db.js';
 import { getIndexStatus } from './rebuild.js';
+import type { GameId } from '../games/types.js';
 
 /**
  * Minimal row shape consumed by the enrichment logic. Mirrors the columns we
@@ -86,13 +87,19 @@ const TYPE_KINDS = new Set([
  */
 export function resolveSymbol(
   shortName: string,
-  options: { kind?: string; limit?: number } = {},
+  options: { kind?: string; limit?: number; game?: GameId } = {},
 ): SymbolMatch[] {
-  const status = getIndexStatus();
-  if (status.type === 'absent' || status.type === 'no-rimworld') {
-    return [];
+  const game = options.game ?? 'rimworld';
+  // The RimWorld guard avoids touching a never-built shared DB; per-game DBs
+  // are created empty on open, so other games just query and get [] if absent
+  // (the calling tool has already checked the per-game index status).
+  if (game === 'rimworld') {
+    const status = getIndexStatus();
+    if (status.type === 'absent' || status.type === 'no-rimworld') {
+      return [];
+    }
   }
-  return resolveSymbolFromDb(openIndexDb(), shortName, options);
+  return resolveSymbolFromDb(openIndexDb(game), shortName, options);
 }
 
 /**

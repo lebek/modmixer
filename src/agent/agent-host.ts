@@ -57,8 +57,8 @@ import { decompileDllTool } from './tools/decompile-dll.js';
 import { renderSvgToPngTool } from './tools/render-svg-to-png.js';
 import { renderPreviewTool } from './tools/render-preview.js';
 import { searchDefsTool } from './tools/search-defs.js';
-import { readCsharpSymbolTool } from './tools/read-csharp-symbol.js';
-import { searchSourceTool } from './tools/search-source.js';
+import { createReadCsharpSymbolTool } from './tools/read-csharp-symbol.js';
+import { createSearchSourceTool } from './tools/search-source.js';
 import { warmSearchCache } from './index/warm-cache.js';
 import { readLoreTool } from './tools/read-lore.js';
 import { saveLoreTool } from './tools/save-lore.js';
@@ -100,6 +100,7 @@ import {
 import { buildSystemPrompt } from './system-prompt.js';
 import { readModPrefs } from './mod-prefs.js';
 import type { GameId } from './games/types.js';
+import { ensureMinecraftIndexInBackground } from './index/rebuild-minecraft.js';
 import type { Extension } from '@mariozechner/pi-coding-agent';
 import {
   addAttachmentPaths,
@@ -149,8 +150,9 @@ export function buildCustomTools(
   getActiveScope: () => ConversationScope | null,
   getActiveModel: () => Model<Api> | null,
   getAttachmentRoots: () => string[],
-  opts?: { live?: boolean },
+  opts?: { live?: boolean; game?: GameId },
 ): AgentTool<any>[] {
+  const game = opts?.game ?? 'rimworld';
   // Guarded path tools are common to both modes.
   const pathTools: AgentTool<any>[] = [
     // Override pi's path-shaped built-ins with versions that enforce the
@@ -166,17 +168,27 @@ export function buildCustomTools(
     createGuardedFindTool(cwd, getAttachmentRoots),
     createGuardedLsTool(cwd, getAttachmentRoots),
   ];
-  // Read-only research tools, also common.
-  const researchTools: AgentTool<any>[] = [
-    listInstalledModsTool,
-    decompileDllTool,
-    // RimWorld source/def index — read-only lookups against $MM/index/*.
-    searchDefsTool,
-    readCsharpSymbolTool,
-    searchSourceTool,
-    readLoreTool,
-    saveLoreTool,
-  ];
+  // Read-only research tools. The source-index lookups are game-aware; the
+  // RimWorld-specific ones (installed-mods, .NET decompile, XML def search) are
+  // omitted for Minecraft, whose data/JSON index isn't wired yet.
+  const researchTools: AgentTool<any>[] =
+    game === 'minecraft'
+      ? [
+          createReadCsharpSymbolTool(game),
+          createSearchSourceTool(game),
+          readLoreTool,
+          saveLoreTool,
+        ]
+      : [
+          listInstalledModsTool,
+          decompileDllTool,
+          // RimWorld source/def index — read-only lookups against $MM/index/*.
+          searchDefsTool,
+          createReadCsharpSymbolTool(game),
+          createSearchSourceTool(game),
+          readLoreTool,
+          saveLoreTool,
+        ];
 
   if (opts?.live) {
     // Live sessions: the user is in-game and cannot answer app dialogs, so
@@ -1084,13 +1096,17 @@ export class AgentHost {
     // visible without rebuilding the session. Seeded from the persisted
     // list so attachments survive reconstruction and app restart.
     const attachmentRoots = new Set<string>(convo.attachmentPaths ?? []);
+    // A Minecraft conversation kicks off its source-index build now so it's
+    // ready (or warm) by the time the agent searches; the build dedups and is
+    // a no-op once fresh. RimWorld uses the startup/settings trigger instead.
+    if (convo.game === 'minecraft') ensureMinecraftIndexInBackground();
     const customTools = buildCustomTools(
       this.cwd,
       convo.id,
       () => convo.scope,
       () => sessionRef?.model ?? null,
       () => [...attachmentRoots],
-      { live: convo.live === true },
+      { live: convo.live === true, game: convo.game },
     ).map((tool) => toolDefinitionFromAgentTool(tool));
     const { session } = await createAgentSession({
       cwd: this.cwd,

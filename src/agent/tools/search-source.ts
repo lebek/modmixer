@@ -4,7 +4,12 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import { getIndexPaths } from '../index/paths.js';
 import { getIndexStatus } from '../index/rebuild.js';
+import {
+  getMinecraftIndexStatus,
+  ensureMinecraftIndexInBackground,
+} from '../index/rebuild-minecraft.js';
 import { resolveRipgrep } from '../index/ripgrep.js';
+import type { GameId } from '../games/types.js';
 
 const Params = Type.Object({
   query: Type.String({
@@ -32,21 +37,44 @@ const NO_INDEX_MSG =
 
 const MAX_OUTPUT_BYTES = 64 * 1024;
 
-export const searchSourceTool: AgentTool<typeof Params, { matchedLines: number; truncated: boolean }> = {
+/**
+ * Resolve the index status for a game and a user-facing "not ready" message.
+ * For Minecraft the index builds lazily on first use (no Settings UI yet), so
+ * an absent index is kicked off in the background here.
+ */
+function indexNotReady(game: GameId): string | null {
+  if (game === 'minecraft') {
+    const status = ensureMinecraftIndexInBackground();
+    if (status === 'fresh') return null;
+    if (status === 'building')
+      return 'The Minecraft code index is still building (one-time decompile, a few minutes). Try again shortly — do other work meanwhile.';
+    return 'The Minecraft code index isn\'t built yet — I just started it in the background (one-time decompile, a few minutes). Try again shortly.';
+  }
+  const status = getIndexStatus();
+  if (status.type === 'absent' || status.type === 'no-rimworld') return NO_INDEX_MSG;
+  return null;
+}
+
+export function createSearchSourceTool(
+  game: GameId = 'rimworld',
+): AgentTool<typeof Params, { matchedLines: number; truncated: boolean }> {
+  const isMc = game === 'minecraft';
+  return {
   name: 'search_source',
-  label: 'Search RimWorld source',
-  description:
-    'Ripgrep over the decompiled RimWorld C# source AND the indexed Defs XML. Use for finding call sites ("StealAIUtility\\\\b"), patch targets, def cross-references like `<li>Designator_AreaHomeExpand</li>`, attribute values, or any pattern that isn\'t a clean type/method name. For symbol-level C# lookup (by short name or FQN) prefer read_csharp_symbol; for def-by-name lookup prefer search_defs. Zero matches here often means the answer lives in an XML def — try search_defs as the fallback.',
+  label: isMc ? 'Search Minecraft source' : 'Search RimWorld source',
+  description: isMc
+    ? 'Ripgrep over the decompiled Minecraft + NeoForge Java source (mojmap + Parchment names). Use for finding call sites, event/registry usage, vanilla behaviour, or any pattern that isn\'t a clean type/method name. For symbol-level lookup (a Java class/method by name) prefer read_csharp_symbol.'
+    : 'Ripgrep over the decompiled RimWorld C# source AND the indexed Defs XML. Use for finding call sites ("StealAIUtility\\\\b"), patch targets, def cross-references like `<li>Designator_AreaHomeExpand</li>`, attribute values, or any pattern that isn\'t a clean type/method name. For symbol-level C# lookup (by short name or FQN) prefer read_csharp_symbol; for def-by-name lookup prefer search_defs. Zero matches here often means the answer lives in an XML def — try search_defs as the fallback.',
   parameters: Params,
   async execute(_id, params, signal): Promise<AgentToolResult<{ matchedLines: number; truncated: boolean }>> {
-    const status = getIndexStatus();
-    if (status.type === 'absent' || status.type === 'no-rimworld') {
+    const notReady = indexNotReady(game);
+    if (notReady) {
       return {
-        content: [{ type: 'text', text: NO_INDEX_MSG }],
+        content: [{ type: 'text', text: notReady }],
         details: { matchedLines: 0, truncated: false },
       };
     }
-    const { sourceRoot, defsRoot } = getIndexPaths();
+    const { sourceRoot, defsRoot } = getIndexPaths(game);
     const rg = resolveRipgrep();
     if (!rg) {
       return {
@@ -124,7 +152,7 @@ export const searchSourceTool: AgentTool<typeof Params, { matchedLines: number; 
           {
             type: 'text',
             text:
-              `No matches for /${params.query}/${flags}${filterNote} across the RimWorld C# source and Defs XML index.\n${tipsLine}`,
+              `No matches for /${params.query}/${flags}${filterNote} across the ${isMc ? 'Minecraft + NeoForge Java source' : 'RimWorld C# source and Defs XML index'}.\n${tipsLine}`,
           },
         ],
         details: { matchedLines: 0, truncated: false },
@@ -136,7 +164,8 @@ export const searchSourceTool: AgentTool<typeof Params, { matchedLines: number; 
       details: { matchedLines, truncated },
     };
   },
-};
+  };
+}
 
 interface RgRunResult {
   stdout: string;

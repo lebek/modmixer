@@ -363,3 +363,8 @@ export async function writeMinecraftMeta(
 export function isMinecraftTemplateAvailable(): boolean {
   return templateDir() !== null;
 }
+
+/** The vendored MDK template dir, or null. Used by the index workspace too. */
+export function getMinecraftTemplateDir(): string | null {
+  return templateDir();
+}
