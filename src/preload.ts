@@ -143,7 +143,8 @@ const api = {
     invoke('modmixer:mods:unsync-from-game', folder),
   deleteMod: (folder: string) => invoke('modmixer:mods:delete', folder),
   importModFromFolder: () => invoke('modmixer:mods:import-from-folder'),
-  createUntitledMod: () => invoke('modmixer:mods:create-untitled'),
+  createUntitledMod: (game?: 'rimworld' | 'minecraft') =>
+    invoke('modmixer:mods:create-untitled', game),
   readModAbout: (folder: string) => invoke('modmixer:mods:read-about', folder),
   readSchematic: (folder: string) => invoke('modmixer:mods:read-schematic', folder),
   scanModDefs: (folder: string) => invoke('modmixer:mods:scan-defs', folder),

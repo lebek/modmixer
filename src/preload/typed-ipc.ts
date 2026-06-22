@@ -23,6 +23,7 @@ import type {
   WorkspaceMod,
   WorkspacePaths,
 } from '../agent/workspace';
+import type { GameId } from '../agent/games/types';
 import type { SchematicData } from '../agent/schematic';
 import type { DefEntry } from '../agent/defs-scan';
 import type { EnableResult, DisableResult } from '../agent/game';
@@ -211,7 +212,7 @@ export interface Channels {
     result: ImportModResult;
     mods: WorkspaceMod[];
   } | null;
-  'modmixer:mods:create-untitled': () => {
+  'modmixer:mods:create-untitled': (game?: GameId) => {
     folder: string;
     mods: WorkspaceMod[];
   };

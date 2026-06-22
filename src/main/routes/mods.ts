@@ -30,6 +30,9 @@ import {
 } from '../../agent/registry/index.js';
 import { listConversationsForMod } from '../../agent/conversations.js';
 import { deleteAllSaves } from '../../agent/snapshots.js';
+import { loadSettings } from '../../agent/settings.js';
+import { resolveGameId } from '../../agent/games/registry.js';
+import type { GameId } from '../../agent/games/types.js';
 import type { RouteContext } from './context.js';
 
 /**
@@ -92,12 +95,18 @@ export function registerModRoutes(ctx: RouteContext): void {
 
   ipc.handle('modmixer:workspace:paths', () => getWorkspacePaths());
 
-  ipc.handle('modmixer:mods:create-untitled', async (): Promise<{
+  ipc.handle('modmixer:mods:create-untitled', async (
+    _evt,
+    game?: GameId,
+  ): Promise<{
     folder: string;
     mods: WorkspaceMod[];
   }> => {
     requireConsent();
-    const { folder } = await createUntitledMod();
+    // Caller may pick the game (library dropdown); otherwise default to the
+    // user's active game. resolveGameId coerces anything unknown to rimworld.
+    const targetGame = game ? resolveGameId(game) : loadSettings().selectedGameId;
+    const { folder } = await createUntitledMod(targetGame);
     emitModChanged(folder);
     await registry.refresh();
     return { folder, mods: await listWorkspaceMods() };

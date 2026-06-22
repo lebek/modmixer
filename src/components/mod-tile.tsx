@@ -1,4 +1,5 @@
 import type { WorkspaceMod } from '../agent/workspace';
+import { getGame } from '../agent/games/registry';
 import { useModPreview } from '@/lib/use-mod-preview';
 import { formatDate, formatRelative } from '@/lib/format-date';
 
@@ -31,6 +32,13 @@ export function ModTile({
           <span className="truncate font-display text-base font-medium text-ink">
             {mod.about.name || mod.folder}
           </span>
+          {mod.prefs.game !== 'rimworld' && (
+            <span
+              className={`shrink-0 rounded px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wide ${getGame(mod.prefs.game).badgeClassName}`}
+            >
+              {getGame(mod.prefs.game).displayName}
+            </span>
+          )}
         </div>
         {(mod.schematic?.shortDescription || mod.about.description) && (
           <p className="line-clamp-2 text-sm text-muted">

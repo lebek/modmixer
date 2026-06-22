@@ -1,10 +1,18 @@
 import { Type } from 'typebox';
+import path from 'node:path';
 import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
 import { isRimWorldRunning, quitRimWorld } from '../game.js';
 import { prepareDebugSession } from '../prefs.js';
 import { shipAndLaunch, type ShipAndLaunchDetails } from '../ship.js';
 import { ensureTestSavedataPrefs } from '../test-savedata.js';
 import { getAgentHost } from '../agent-host.js';
+import { readModPrefs } from '../mod-prefs.js';
+import { getWorkspacePaths } from '../workspace.js';
+import {
+  isMinecraftClientRunning,
+  quitMinecraftClient,
+  launchMinecraftClient,
+} from '../minecraft/launch.js';
 
 const Params = Type.Object({
   folder: Type.String({
@@ -75,6 +83,62 @@ interface RunTestCycleDetails {
  * run at a time — startMonitoring throws if another mod is mid-test, and
  * that error propagates back to the agent as a tool result.
  */
+/**
+ * Minecraft test cycle: arm the shared bridge monitor, then launch the modded
+ * client with `gradlew runClient` (the bridge mod streams aggregated errors
+ * back over localhost). Fire-and-forget — the client runs until it auto-exits
+ * (watchdog) or the user closes it; errors arrive as auto-prompts meanwhile.
+ */
+async function runMinecraftTestCycle(
+  conversationId: string,
+  folder: string,
+): Promise<AgentToolResult<RunTestCycleDetails>> {
+  const lines: string[] = [];
+
+  let quit: RunTestCycleDetails['quit'] = null;
+  if (isMinecraftClientRunning()) {
+    await quitMinecraftClient();
+    quit = { wasRunning: true, killed: true, exited: true };
+    lines.push('Stopped the previous test client.');
+  }
+
+  // Arm the monitor BEFORE launching so the bridge can connect as the client
+  // boots (the bridge also retries with backoff, so order is forgiving).
+  await getAgentHost().startMonitoring({
+    conversationId,
+    modFolder: folder,
+    isolated: false,
+  });
+
+  const { workspaceDir } = getWorkspacePaths();
+  const projectDir = path.join(workspaceDir, folder);
+  try {
+    await launchMinecraftClient(projectDir);
+  } catch (err) {
+    return {
+      content: [
+        {
+          type: 'text',
+          text: `Failed to launch the Minecraft client: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        },
+      ],
+      details: { quit, prefs: null, launch: null, watching: false },
+    };
+  }
+
+  lines.push(
+    'Launched the modded client (gradlew runClient) with the diagnostics bridge. ' +
+      'The first run decompiles Minecraft and can take several minutes. Errors will ' +
+      'arrive automatically as "[automated …]" messages; tell the user what to try in-game.',
+  );
+  return {
+    content: [{ type: 'text', text: lines.join(' ') }],
+    details: { quit, prefs: null, launch: null, watching: true },
+  };
+}
+
 export function createRunTestCycleTool(
   conversationId: string,
 ): AgentTool<typeof Params, RunTestCycleDetails> {
@@ -85,6 +149,15 @@ export function createRunTestCycleTool(
       "Macro: the only way to test a mod in-game. Handles the entire flow in one call — flips dev-mode + pins palette entries in Prefs.xml, syncs the mod into RimWorld's Mods/, installs the Modmixer Bridge mod (Harmony-patched diagnostics over localhost TCP), writes an active-mod list (Core + DLCs + target + transitive deps + any companionMods + bridge) to a separate savedata folder by default so the user's real mod list is untouched, launches RimWorld with `-quicktest`, and arms background bridge monitoring. If RimWorld is already running it's force-quit and relaunched automatically — never ask about unsaved progress (Modmixer users are mod-testing; saves don't matter). After this returns, tell the user EXACTLY what to do in-game (they're about to alt-tab) — errors will arrive automatically as '[automated …]' messages via the standard error-triage protocol.",
     parameters: Params,
     async execute(_id, params): Promise<AgentToolResult<RunTestCycleDetails>> {
+      // Minecraft mods take a completely different test path: no Steam, no
+      // ModsConfig, no Prefs — launch the modded client straight from the
+      // project via `gradlew runClient` with the bridge mod loaded. The
+      // monitor server + error-buffer plumbing is shared.
+      const modPrefs = await readModPrefs(params.folder);
+      if (modPrefs.game === 'minecraft') {
+        return runMinecraftTestCycle(conversationId, params.folder);
+      }
+
       const lines: string[] = [];
 
       // 1. RimWorld-running guard. Always force-quit a running instance before
