@@ -109,20 +109,35 @@ export async function ensureMinecraftSources(
  * include list limits extraction to those top-level path prefixes (e.g.
  * ['data/', 'assets/']) on platforms where the unzip tool supports globs.
  */
-export async function extractJar(
+export async function extractJarInto(
   jar: string,
   dest: string,
   includePrefixes?: string[],
 ): Promise<void> {
-  await fsp.rm(dest, { recursive: true, force: true });
   await fsp.mkdir(dest, { recursive: true });
   if (process.platform === 'win32') {
     // bsdtar can't easily filter; extract all (callers walk what they need).
     await execFileP('tar', ['-xf', jar, '-C', dest], { maxBuffer: 256 * 1024 * 1024 });
   } else {
     const globs = includePrefixes?.map((p) => `${p}*`) ?? [];
-    await execFileP('unzip', ['-q', '-o', jar, ...globs, '-d', dest], {
-      maxBuffer: 256 * 1024 * 1024,
-    });
+    try {
+      await execFileP('unzip', ['-q', '-o', jar, ...globs, '-d', dest], {
+        maxBuffer: 256 * 1024 * 1024,
+      });
+    } catch (err) {
+      // unzip exit 11 = none of the include globs matched anything in this jar
+      // (e.g. a jar with no data/neoforge/). That's expected, not a failure.
+      if ((err as { code?: number }).code !== 11) throw err;
+    }
   }
+}
+
+/** Wipe `dest` then extract (for the sources tree, which is rebuilt wholesale). */
+export async function extractJar(
+  jar: string,
+  dest: string,
+  includePrefixes?: string[],
+): Promise<void> {
+  await fsp.rm(dest, { recursive: true, force: true });
+  await extractJarInto(jar, dest, includePrefixes);
 }

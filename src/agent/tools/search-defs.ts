@@ -4,6 +4,11 @@ import path from 'node:path';
 import { openIndexDb } from '../index/db.js';
 import { getIndexPaths } from '../index/paths.js';
 import { getIndexStatus } from '../index/rebuild.js';
+import {
+  getMinecraftIndexStatus,
+  ensureMinecraftIndexInBackground,
+} from '../index/rebuild-minecraft.js';
+import type { GameId } from '../games/types.js';
 
 const Params = Type.Object({
   query: Type.String({
@@ -94,22 +99,38 @@ type Details =
 const NO_INDEX_MSG =
   'RimWorld source index is not built yet. Open Settings → RimWorld index → Rebuild, or wait for the startup index to finish.';
 
-export const searchDefsTool: AgentTool<typeof Params, Details> = {
+function defsIndexNotReady(game: GameId): string | null {
+  if (game === 'minecraft') {
+    const status = ensureMinecraftIndexInBackground();
+    if (status === 'fresh') return null;
+    if (status === 'building')
+      return 'The Minecraft index is still building (one-time decompile, a few minutes). Try again shortly.';
+    return "The Minecraft index isn't built yet — I just started it in the background. Try again shortly.";
+  }
+  const status = getIndexStatus();
+  if (status.type === 'absent' || status.type === 'no-rimworld') return NO_INDEX_MSG;
+  return null;
+}
+
+export function createSearchDefsTool(game: GameId = 'rimworld'): AgentTool<typeof Params, Details> {
+  const isMc = game === 'minecraft';
+  return {
   name: 'search_defs',
-  label: 'Search defs',
-  description:
-    "Look up XML defs in the indexed Core + DLCs corpus. Three modes in one tool:\n\n• default — search by defName / label / description / abstract Name. Pass a single keyword (\"Pirate\") or a few whitespace-separated terms (\"BaseHuman raider\") — terms are AND'd. Abstract defs (those with `Name=\"…\"` and no `defName`, e.g. `FactionBase`) are matched on their Name attribute. When exactly one def matches, the full merged XML is returned inline.\n• descendantsOf=<Name> — find every def that extends a parent via ParentName (e.g. \"BaseFilth\"). Pass recursive=true to walk transitively.\n• referencedBy=<defName> — find every C# source location that mentions this defName by string literal.\n\nTemplate-fetch idiom: when you know the exact defName and just want its full XML to copy from (e.g. \"show me the Pirate FactionDef as a template\"), call with `limit=1` (and optionally `merged=true` to fold ParentName inheritance inline). That collapses the common search → identify → re-fetch chain into one call.\n\nThis tells you what XML data exists. For code BEHAVIOR (how does X work, why isn't Y firing, what's the right API pattern) start with search_source or read_csharp_symbol — the def database can't tell you how the engine consumes a def. Zero results here doesn't mean nothing exists; it usually means the answer lives in C# source, not XML.",
+  label: isMc ? 'Search Minecraft data' : 'Search defs',
+  description: isMc
+    ? "Look up Minecraft data/asset JSON in the indexed vanilla corpus by namespaced id. Search recipes, loot tables, tags, advancements, worldgen, models, blockstates, and lang (e.g. \"diamond_sword\", \"oak_planks\"). Filter by defType (recipe, loot_table, tags, advancement, models, blockstates, lang). When exactly one entry matches, its full JSON is returned inline — handy as a template to copy from. For Java code BEHAVIOR (how a registry/event works) use read_csharp_symbol or search_source instead."
+    : "Look up XML defs in the indexed Core + DLCs corpus. Three modes in one tool:\n\n• default — search by defName / label / description / abstract Name. Pass a single keyword (\"Pirate\") or a few whitespace-separated terms (\"BaseHuman raider\") — terms are AND'd. Abstract defs (those with `Name=\"…\"` and no `defName`, e.g. `FactionBase`) are matched on their Name attribute. When exactly one def matches, the full merged XML is returned inline.\n• descendantsOf=<Name> — find every def that extends a parent via ParentName (e.g. \"BaseFilth\"). Pass recursive=true to walk transitively.\n• referencedBy=<defName> — find every C# source location that mentions this defName by string literal.\n\nTemplate-fetch idiom: when you know the exact defName and just want its full XML to copy from (e.g. \"show me the Pirate FactionDef as a template\"), call with `limit=1` (and optionally `merged=true` to fold ParentName inheritance inline). That collapses the common search → identify → re-fetch chain into one call.\n\nThis tells you what XML data exists. For code BEHAVIOR (how does X work, why isn't Y firing, what's the right API pattern) start with search_source or read_csharp_symbol — the def database can't tell you how the engine consumes a def. Zero results here doesn't mean nothing exists; it usually means the answer lives in C# source, not XML.",
   parameters: Params,
   async execute(_id, params): Promise<AgentToolResult<Details>> {
-    const status = getIndexStatus();
-    if (status.type === 'absent' || status.type === 'no-rimworld') {
+    const notReady = defsIndexNotReady(game);
+    if (notReady) {
       return {
-        content: [{ type: 'text', text: NO_INDEX_MSG }],
+        content: [{ type: 'text', text: notReady }],
         details: { mode: 'search', hits: [] },
       };
     }
-    const db = openIndexDb();
-    const { defsRoot, sourceRoot } = getIndexPaths();
+    const db = openIndexDb(game);
+    const { defsRoot, sourceRoot } = getIndexPaths(game);
 
     if (params.descendantsOf) {
       return runDescendants(db, params, defsRoot);
@@ -287,7 +308,8 @@ export const searchDefsTool: AgentTool<typeof Params, Details> = {
       details: { mode: 'search', hits: absRows },
     };
   },
-};
+  };
+}
 
 function fetchDefRow(
   db: ReturnType<typeof openIndexDb>,

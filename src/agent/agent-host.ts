@@ -56,7 +56,7 @@ import { listInstalledModsTool } from './tools/list-installed-mods.js';
 import { decompileDllTool } from './tools/decompile-dll.js';
 import { renderSvgToPngTool } from './tools/render-svg-to-png.js';
 import { renderPreviewTool } from './tools/render-preview.js';
-import { searchDefsTool } from './tools/search-defs.js';
+import { createSearchDefsTool } from './tools/search-defs.js';
 import { createReadCsharpSymbolTool } from './tools/read-csharp-symbol.js';
 import { createSearchSourceTool } from './tools/search-source.js';
 import { warmSearchCache } from './index/warm-cache.js';
@@ -174,6 +174,7 @@ export function buildCustomTools(
   const researchTools: AgentTool<any>[] =
     game === 'minecraft'
       ? [
+          createSearchDefsTool(game),
           createReadCsharpSymbolTool(game),
           createSearchSourceTool(game),
           readLoreTool,
@@ -183,7 +184,7 @@ export function buildCustomTools(
           listInstalledModsTool,
           decompileDllTool,
           // RimWorld source/def index — read-only lookups against $MM/index/*.
-          searchDefsTool,
+          createSearchDefsTool(game),
           createReadCsharpSymbolTool(game),
           createSearchSourceTool(game),
           readLoreTool,

@@ -2,7 +2,13 @@ import fs from 'node:fs';
 import { getIndexPaths } from './paths.js';
 import { closeIndexDb, openIndexDb, resetSchema } from './db.js';
 import { indexJava } from './java-indexer.js';
-import { ensureMinecraftSources, extractJar } from './minecraft-source.js';
+import { indexMinecraftData } from './minecraft-data-indexer.js';
+import {
+  ensureMinecraftSources,
+  extractJar,
+  extractJarInto,
+} from './minecraft-source.js';
+import fsp from 'node:fs/promises';
 import { ensureJdk21 } from '../minecraft/jdk.js';
 import { toolchainFingerprint } from '../minecraft/versions.js';
 import type { IndexProgressListener } from './progress.js';
@@ -18,13 +24,15 @@ import type { IndexProgressListener } from './progress.js';
  * the sources are Mojang-licensed and generated locally).
  */
 
-const MC_INDEX_SCHEMA_VERSION = 1;
+// v2 added the data/JSON index (recipes, loot tables, tags, models, lang).
+const MC_INDEX_SCHEMA_VERSION = 2;
 
 export interface MinecraftIndexMeta {
   schemaVersion: number;
   /** Pinned toolchain fingerprint (MC + NeoForge + Parchment versions). */
   toolchain: string;
   symbolCount: number;
+  defCount: number;
   sourceBytes: number;
   builtAt: string;
 }
@@ -99,7 +107,7 @@ export async function rebuildMinecraftIndex(
   const signal = options.signal ?? ctrl.signal;
   const start = Date.now();
   try {
-    onProgress({ type: 'starting', phases: ['decompile', 'symbols'] });
+    onProgress({ type: 'starting', phases: ['decompile', 'symbols', 'defs'] });
 
     onProgress({
       type: 'phase',
@@ -113,9 +121,10 @@ export async function rebuildMinecraftIndex(
       phase: 'decompile',
       message: 'Generating decompiled Minecraft sources (one-time, can take a few minutes)…',
     });
-    const { sourcesJar } = await ensureMinecraftSources(undefined, signal);
+    const { sourcesJar, dataJar, clientResourcesJar } =
+      await ensureMinecraftSources(undefined, signal);
 
-    const { sourceRoot } = getIndexPaths('minecraft');
+    const { sourceRoot, defsRoot } = getIndexPaths('minecraft');
     onProgress({
       type: 'phase',
       phase: 'decompile',
@@ -134,10 +143,35 @@ export async function rebuildMinecraftIndex(
       signal,
     );
 
+    // Data/asset JSON (recipes, loot tables, tags, models, lang) → def table.
+    onProgress({
+      type: 'phase',
+      phase: 'defs',
+      message: 'Extracting Minecraft data + assets…',
+    });
+    await fsp.rm(defsRoot, { recursive: true, force: true });
+    await fsp.mkdir(defsRoot, { recursive: true });
+    // The client-extra jar holds the FULL vanilla data pack (all recipes/loot
+    // tables/tags + assets); the merged jar only carries NeoForge's own data +
+    // a patched subset. So pull data/ + the JSON asset dirs from client-extra,
+    // then layer NeoForge's data/neoforge/ on top.
+    if (clientResourcesJar) {
+      await extractJarInto(clientResourcesJar, defsRoot, [
+        'data/',
+        'assets/minecraft/lang/',
+        'assets/minecraft/models/',
+        'assets/minecraft/blockstates/',
+      ]);
+    }
+    if (dataJar) await extractJarInto(dataJar, defsRoot, ['data/neoforge/']);
+    if (signal.aborted) throw new Error('Index rebuild aborted');
+    const defCount = await indexMinecraftData(db, { dataRoot: defsRoot }, onProgress, signal);
+
     const meta: MinecraftIndexMeta = {
       schemaVersion: MC_INDEX_SCHEMA_VERSION,
       toolchain: toolchainFingerprint(),
       symbolCount,
+      defCount,
       sourceBytes,
       builtAt: new Date().toISOString(),
     };
