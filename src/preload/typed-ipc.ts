@@ -163,6 +163,7 @@ export interface Channels {
   'modmixer:settings:set-theme': (theme: ThemePreference) => Settings;
   'modmixer:settings:set-thinking-level': (level: ThinkingLevel) => Settings;
   'modmixer:settings:set-multi-chat': (enabled: boolean) => Settings;
+  'modmixer:settings:set-minecraft-enabled': (enabled: boolean) => Settings;
   'modmixer:settings:set-community-lore': (enabled: boolean) => Settings;
   'modmixer:settings:set-auto-launch': (enabled: boolean) => Settings;
   'modmixer:settings:set-dangerously-skip-permissions': (

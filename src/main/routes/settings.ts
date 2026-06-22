@@ -66,6 +66,11 @@ export function registerSettingsRoutes(ctx: RouteContext): void {
   );
 
   ipc.handle(
+    'modmixer:settings:set-minecraft-enabled',
+    (_evt, enabled: boolean) => saveSettings({ minecraftEnabled: enabled }),
+  );
+
+  ipc.handle(
     'modmixer:settings:set-auto-launch',
     // New-chats-only: takes effect for chats created after this point, since
     // the launch mode is baked into the system prompt at conversation

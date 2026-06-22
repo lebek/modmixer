@@ -22,6 +22,7 @@ export type SettingsSection =
   | 'general'
   | 'appearance'
   | 'index'
+  | 'games'
   | 'advanced';
 
 export function AppSettingsDialog({
@@ -40,6 +41,7 @@ export function AppSettingsDialog({
   const [defaultThinking, setDefaultThinking] =
     useState<ThinkingLevel>('medium');
   const [multiChat, setMultiChat] = useState(false);
+  const [minecraftEnabled, setMinecraftEnabled] = useState(false);
   const [communityLore, setCommunityLore] = useState(false);
   const [autoLaunch, setAutoLaunch] = useState(false);
   const [skipPermissions, setSkipPermissions] = useState(false);
@@ -54,6 +56,7 @@ export function AppSettingsDialog({
       setDefaultModel(s.model);
       setDefaultThinking(s.thinkingLevel);
       setMultiChat(s.multiChat);
+      setMinecraftEnabled(s.minecraftEnabled);
       setCommunityLore(s.useCommunityLore);
       setAutoLaunch(s.autoLaunch);
       setSkipPermissions(s.dangerouslySkipPermissions);
@@ -94,6 +97,11 @@ export function AppSettingsDialog({
     await window.modmixer.setMultiChat(next);
   };
 
+  const changeMinecraftEnabled = async (next: boolean) => {
+    setMinecraftEnabled(next);
+    await window.modmixer.setMinecraftEnabled(next);
+  };
+
   const changeCommunityLore = async (next: boolean) => {
     setCommunityLore(next);
     await window.modmixer.setCommunityLore(next);
@@ -116,9 +124,11 @@ export function AppSettingsDialog({
         ? 'Appearance'
         : section === 'index'
           ? 'RimWorld index'
-          : section === 'advanced'
-            ? 'Advanced'
-            : 'General';
+          : section === 'games'
+            ? 'Games'
+            : section === 'advanced'
+              ? 'Advanced'
+              : 'General';
 
   return (
     <div
@@ -144,6 +154,11 @@ export function AppSettingsDialog({
             label="RimWorld index"
             active={section === 'index'}
             onClick={() => setSection('index')}
+          />
+          <SectionTab
+            label="Games"
+            active={section === 'games'}
+            onClick={() => setSection('games')}
           />
           <SectionTab
             label="General"
@@ -176,6 +191,15 @@ export function AppSettingsDialog({
               <AppearanceSection theme={theme} onChange={changeTheme} />
             )}
             {section === 'index' && <IndexSection />}
+            {section === 'games' &&
+              (!loaded ? (
+                <p className="text-sm text-muted">Loading…</p>
+              ) : (
+                <GamesSection
+                  minecraftEnabled={minecraftEnabled}
+                  onMinecraftEnabledChange={changeMinecraftEnabled}
+                />
+              ))}
             {section === 'advanced' &&
               (!loaded ? (
                 <p className="text-sm text-muted">Loading…</p>
@@ -492,6 +516,52 @@ function AppearanceSection({
             </button>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+function GamesSection({
+  minecraftEnabled,
+  onMinecraftEnabledChange,
+}: {
+  minecraftEnabled: boolean;
+  onMinecraftEnabledChange: (next: boolean) => void | Promise<void>;
+}) {
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-muted">
+        Modmixer supports more than one game. RimWorld is always on; enable
+        another game here, then pick which game a new mod targets from the
+        “+ new mod” menu on the home screen.
+      </p>
+      <div className="border-t border-line pt-4">
+        <label className="flex cursor-pointer items-start gap-2">
+          <input
+            type="checkbox"
+            checked={minecraftEnabled}
+            onChange={(e) => void onMinecraftEnabledChange(e.target.checked)}
+            className="mt-0.5"
+          />
+          <span className="text-sm text-ink">
+            Minecraft (NeoForge 1.21.1){' '}
+            <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-warning">
+              Beta
+            </span>
+            <span className="mt-0.5 block text-xs text-muted">
+              Create and test Minecraft Java mods with NeoForge. Modmixer
+              provisions Java 21 and the Gradle toolchain automatically — you
+              don’t need anything installed. The first build/test does a
+              one-time Minecraft decompile that can take a few minutes.
+            </span>
+          </span>
+        </label>
+        {minecraftEnabled && (
+          <div className="mt-2 rounded-md border border-line bg-surface/40 px-3 py-2 text-xs text-muted">
+            “Minecraft” now appears in the “+ new mod” menu. To publish, add a
+            Modrinth token from a Minecraft mod’s Publish panel.
+          </div>
+        )}
       </div>
     </div>
   );

@@ -81,6 +81,8 @@ const api = {
     invoke('modmixer:settings:set-thinking-level', level),
   setMultiChat: (enabled: boolean) =>
     invoke('modmixer:settings:set-multi-chat', enabled),
+  setMinecraftEnabled: (enabled: boolean) =>
+    invoke('modmixer:settings:set-minecraft-enabled', enabled),
   setAutoLaunch: (enabled: boolean) =>
     invoke('modmixer:settings:set-auto-launch', enabled),
   setDangerouslySkipPermissions: (enabled: boolean) =>
