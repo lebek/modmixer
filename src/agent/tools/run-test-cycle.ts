@@ -83,6 +83,49 @@ interface RunTestCycleDetails {
  * run at a time — startMonitoring throws if another mod is mid-test, and
  * that error propagates back to the agent as a tool result.
  */
+// Distinctive markers in NeoForge/FML output when mod loading fails. These show
+// the in-game "Error loading mods" screen; the text also lands in the runClient
+// console, which is what we scan.
+const LOAD_FAILURE_RE =
+  /Error loading mods|ModLoadingException|ModLoadingIssue|which does not exist or is not in the same file|Missing or unsupported mandatory|Failed to load|incompatible mods|caught exception during loading/i;
+
+/**
+ * Build a line handler that watches runClient output for a mod-loading failure
+ * block and, on first sight, steers a concise diagnostic into the agent exactly
+ * once. Collects up to ~60 lines from the first marker, flushing after a short
+ * idle so the whole FML error block is captured.
+ */
+function makeLoadFailureDetector(conversationId: string): (line: string) => void {
+  let collecting = false;
+  let reported = false;
+  const block: string[] = [];
+  let timer: NodeJS.Timeout | null = null;
+
+  const flush = () => {
+    if (reported) return;
+    reported = true;
+    if (timer) clearTimeout(timer);
+    const detail = block.join('\n').slice(0, 4000);
+    void getAgentHost().reportTestDiagnostic(
+      conversationId,
+      `[automated — test run] The Minecraft client failed to load the mod (NeoForge "Error loading mods" screen). Reported by the loader:\n\n${detail}\n\nThis is a load-time error (the build compiled fine). Diagnose the cause from the message above — a common one is a mod-id/entrypoint mismatch — fix it, then run the test again.`,
+    );
+  };
+
+  return (line: string) => {
+    if (reported) return;
+    if (!collecting && LOAD_FAILURE_RE.test(line)) collecting = true;
+    if (!collecting) return;
+    block.push(line);
+    if (block.length >= 60) {
+      flush();
+      return;
+    }
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(flush, 2500);
+  };
+}
+
 /**
  * Minecraft test cycle: arm the shared bridge monitor, then launch the modded
  * client with `gradlew runClient` (the bridge mod streams aggregated errors
@@ -112,8 +155,16 @@ async function runMinecraftTestCycle(
 
   const { workspaceDir } = getWorkspacePaths();
   const projectDir = path.join(workspaceDir, folder);
+
+  // Backstop for load-time failures the in-game bridge can't catch: scan the
+  // runClient output for NeoForge's mod-loading error block (which aborts the
+  // mod bus before the bridge's hooks run, so a broken mod otherwise produces a
+  // green build + silence). On first match, collect the error block and steer
+  // it into the agent once, so it never wrongly concludes "all good".
+  const onLine = makeLoadFailureDetector(conversationId);
+
   try {
-    await launchMinecraftClient(projectDir);
+    await launchMinecraftClient(projectDir, { onLine });
   } catch (err) {
     return {
       content: [

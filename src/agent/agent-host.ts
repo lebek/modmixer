@@ -2355,6 +2355,29 @@ export class AgentHost {
   }
 
   /**
+   * Backstop for the Minecraft test loop: surface a launch/load diagnostic
+   * detected from the `gradlew runClient` output (e.g. a NeoForge mod-loading
+   * failure that shows the in-game error screen) into the conversation. This
+   * covers the gap where the in-game bridge can't report — load-time failures
+   * abort the mod event bus before the bridge's hooks run, so without this the
+   * agent would see a green build + no bridge errors and wrongly conclude all
+   * is well. Same steer semantics as bridge error auto-prompts; reported once
+   * per test run by the caller.
+   */
+  async reportTestDiagnostic(conversationId: string, text: string): Promise<void> {
+    if (this.monitoringConversationId !== conversationId) return;
+    const entry = this.sessions.get(conversationId);
+    if (!entry) return;
+    this.bridgeErrorsSeen = true;
+    sendToast('Modmixer', 'Mod failed to load — investigating…');
+    try {
+      await entry.session.prompt(text, { streamingBehavior: 'steer' });
+    } catch (err) {
+      console.error('Failed to prompt session with launch diagnostic:', err);
+    }
+  }
+
+  /**
    * Demo-video harness only — the IPC handler is registered behind
    * MODMIXER_DEMO=1 in main.ts. One-shot completion against the user's
    * configured Anthropic credentials (OAuth subscription or API key), so the
