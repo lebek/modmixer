@@ -41,6 +41,13 @@ export interface ModPrefs {
   modrinthProjectId?: string;
   /** Modrinth project slug, for building the public URL. */
   modrinthSlug?: string;
+  /**
+   * Version number of the most recent successful Modrinth publish. Used to
+   * pre-fill the publish dialog with the next patch bump — Modrinth rejects a
+   * duplicate version, so each update must increment. Undefined until first
+   * published.
+   */
+  modrinthVersion?: string;
 }
 
 const SIDECAR_DIR = '.modmixer';
@@ -78,6 +85,10 @@ function parsePrefs(raw: string): ModPrefs {
           : undefined,
       modrinthSlug:
         typeof parsed.modrinthSlug === 'string' ? parsed.modrinthSlug : undefined,
+      modrinthVersion:
+        typeof parsed.modrinthVersion === 'string'
+          ? parsed.modrinthVersion
+          : undefined,
     };
   } catch {
     return defaults();
@@ -123,6 +134,10 @@ export async function writeModPrefs(
         : current.modrinthProjectId,
     modrinthSlug:
       'modrinthSlug' in patch ? patch.modrinthSlug : current.modrinthSlug,
+    modrinthVersion:
+      'modrinthVersion' in patch
+        ? patch.modrinthVersion
+        : current.modrinthVersion,
   };
   await fsp.mkdir(path.join(modDir, SIDECAR_DIR), { recursive: true });
   await fsp.writeFile(

@@ -225,7 +225,7 @@ export function MinecraftPublishPanel({ mod }: { mod: WorkspaceMod }) {
         open={confirmOpen}
         isUpdate={isUpdate}
         modName={title}
-        defaultVersion="1.0.0"
+        defaultVersion={nextVersion(mod.prefs.modrinthVersion)}
         onCancel={() => setConfirmOpen(false)}
         onConfirm={(result) => {
           setConfirmOpen(false);
@@ -238,6 +238,20 @@ export function MinecraftPublishPanel({ mod }: { mod: WorkspaceMod }) {
 
 const inputCls =
   'w-full rounded-md border border-line bg-paper px-2.5 py-1.5 text-sm text-ink focus:border-accent focus:outline-none';
+
+/**
+ * Seed the next publish's version number: bump the last numeric component of
+ * the previously published version (1.0.0 → 1.0.1), or start at 1.0.0 for a mod
+ * that's never been published. Modrinth rejects a duplicate version, so a
+ * sensible pre-fill beats re-typing — the user can still override it.
+ */
+function nextVersion(prev: string | undefined): string {
+  if (!prev) return '1.0.0';
+  const m = prev.match(/^(.*?)(\d+)(\D*)$/);
+  if (!m) return prev;
+  const [, head, num, tail] = m;
+  return `${head}${Number(num) + 1}${tail}`;
+}
 
 function slugify(s: string): string {
   return s

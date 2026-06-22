@@ -63,6 +63,7 @@ export function registerModrinthRoutes(ctx: RouteContext): void {
       await writeModPrefs(folder, {
         modrinthProjectId: result.projectId,
         modrinthSlug: result.slug,
+        modrinthVersion: version.versionNumber,
         lastPublishedAt: Date.now(),
       });
       emitModChanged(folder);
