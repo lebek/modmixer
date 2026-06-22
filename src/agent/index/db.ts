@@ -1,6 +1,7 @@
 import path from 'node:path';
 import type Database from 'better-sqlite3';
 import { getIndexPaths } from './paths.js';
+import type { GameId } from '../games/types.js';
 
 /**
  * Resolve and require better-sqlite3. We can't let Vite bundle it (native
@@ -29,28 +30,37 @@ function loadBetterSqlite(): typeof Database {
   }
 }
 
-let cached: Database.Database | null = null;
+// One connection per game (RimWorld + Minecraft indexes are separate SQLite
+// files under per-game subdirs). Defaults to RimWorld so existing callers are
+// unchanged.
+const cached = new Map<GameId, Database.Database>();
 
-export function openIndexDb(): Database.Database {
-  if (cached) return cached;
+export function openIndexDb(gameId: GameId = 'rimworld'): Database.Database {
+  const existing = cached.get(gameId);
+  if (existing) return existing;
   const Sqlite = loadBetterSqlite();
-  const { dbPath } = getIndexPaths();
-  cached = new Sqlite(dbPath);
-  cached.pragma('journal_mode = WAL');
-  cached.pragma('synchronous = NORMAL');
-  ensureSchema(cached);
-  return cached;
+  const { dbPath } = getIndexPaths(gameId);
+  const db = new Sqlite(dbPath);
+  db.pragma('journal_mode = WAL');
+  db.pragma('synchronous = NORMAL');
+  ensureSchema(db);
+  cached.set(gameId, db);
+  return db;
 }
 
-export function closeIndexDb(): void {
-  if (cached) {
+export function closeIndexDb(gameId?: GameId): void {
+  const closeOne = (g: GameId) => {
+    const db = cached.get(g);
+    if (!db) return;
     try {
-      cached.close();
+      db.close();
     } catch {
       // ignore — process exit will release the handle anyway
     }
-    cached = null;
-  }
+    cached.delete(g);
+  };
+  if (gameId) closeOne(gameId);
+  else for (const g of [...cached.keys()]) closeOne(g);
 }
 
 /**

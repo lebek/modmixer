@@ -1,6 +1,7 @@
 import { app } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
+import type { GameId } from '../games/types.js';
 
 /**
  * Disk layout for the RimWorld source/def index. Lives under userData so the
@@ -21,8 +22,16 @@ export interface IndexPaths {
   metaPath: string;
 }
 
-export function getIndexPaths(): IndexPaths {
-  const root = path.join(app.getPath('userData'), 'index');
+/**
+ * Per-game index root. RimWorld keeps the legacy `index/` path so existing
+ * indexes aren't invalidated; every other game gets `index/<gameId>/`. The
+ * subdir names (Defs/, Source/) are reused across games even though Minecraft
+ * stores decompiled Java under Source/ and vanilla JSON data under Defs/ — the
+ * SQLite schema and search tools are language-agnostic.
+ */
+export function getIndexPaths(gameId: GameId = 'rimworld'): IndexPaths {
+  const base = path.join(app.getPath('userData'), 'index');
+  const root = gameId === 'rimworld' ? base : path.join(base, gameId);
   fs.mkdirSync(root, { recursive: true });
   return {
     root,
@@ -70,5 +79,11 @@ export function resolveVendoredIlspycmd(): string | null {
 /** Path to the prebuilt tree-sitter C# grammar wasm. Null if not fetched. */
 export function resolveTreeSitterCsharpWasm(): string | null {
   const candidate = resolvePackagedResource('tree-sitter/tree-sitter-c-sharp.wasm');
+  return fs.existsSync(candidate) ? candidate : null;
+}
+
+/** Path to the prebuilt tree-sitter Java grammar wasm (Minecraft index). Null if not fetched. */
+export function resolveTreeSitterJavaWasm(): string | null {
+  const candidate = resolvePackagedResource('tree-sitter/tree-sitter-java.wasm');
   return fs.existsSync(candidate) ? candidate : null;
 }
