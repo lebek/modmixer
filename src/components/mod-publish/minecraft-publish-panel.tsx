@@ -11,6 +11,10 @@ import { ErrorBanner, Field, Section } from './ui';
 export function MinecraftPublishPanel({ mod }: { mod: WorkspaceMod }) {
   const [hasToken, setHasToken] = useState<boolean | null>(null);
   const [tokenInput, setTokenInput] = useState('');
+  // Reveals the token form even when a token is already stored, so a wrong or
+  // expired token can be replaced (otherwise publishing would just keep
+  // failing with no way back to the input from this panel).
+  const [editingToken, setEditingToken] = useState(false);
 
   // Modrinth project metadata (project-level, applied at first publish).
   const [slug, setSlug] = useState(slugify(mod.about.packageId || mod.about.name));
@@ -48,7 +52,10 @@ export function MinecraftPublishPanel({ mod }: { mod: WorkspaceMod }) {
   const saveToken = useAsyncAction(async () => {
     const ok = await window.modmixer.setModrinthToken(tokenInput.trim());
     setHasToken(ok);
-    if (ok) setTokenInput('');
+    if (ok) {
+      setTokenInput('');
+      setEditingToken(false);
+    }
   });
 
   const publish = useAsyncAction(async () => {
@@ -76,40 +83,9 @@ export function MinecraftPublishPanel({ mod }: { mod: WorkspaceMod }) {
     );
   });
 
-  if (hasToken === false) {
-    return (
-      <div className="flex min-h-0 flex-1 flex-col">
-        <div className="flex-1 overflow-auto px-6 py-5">
-          <div className="max-w-xl space-y-4">
-            <Section
-              title="Connect Modrinth"
-              description="Minecraft mods publish to Modrinth. Paste a Modrinth personal access token (Settings → PATs on modrinth.com) with the Create projects + Create versions scopes. It's stored encrypted on this machine."
-            >
-              <Field label="Modrinth token">
-                <input
-                  type="password"
-                  value={tokenInput}
-                  onChange={(e) => setTokenInput(e.target.value)}
-                  className="w-full rounded-md border border-line bg-paper px-2.5 py-1.5 text-sm text-ink focus:border-accent focus:outline-none"
-                  placeholder="mrp_…"
-                />
-              </Field>
-              {saveToken.error && <ErrorBanner>{saveToken.error}</ErrorBanner>}
-              <div className="flex justify-end pt-1">
-                <button
-                  onClick={() => void saveToken.run()}
-                  disabled={!tokenInput.trim() || saveToken.busy}
-                  className="rounded-md bg-accent px-3 py-1 text-[10px] uppercase tracking-[0.18em] text-accent-foreground transition-opacity hover:bg-accent-soft disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  {saveToken.busy ? 'Saving…' : 'Save token'}
-                </button>
-              </div>
-            </Section>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  // The token form shows up front until a token is stored, and on demand
+  // afterwards (to replace a bad one). The metadata above is always editable.
+  const showTokenForm = hasToken === false || editingToken;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -179,14 +155,71 @@ export function MinecraftPublishPanel({ mod }: { mod: WorkspaceMod }) {
             )}
             {publish.error && <ErrorBanner>{publish.error}</ErrorBanner>}
 
-            <div className="flex items-center justify-end gap-2 pt-1">
-              <button
-                onClick={() => void publish.run()}
-                disabled={publish.busy || !title.trim() || (!isUpdate && !slug.trim())}
-                className="rounded-md bg-ink px-3 py-1 text-[10px] uppercase tracking-[0.18em] text-paper transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {publish.busy ? 'Publishing…' : isUpdate ? 'Publish update' : 'Publish to Modrinth'}
-              </button>
+            {/* Publish action — the only part gated on Modrinth credentials. */}
+            <div className="space-y-3 border-t border-line pt-4">
+              {hasToken === null ? (
+                <p className="text-xs text-muted">Checking Modrinth connection…</p>
+              ) : showTokenForm ? (
+                <div className="space-y-3 rounded-md border border-line bg-surface/30 p-3">
+                  <div>
+                    <h3 className="text-xs font-medium text-ink">
+                      Connect Modrinth to publish
+                    </h3>
+                    <p className="mt-0.5 text-xs text-muted">
+                      Paste a Modrinth personal access token (Settings → PATs on
+                      modrinth.com) with the Create projects + Create versions
+                      scopes. It's stored encrypted on this machine.
+                    </p>
+                  </div>
+                  <input
+                    type="password"
+                    value={tokenInput}
+                    onChange={(e) => setTokenInput(e.target.value)}
+                    className={inputCls}
+                    placeholder="mrp_…"
+                  />
+                  {saveToken.error && <ErrorBanner>{saveToken.error}</ErrorBanner>}
+                  <div className="flex justify-end gap-2">
+                    {hasToken && (
+                      <button
+                        onClick={() => {
+                          setEditingToken(false);
+                          setTokenInput('');
+                        }}
+                        className="rounded-md border border-line px-3 py-1 text-[10px] uppercase tracking-[0.18em] text-muted transition-colors hover:text-ink"
+                      >
+                        Cancel
+                      </button>
+                    )}
+                    <button
+                      onClick={() => void saveToken.run()}
+                      disabled={!tokenInput.trim() || saveToken.busy}
+                      className="rounded-md bg-accent px-3 py-1 text-[10px] uppercase tracking-[0.18em] text-accent-foreground transition-opacity hover:bg-accent-soft disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      {saveToken.busy ? 'Saving…' : 'Save token'}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs text-muted">
+                    Modrinth connected ·{' '}
+                    <button
+                      onClick={() => setEditingToken(true)}
+                      className="text-accent hover:underline"
+                    >
+                      change token
+                    </button>
+                  </span>
+                  <button
+                    onClick={() => void publish.run()}
+                    disabled={publish.busy || !title.trim() || (!isUpdate && !slug.trim())}
+                    className="rounded-md bg-ink px-3 py-1 text-[10px] uppercase tracking-[0.18em] text-paper transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {publish.busy ? 'Publishing…' : isUpdate ? 'Publish update' : 'Publish to Modrinth'}
+                  </button>
+                </div>
+              )}
             </div>
           </Section>
         </div>
