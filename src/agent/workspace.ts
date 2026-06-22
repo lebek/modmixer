@@ -11,6 +11,7 @@ import { DEFAULT_GAME_ID } from './games/registry.js';
 import {
   createMinecraftMod,
   isMinecraftTemplateAvailable,
+  readMinecraftMeta,
 } from './minecraft/scaffold.js';
 import { scanAssets } from './assets/scanner.js';
 import { parseAboutXml, type ModDependency } from './registry/about-xml.js';
@@ -133,7 +134,23 @@ async function buildWorkspaceMod(
     fsp.stat(workspacePath).catch(() => null),
     latestMtimeMs(workspacePath),
   ]);
-  const about = aboutXml ? parseAbout(aboutXml) : emptyAbout(folder);
+  // Minecraft mods have no About.xml — their identity lives in gradle.properties.
+  // Map it into the same AboutMetadata shape so the UI (which reads mod.about)
+  // shows the real name instead of the folder id.
+  let about: AboutMetadata;
+  if (prefs.game === 'minecraft') {
+    const meta = readMinecraftMeta(workspacePath);
+    about = meta
+      ? {
+          ...emptyAbout(meta.name || 'Untitled Mod'),
+          packageId: meta.modId,
+          author: meta.author,
+          description: meta.description,
+        }
+      : emptyAbout(folder);
+  } else {
+    about = aboutXml ? parseAbout(aboutXml) : emptyAbout(folder);
+  }
   const createdAt = folderStat?.birthtimeMs ?? folderStat?.ctimeMs ?? 0;
   return {
     folder,

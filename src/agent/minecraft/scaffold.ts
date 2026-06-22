@@ -46,6 +46,48 @@ export function slugifyModId(raw: string): string {
   return (`mod${slug}`).slice(0, 64).padEnd(2, 'mod');
 }
 
+export interface MinecraftMeta {
+  name: string;
+  modId: string;
+  author: string;
+  description: string;
+  version: string;
+}
+
+function parseGradleProps(content: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const line of content.split(/\r?\n/)) {
+    const t = line.trim();
+    if (!t || t.startsWith('#') || t.startsWith('!')) continue;
+    const eq = t.indexOf('=');
+    if (eq < 0) continue;
+    out[t.slice(0, eq).trim()] = t.slice(eq + 1).trim();
+  }
+  return out;
+}
+
+/**
+ * Read a scaffolded Minecraft mod's identity from gradle.properties — the MC
+ * analogue of RimWorld's About.xml. Returns null when the file is absent (an
+ * MC mod whose project hasn't been laid down yet).
+ */
+export function readMinecraftMeta(modDir: string): MinecraftMeta | null {
+  const p = path.join(modDir, 'gradle.properties');
+  if (!fs.existsSync(p)) return null;
+  try {
+    const props = parseGradleProps(fs.readFileSync(p, 'utf8'));
+    return {
+      name: props.mod_name ?? '',
+      modId: props.mod_id ?? '',
+      author: props.mod_authors ?? '',
+      description: props.mod_description ?? '',
+      version: props.mod_version ?? '',
+    };
+  } catch {
+    return null;
+  }
+}
+
 /** Resolve the vendored MDK template dir (dev tree or packaged resources). */
 function templateDir(): string | null {
   const candidates = [

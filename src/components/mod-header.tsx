@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { WorkspaceMod } from '../agent/workspace';
+import { getGame } from '../agent/games/registry';
 import { cn } from '@/lib/cn';
 
 export function ModHeader({
@@ -15,7 +16,11 @@ export function ModHeader({
   onTest: () => void;
   hasAi: boolean;
 }) {
-  const running = useRimWorldRunning();
+  const game = mod.prefs.game;
+  const isRimWorld = game === 'rimworld';
+  // The "close rimworld" affordance only applies to RimWorld; for other games
+  // we just show the test/launch button (the test flow itself is game-aware).
+  const running = useRimWorldRunning(isRimWorld);
   const [closing, setClosing] = useState(false);
 
   const onClose = async () => {
@@ -50,7 +55,7 @@ export function ModHeader({
         )}
       </div>
       <div className="ml-4 flex items-center gap-2">
-        {running ? (
+        {isRimWorld && running ? (
           <button
             onClick={onClose}
             disabled={closing}
@@ -72,7 +77,9 @@ export function ModHeader({
             )}
           >
             <LaunchIcon />
-            launch in rimworld
+            {isRimWorld
+              ? 'launch in rimworld'
+              : `test in ${getGame(game).displayName.toLowerCase()}`}
           </button>
         )}
         <SessionMenu conversationId={conversationId} />
@@ -167,9 +174,13 @@ function KebabIcon() {
   );
 }
 
-function useRimWorldRunning(): boolean {
+function useRimWorldRunning(enabled: boolean): boolean {
   const [running, setRunning] = useState(false);
   useEffect(() => {
+    if (!enabled) {
+      setRunning(false);
+      return;
+    }
     let cancelled = false;
     const tick = async () => {
       try {
@@ -185,7 +196,7 @@ function useRimWorldRunning(): boolean {
       cancelled = true;
       window.clearInterval(id);
     };
-  }, []);
+  }, [enabled]);
   return running;
 }
 
