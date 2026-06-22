@@ -76,6 +76,16 @@ final class LogAppender extends AbstractAppender {
             String loggerName = event.getLoggerName();
             String threadName = event.getThreadName();
 
+            // Drop content-free events: no throwable AND no message text. They
+            // carry nothing actionable — e.g. NeoForge's EventBus emits a blank
+            // ERROR line right around a handler throw — and would otherwise
+            // surface as a duplicate, unattributable [Unknown] error class
+            // beside the real one. Real errors always have a message and/or a
+            // throwable, so this never hides anything actionable.
+            if (thrown == null && (message == null || message.trim().isEmpty())) {
+                return;
+            }
+
             String hash = ErrorFingerprint.compute(severity, thrown, message);
 
             // Dedup: only the FIRST occurrence of a fingerprint emits.
