@@ -9,6 +9,7 @@ import { ModPublishPanel } from './mod-publish-panel';
 import { ModDepsPanel } from './mod-deps-panel';
 import { ModBuildSidebar, type BuildPanel } from './mod-build-sidebar';
 import { SavesView, type RestoreResult } from './saves-view';
+import { getGame, resolveGameId } from '../agent/games/registry';
 
 export function BuildView({
   activeMod,
@@ -57,15 +58,43 @@ export function BuildView({
   // Force panel='chat' and hide the Assets entry until a mod exists.
   const newModInProgress = !activeMod;
 
+  // Per-game UI gating: the Assets (Textures/Sounds) and Deps (About.xml
+  // dependencies) panels are RimWorld-specific. Gate them on the mod's game
+  // capabilities so a Minecraft mod doesn't get RimWorld's content panels.
+  const caps = activeMod
+    ? getGame(resolveGameId(activeMod.prefs.game)).capabilities
+    : null;
+  const showAssetPanel = !newModInProgress && !!caps?.assetPanel;
+  const showDepsPanel = !newModInProgress && !!caps?.depsPanel;
+  // Publish target drives the row label (and hides the row for a game that
+  // can't publish). RimWorld → Steam Workshop, Minecraft → Modrinth.
+  const publishSubtitle =
+    caps?.publish === 'modrinth'
+      ? 'Send to Modrinth'
+      : caps?.publish === 'steam-workshop'
+        ? 'Send to Steam Workshop'
+        : undefined;
+  // Coerce an unavailable panel back to chat (e.g. a Minecraft mod whose stored
+  // panel is a RimWorld-only one) so the content area never renders blank.
+  const effectivePanel: BuildPanel =
+    newModInProgress ||
+    (panel === 'assets' && !showAssetPanel) ||
+    (panel === 'deps' && !showDepsPanel)
+      ? 'chat'
+      : panel;
+
   return (
     <div className="flex min-h-0 flex-1">
       <ModBuildSidebar
         mod={activeMod}
         convo={activeConvo}
-        panel={newModInProgress ? 'chat' : panel}
+        panel={effectivePanel}
         onSelectPanel={onSelectPanel}
         onBack={onBack}
         showAssets={!newModInProgress}
+        showAssetPanel={showAssetPanel}
+        showDepsPanel={showDepsPanel}
+        publishSubtitle={publishSubtitle}
         onNewChat={newModInProgress ? undefined : onNewChat}
         multiChat={multiChat}
         chatListRev={chatListRev}
@@ -84,19 +113,19 @@ export function BuildView({
             hasAi={hasAi}
           />
         )}
-        {!newModInProgress && panel === 'schematic' && activeMod && (
+        {effectivePanel === 'schematic' && activeMod && (
           <ModSchematicPanel mod={activeMod} />
         )}
-        {!newModInProgress && panel === 'assets' && activeMod && (
+        {effectivePanel === 'assets' && activeMod && (
           <AssetsView mod={activeMod} />
         )}
-        {!newModInProgress && panel === 'deps' && activeMod && (
+        {effectivePanel === 'deps' && activeMod && (
           <ModDepsPanel mod={activeMod} />
         )}
-        {!newModInProgress && panel === 'saves' && activeMod && (
+        {effectivePanel === 'saves' && activeMod && (
           <SavesView mod={activeMod} onRestored={onSavesRestored} />
         )}
-        {!newModInProgress && panel === 'publish' && activeMod && (
+        {effectivePanel === 'publish' && activeMod && (
           <ModPublishPanel
             mod={activeMod}
             hasAi={hasAi}
@@ -108,7 +137,7 @@ export function BuildView({
         )}
         <div
           className={
-            newModInProgress || panel === 'chat'
+            effectivePanel === 'chat'
               ? 'flex min-h-0 flex-1 flex-col'
               : 'hidden'
           }

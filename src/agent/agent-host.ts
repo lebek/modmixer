@@ -56,6 +56,7 @@ import { listInstalledModsTool } from './tools/list-installed-mods.js';
 import { decompileDllTool } from './tools/decompile-dll.js';
 import { renderSvgToPngTool } from './tools/render-svg-to-png.js';
 import { renderPreviewTool } from './tools/render-preview.js';
+import { getGame } from './games/registry.js';
 import { createSearchDefsTool } from './tools/search-defs.js';
 import { createReadCsharpSymbolTool } from './tools/read-csharp-symbol.js';
 import { createSearchSourceTool } from './tools/search-source.js';
@@ -212,7 +213,7 @@ export function buildCustomTools(
   }
 
   return [
-    createScaffoldModTool(getActiveScope),
+    createScaffoldModTool(getActiveScope, game),
     setModMetadataTool,
     updateSchematicTool,
     buildModTool,
@@ -220,8 +221,12 @@ export function buildCustomTools(
     notifyTestStatusTool,
     monitorGetErrorTool,
     monitorPollTool,
-    renderSvgToPngTool,
-    renderPreviewTool,
+    // RimWorld-only image tools (Steam Workshop preview render, Textures/ sprite
+    // SVG→PNG). Omitted for games without the asset panel — Minecraft supplies
+    // Modrinth gallery images, not an in-project sprite pipeline.
+    ...(getGame(game).capabilities.assetPanel
+      ? [renderSvgToPngTool, renderPreviewTool]
+      : []),
     ...researchTools,
     // bash is the catch-all for arbitrary shell exec. The path-policy guard
     // is the safety net; the confirmation prompt is the user-facing brake.

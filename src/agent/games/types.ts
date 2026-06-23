@@ -33,6 +33,12 @@ export interface GameCapabilities {
   publish: PublishTarget;
   /** The Textures/Sounds asset-requirement panel + sprite preview rendering. */
   assetPanel: boolean;
+  /**
+   * The mod-dependency / load-order editor panel (RimWorld About.xml
+   * modDependencies + loadAfter/Before). RimWorld-specific; a Minecraft mod's
+   * dependencies live in the generated neoforge.mods.toml, which has no panel.
+   */
+  depsPanel: boolean;
   /** In-game live hot-edit session (RimWorld Verse bridge); off for MC beta. */
   liveSession: boolean;
   /** The build → launch → aggregated-error test loop (both games). */

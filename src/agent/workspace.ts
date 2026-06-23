@@ -199,6 +199,17 @@ export async function writeAbout(
   const { workspaceDir } = getWorkspacePaths();
   const modDir = path.join(workspaceDir, folder);
   if (!fs.existsSync(modDir)) return null;
+  // About.xml is RimWorld-only. A Minecraft mod's identity/deps live in
+  // gradle.properties + the generated neoforge.mods.toml; refuse rather than
+  // fabricate a stray manifest inside a NeoForge project. (The Deps/About UI
+  // that reaches this IPC is also gated off for non-RimWorld games — this is
+  // the defense-in-depth backstop for any programmatic caller.)
+  const prefs = await readModPrefs(folder);
+  if (prefs.game !== 'rimworld') {
+    throw new Error(
+      `writeAbout is RimWorld-only; mod "${folder}" targets ${prefs.game}. Set identity via set_mod_metadata (gradle.properties), not About.xml.`,
+    );
+  }
   const aboutDir = path.join(modDir, 'About');
   await fsp.mkdir(aboutDir, { recursive: true });
   const aboutPath = path.join(aboutDir, 'About.xml');

@@ -52,17 +52,32 @@ export function registerModrinthRoutes(ctx: RouteContext): void {
         throw new Error(error);
       }
 
+      // On re-publish the project slug can't change via the version endpoint
+      // (and Modrinth doesn't return it), so reuse the slug we already stored
+      // rather than the form's packageId-derived guess — otherwise the "View on
+      // Modrinth" URL points at a slug that may not exist.
+      const isRepublish = !!mod.prefs.modrinthProjectId;
+      const effectiveMeta =
+        isRepublish && mod.prefs.modrinthSlug
+          ? { ...meta, slug: mod.prefs.modrinthSlug }
+          : meta;
+
       const result = await publishToModrinth({
         jarPath: build.jarPath,
         projectId: mod.prefs.modrinthProjectId,
-        meta,
+        meta: effectiveMeta,
         version,
         onProgress: emit,
       });
 
       await writeModPrefs(folder, {
         modrinthProjectId: result.projectId,
-        modrinthSlug: result.slug,
+        // Only (re)store the slug when we actually learned it from Modrinth (new
+        // project creation, or a mod that had none yet). On re-publish keep the
+        // known-good stored slug rather than clobbering it with a guess.
+        ...(result.projectCreated || !mod.prefs.modrinthSlug
+          ? { modrinthSlug: result.slug }
+          : {}),
         modrinthVersion: version.versionNumber,
         lastPublishedAt: Date.now(),
       });

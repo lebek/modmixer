@@ -22,6 +22,9 @@ export function ModBuildSidebar({
   onSelectPanel,
   onBack,
   showAssets,
+  showAssetPanel,
+  showDepsPanel,
+  publishSubtitle,
   onNewChat,
   multiChat,
   chatListRev,
@@ -35,7 +38,14 @@ export function ModBuildSidebar({
   panel: BuildPanel;
   onSelectPanel: (panel: BuildPanel) => void;
   onBack: () => void;
+  /** A mod exists (vs a pre-scaffold draft) — gates the game-agnostic rows. */
   showAssets: boolean;
+  /** Game has the RimWorld Textures/Sounds asset panel. */
+  showAssetPanel: boolean;
+  /** Game has the RimWorld About.xml dependency editor. */
+  showDepsPanel: boolean;
+  /** Publish-row label per the game's target; undefined hides the row. */
+  publishSubtitle?: string;
   onNewChat?: () => void;
   multiChat: boolean;
   chatListRev: number;
@@ -51,7 +61,7 @@ export function ModBuildSidebar({
   const showMultiChat = multiChat && !!mod;
 
   useEffect(() => {
-    if (!mod || !showAssets) {
+    if (!mod || !showAssetPanel) {
       setAssetCounts(null);
       return;
     }
@@ -72,7 +82,7 @@ export function ModBuildSidebar({
       cancelled = true;
       off();
     };
-  }, [mod?.folder, showAssets]);
+  }, [mod?.folder, showAssetPanel]);
 
   const missing = assetCounts?.missing ?? 0;
   const invalid = assetCounts?.invalid ?? 0;
@@ -123,7 +133,7 @@ export function ModBuildSidebar({
             onClick={() => onSelectPanel('schematic')}
           />
         )}
-        {showAssets && (
+        {showAssetPanel && (
           <SidebarRow
             label="Assets"
             subtitle="Add images and sounds"
@@ -144,7 +154,7 @@ export function ModBuildSidebar({
             }
           />
         )}
-        {showAssets && (
+        {showDepsPanel && (
           <SidebarRow
             label="Deps"
             subtitle="What this mod needs"
@@ -153,10 +163,10 @@ export function ModBuildSidebar({
             onClick={() => onSelectPanel('deps')}
           />
         )}
-        {showAssets && (
+        {showAssets && publishSubtitle && (
           <SidebarRow
             label="Publish"
-            subtitle="Send to Steam Workshop"
+            subtitle={publishSubtitle}
             icon={<PublishIcon />}
             active={panel === 'publish'}
             onClick={() => onSelectPanel('publish')}

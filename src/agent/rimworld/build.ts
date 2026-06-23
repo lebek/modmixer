@@ -1,0 +1,110 @@
+/**
+ * RimWorld build: `dotnet build` in the mod's Source/ dir, plus advisory lint
+ * findings and (on failure) "missing using" hints resolved against the C#
+ * symbol index. Extracted out of tools/build-mod.ts so the build_mod tool is a
+ * thin dispatch to getAdapter(game).build() and this RimWorld-specific logic
+ * lives in the (newly symmetric) rimworld/ module rather than as the tool's
+ * ambient default.
+ */
+import path from 'node:path';
+import fs from 'node:fs';
+import { spawn } from 'node:child_process';
+import type { AgentToolResult } from '@mariozechner/pi-agent-core';
+import { lintMod, formatFindings, type LintFinding } from '../build-lint.js';
+import {
+  extractHints,
+  formatHints,
+  type BuildErrorHint,
+} from '../build-error-hints.js';
+import { DOTNET_NOT_FOUND_MESSAGE, resolveDotnet } from '../dotnet.js';
+import { launchModeHint } from '../launch-mode.js';
+import type { BuildModDetails } from '../adapters/types.js';
+
+export async function buildRimworldMod(
+  modDir: string,
+  signal?: AbortSignal,
+): Promise<AgentToolResult<BuildModDetails>> {
+  const sourceDir = path.join(modDir, 'Source');
+  if (!fs.existsSync(sourceDir)) {
+    throw new Error(
+      `Source folder not found: ${sourceDir}. Use scaffold_mod with withCSharp=true or write a .csproj first.`,
+    );
+  }
+  const dotnet = resolveDotnet();
+  if (!dotnet) {
+    throw new Error(DOTNET_NOT_FOUND_MESSAGE);
+  }
+  const result = await runCommand(dotnet, ['build', '--nologo'], sourceDir, signal);
+  // Run lints even on a failed build — most lint findings (tickerType, wrong
+  // TFM) are diagnoseable from source alone, and surfacing them alongside
+  // compile errors gives the agent a head start.
+  let lintFindings: LintFinding[] = [];
+  try {
+    lintFindings = await lintMod(modDir);
+  } catch (err) {
+    // Lint failures should never block the build; log and continue.
+    console.warn('[build_mod] lint failed:', err);
+  }
+  // For failed builds, try to resolve any "missing using" errors against the
+  // C# symbol index so the agent doesn't have to grep for it. Hints are
+  // best-effort — we swallow any failure rather than masking the build error.
+  let errorHints: BuildErrorHint[] = [];
+  if (result.exitCode !== 0) {
+    try {
+      errorHints = extractHints(result.stdout, modDir);
+    } catch (err) {
+      console.warn('[build_mod] hint extraction failed:', err);
+    }
+  }
+  const status =
+    result.exitCode === 0
+      ? 'BUILD SUCCEEDED'
+      : `BUILD FAILED (exit ${result.exitCode})`;
+  const text =
+    `${status}\n\n${result.stdout}${
+      result.stderr ? '\n--- stderr ---\n' + result.stderr : ''
+    }` +
+    formatFindings(lintFindings) +
+    formatHints(errorHints) +
+    // Only on a green build: a red build's next step is fixing errors, not
+    // testing, so a launch reminder there is just noise. The hint itself is
+    // worded to NOT imply the green build means "ready to test".
+    (result.exitCode === 0 ? launchModeHint() : '');
+  return {
+    content: [{ type: 'text', text }],
+    details: { ...result, sourceDir, lintFindings, errorHints },
+  };
+}
+
+function runCommand(
+  cmd: string,
+  args: string[],
+  cwd: string,
+  signal?: AbortSignal,
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  return new Promise((resolve) => {
+    const proc = spawn(cmd, args, { cwd });
+    let stdout = '';
+    let stderr = '';
+    proc.stdout?.on('data', (d: Buffer) => {
+      stdout += d.toString();
+    });
+    proc.stderr?.on('data', (d: Buffer) => {
+      stderr += d.toString();
+    });
+    const onAbort = () => proc.kill();
+    signal?.addEventListener('abort', onAbort);
+    proc.on('close', (code) => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve({ exitCode: code ?? -1, stdout, stderr });
+    });
+    proc.on('error', (err) => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve({
+        exitCode: -1,
+        stdout,
+        stderr: stderr + (err instanceof Error ? err.message : String(err)),
+      });
+    });
+  });
+}

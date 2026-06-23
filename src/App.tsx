@@ -14,7 +14,7 @@ import { LibraryView } from './components/library-view';
 import { LibraryPlaceholder } from './components/library-placeholder';
 import { GameSelector } from './components/game-selector';
 import type { GameId } from './agent/games/types';
-import { resolveGameId } from './agent/games/registry';
+import { getGame, resolveGameId } from './agent/games/registry';
 import type { RestoreResult } from './components/saves-view';
 import { SessionRecoveryDialog } from './components/session-recovery-dialog';
 import { appAlert, appConfirm } from './components/app-dialog';
@@ -509,10 +509,11 @@ export function App() {
     if (!focusedTab || !hasAi) return;
     const mod = mods.find((m) => m.folder === focusedTab.folder);
     const displayName = mod?.about.name || focusedTab.folder;
+    const gameName = getGame(resolveGameId(mod?.prefs.game)).displayName;
     try {
       await window.modmixer.send(
         focusedTab.conversation.id,
-        `Test "${displayName}" in RimWorld now. Run the full test-in-game flow including monitoring the log for errors.`,
+        `Test "${displayName}" in ${gameName} now. Run the full test-in-game flow including monitoring the log for errors.`,
       );
     } catch (err) {
       console.error(err);

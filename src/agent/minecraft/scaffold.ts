@@ -35,15 +35,19 @@ export interface MinecraftModIdentity {
   groupId?: string;
 }
 
-/** Coerce arbitrary text into a valid NeoForge mod id. */
+/**
+ * Coerce arbitrary text into a valid NeoForge mod id. NeoForge requires the id
+ * to match `[a-z][a-z0-9_]{1,63}` — i.e. start with a LETTER and be 2–64 chars.
+ * Stripping disallowed chars isn't enough: a name like "3D Shapes" → "3dshapes"
+ * or "_under" would pass a naive strip but fail FML at load. So we prefix a
+ * letter when the cleaned text starts with a digit/underscore (or is empty),
+ * then guarantee the 2-char minimum.
+ */
 export function slugifyModId(raw: string): string {
-  const slug = raw
-    .toLowerCase()
-    .replace(/[^a-z0-9_]+/g, '')
-    .slice(0, 64);
-  if (slug.length >= 2) return slug;
-  // Pad/guarantee a usable id when the name has too few valid chars.
-  return (`mod${slug}`).slice(0, 64).padEnd(2, 'mod');
+  let slug = raw.toLowerCase().replace(/[^a-z0-9_]+/g, '');
+  if (!/^[a-z]/.test(slug)) slug = `mod${slug}`;
+  slug = slug.slice(0, 64);
+  return slug.length >= 2 ? slug : `${slug}mod`.slice(0, 64);
 }
 
 export interface MinecraftMeta {

@@ -16,6 +16,7 @@ const RIMWORLD: GameDefinition = {
     steamWorkshop: true,
     publish: 'steam-workshop',
     assetPanel: true,
+    depsPanel: true,
     liveSession: true,
     testLoop: true,
     sourceIndex: true,
@@ -36,6 +37,9 @@ const MINECRAFT: GameDefinition = {
     // Disabled for the beta — the RimWorld asset scanner + sprite preview are
     // Textures/Sounds-specific; Minecraft mods supply Modrinth gallery images.
     assetPanel: false,
+    // RimWorld About.xml dependency editor; Minecraft deps live in the
+    // generated neoforge.mods.toml (no panel).
+    depsPanel: false,
     // No in-game hot-edit session for the beta (RimWorld's is Verse-specific).
     liveSession: false,
     testLoop: true,

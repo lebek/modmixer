@@ -434,7 +434,7 @@ function minecraftScopeBlock(scope: ConversationScope): string {
 The mod's identity (display name, id, version, authors) lives in ${scope.modFolder}/gradle.properties — there is NO hand-written mods.toml to read; the manifest is generated from src/main/templates/META-INF/neoforge.mods.toml by Gradle expanding gradle.properties.
 If the mod is still named "Untitled Mod" (id "untitledmod"), give it a sensible name + id with set_mod_metadata EARLY (name = display title, packageId = short lowercase id like "foobargreeter") once you understand what the user wants — it rebrands the project so all later work uses the right id.`;
   }
-  return `No mod is open yet. When the user describes what they want to build, create the mod (a NeoForge project is scaffolded under a workspace folder), name it with set_mod_metadata, then edit src/main/java and src/main/resources under that folder.`;
+  return `No mod is open yet. When the user describes what they want to build, create the project with scaffold_mod (it lays down a NeoForge/Gradle project under a workspace folder), give it a name + id with set_mod_metadata (id = a short lowercase word like "coolblocks"), then edit src/main/java and src/main/resources under that folder.`;
 }
 
 function buildMinecraftSystemPrompt(scope: ConversationScope): string {
