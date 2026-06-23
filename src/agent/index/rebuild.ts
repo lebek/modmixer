@@ -121,7 +121,9 @@ export async function rebuildIndex(
     fs.mkdirSync(paths.root, { recursive: true });
 
     // Reset DB before populating. Closing first so WAL files don't survive.
-    closeIndexDb();
+    // Scope the close to RimWorld's connection — a bare closeIndexDb() would
+    // also drop a concurrent Minecraft index build's open handle.
+    closeIndexDb('rimworld');
     const db = openIndexDb();
     resetSchema(db);
 

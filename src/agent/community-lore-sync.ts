@@ -1,4 +1,6 @@
 import {
+  baseLoreDir,
+  communityLoreDir,
   deleteUserEntries,
   isLoreTopicForGame,
   readAllUserEntries,
@@ -204,6 +206,11 @@ export async function syncCommunityLore(): Promise<void> {
     }
 
     if (!pullOk) continue;
+    // Only prune a game's reviewed user entries once its curated copies are
+    // actually READ (baseLoreDir === the community cache). For a game whose
+    // community-lore read path isn't enabled yet (see baseLoreDir's per-game
+    // guard), pruning would delete the only readable copy of a reviewed lesson.
+    if (baseLoreDir(game) !== communityLoreDir(game)) continue;
     try {
       if (reviewed === null) reviewed = await fetchReviewedHooks(settings.distinctId);
       const forGame = reviewed.filter((r) => r.game === game);
