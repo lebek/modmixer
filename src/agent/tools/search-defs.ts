@@ -4,10 +4,7 @@ import path from 'node:path';
 import { openIndexDb } from '../index/db.js';
 import { getIndexPaths } from '../index/paths.js';
 import { getIndexStatus } from '../index/rebuild.js';
-import {
-  getMinecraftIndexStatus,
-  ensureMinecraftIndexInBackground,
-} from '../index/rebuild-minecraft.js';
+import { ensureMinecraftIndexInBackground } from '../index/rebuild-minecraft.js';
 import type { GameId } from '../games/types.js';
 
 const Params = Type.Object({

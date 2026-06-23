@@ -703,6 +703,8 @@ export class AgentHost {
    * touch the real config.
    */
   private monitoringIsolated = false;
+  /** Display name of the game under test, for teardown messaging. */
+  private monitoringGameName = 'the game';
   /**
    * Did we see a bridge_hello during this monitoring session? The
    * "test session ended" toast only fires after this flips true; otherwise
@@ -2093,9 +2095,9 @@ export class AgentHost {
       this.monitoringConversationId !== opts.conversationId
     ) {
       throw new Error(
-        'Another mod is already being tested in RimWorld. Only one in-game ' +
-          'test can run at a time — finish that test (or close RimWorld) ' +
-          'before testing this mod.',
+        'Another mod is already being tested. Only one in-game test can run ' +
+          'at a time — finish that test (or close the game) before testing ' +
+          'this mod.',
       );
     }
     this.stopMonitoring();
@@ -2108,6 +2110,7 @@ export class AgentHost {
     try {
       const mod = await getWorkspaceMod(opts.modFolder);
       if (mod) {
+        this.monitoringGameName = getGame(mod.prefs.game).displayName;
         modUnderTest = {
           name: mod.about.name,
           packageId: mod.about.packageId,
@@ -2176,7 +2179,10 @@ export class AgentHost {
     // the in-game side dropped us, which means the game is quitting (or
     // crashed). Tear down + clean up the bridge install.
     if (!this.bridgeSeenConnected) return;
-    sendToast('Modmixer', 'RimWorld closed — test session ended.');
+    sendToast(
+      'Modmixer',
+      `${this.monitoringGameName} closed — test session ended.`,
+    );
     const wasNonIsolated = !this.monitoringIsolated;
     this.stopMonitoring();
     void this.teardownBridgeInstall(wasNonIsolated);

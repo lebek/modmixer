@@ -4,10 +4,7 @@ import path from 'node:path';
 import fsp from 'node:fs/promises';
 import { openIndexDb } from '../index/db.js';
 import { getIndexStatus } from '../index/rebuild.js';
-import {
-  getMinecraftIndexStatus,
-  ensureMinecraftIndexInBackground,
-} from '../index/rebuild-minecraft.js';
+import { ensureMinecraftIndexInBackground } from '../index/rebuild-minecraft.js';
 import { getIndexPaths } from '../index/paths.js';
 import { resolveSymbol, type SymbolMatch } from '../index/resolve-symbol.js';
 import type { GameId } from '../games/types.js';

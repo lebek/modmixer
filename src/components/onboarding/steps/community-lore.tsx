@@ -33,7 +33,7 @@ export function CommunityLoreStep({
       totalSteps={total}
       eyebrow="Community lore"
       title="Make Modmixer smarter together"
-      subtitle="Modmixer collects hard-won RimWorld-modding lessons as it works. Sharing them helps every user."
+      subtitle="Modmixer collects hard-won modding lessons as it works. Sharing them helps every user."
       canContinue={loaded}
       continueLabel="Continue"
       onContinue={() => void handleContinue()}
@@ -52,8 +52,8 @@ export function CommunityLoreStep({
               Share community lore
             </div>
             <p className="mt-1 text-xs leading-relaxed text-muted">
-              Uploads your modding lesson notes (e.g. "SoundDef volume scale is
-              0–100") to help other users — and pulls everyone else's lessons
+              Uploads your modding lesson notes (e.g. a tricky API quirk you've
+              figured out) to help other users — and pulls everyone else's lessons
               back so your agent gets smarter too. It's a two-way exchange.
             </p>
           </div>

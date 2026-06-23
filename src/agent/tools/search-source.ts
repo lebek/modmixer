@@ -4,10 +4,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import { getIndexPaths } from '../index/paths.js';
 import { getIndexStatus } from '../index/rebuild.js';
-import {
-  getMinecraftIndexStatus,
-  ensureMinecraftIndexInBackground,
-} from '../index/rebuild-minecraft.js';
+import { ensureMinecraftIndexInBackground } from '../index/rebuild-minecraft.js';
 import { resolveRipgrep } from '../index/ripgrep.js';
 import type { GameId } from '../games/types.js';
 

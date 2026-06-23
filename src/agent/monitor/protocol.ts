@@ -22,7 +22,8 @@ export interface ServerHello {
 export interface BridgeHello {
   type: 'bridge_hello';
   protocol: number;
-  rimworldVersion: string;
+  /** Running game version (e.g. RimWorld "1.5" or Minecraft "1.21.1"). */
+  gameVersion: string;
   bridgeVersion: string;
   /** ms-since-epoch when the game process started, for uptime math. */
   startedAt: number;
@@ -135,7 +136,7 @@ export type MonitorConnectionState =
       kind: 'connected';
       port: number;
       since: number;
-      rimworldVersion: string;
+      gameVersion: string;
       bridgeVersion: string;
       gameStartedAt: number;
     };

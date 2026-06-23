@@ -241,7 +241,7 @@ export class MonitorServer extends EventEmitter {
         kind: 'connected',
         port: BRIDGE_PORT,
         since: Date.now(),
-        rimworldVersion: msg.rimworldVersion,
+        gameVersion: msg.gameVersion,
         bridgeVersion: msg.bridgeVersion,
         gameStartedAt: msg.startedAt,
       });
