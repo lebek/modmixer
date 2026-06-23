@@ -83,8 +83,12 @@ const api = {
     invoke('modmixer:settings:set-multi-chat', enabled),
   setMinecraftEnabled: (enabled: boolean) =>
     invoke('modmixer:settings:set-minecraft-enabled', enabled),
-  getMinecraftIndexStatus: () => invoke('modmixer:minecraft:index-status'),
-  rebuildMinecraftIndex: () => invoke('modmixer:minecraft:index-rebuild'),
+  getGameSetupStatus: (game: 'rimworld' | 'minecraft') =>
+    invoke('modmixer:game-setup:status', game),
+  rebuildGameSetup: (
+    game: 'rimworld' | 'minecraft',
+    opts?: { force?: boolean },
+  ) => invoke('modmixer:game-setup:rebuild', game, opts),
   setSelectedGame: (game: 'rimworld' | 'minecraft') =>
     invoke('modmixer:settings:set-selected-game', game),
   setAutoLaunch: (enabled: boolean) =>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useState } from 'react';
 import type { ThinkingLevel } from '@mariozechner/pi-agent-core';
 import { sanitizeAuthorHandle } from '@/lib/identifiers';
 import type {
@@ -17,12 +17,17 @@ import { applyTheme } from '@/lib/theme';
 import { ModelPicker } from './model-picker';
 import { ThinkingPicker } from './thinking-picker';
 import { GameIcon } from './game-icon';
+import { getSelectableGames } from '@/agent/games/registry';
+import type {
+  GameDefinition,
+  GameSetupState,
+  GameSetupStatus,
+} from '@/agent/games/types';
 
 export type SettingsSection =
   | 'providers'
   | 'general'
   | 'appearance'
-  | 'index'
   | 'games'
   | 'advanced';
 
@@ -116,13 +121,11 @@ export function AppSettingsDialog({
       ? 'AI providers'
       : section === 'appearance'
         ? 'Appearance'
-        : section === 'index'
-          ? 'RimWorld index'
-          : section === 'games'
-            ? 'Games'
-            : section === 'advanced'
-              ? 'Advanced'
-              : 'General';
+        : section === 'games'
+          ? 'Games'
+          : section === 'advanced'
+            ? 'Advanced'
+            : 'General';
 
   return (
     <div
@@ -143,11 +146,6 @@ export function AppSettingsDialog({
             label="Appearance"
             active={section === 'appearance'}
             onClick={() => setSection('appearance')}
-          />
-          <SectionTab
-            label="RimWorld index"
-            active={section === 'index'}
-            onClick={() => setSection('index')}
           />
           <SectionTab
             label="Games"
@@ -184,7 +182,6 @@ export function AppSettingsDialog({
             {section === 'appearance' && (
               <AppearanceSection theme={theme} onChange={changeTheme} />
             )}
-            {section === 'index' && <IndexSection />}
             {section === 'games' && <GamesSection />}
             {section === 'advanced' &&
               (!loaded ? (
@@ -508,38 +505,6 @@ function AppearanceSection({
 }
 
 function GamesSection() {
-  const [mcStatus, setMcStatus] = useState<
-    'absent' | 'fresh' | 'stale' | 'building' | null
-  >(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    const tick = () =>
-      void window.modmixer.getMinecraftIndexStatus().then((s) => {
-        if (!cancelled) setMcStatus(s);
-      });
-    tick();
-    // Poll while a build is running so the status updates without reopening.
-    const id = window.setInterval(tick, 3000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(id);
-    };
-  }, []);
-
-  const mcLabel =
-    mcStatus === 'fresh'
-      ? 'Ready'
-      : mcStatus === 'building'
-        ? 'Setting up…'
-        : mcStatus === 'stale'
-          ? 'Update available'
-          : 'Not set up';
-
-  const setupMc = () => {
-    void window.modmixer.rebuildMinecraftIndex().then(setMcStatus);
-  };
-
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted">
@@ -549,56 +514,129 @@ function GamesSection() {
       </p>
 
       <div className="space-y-3">
-        <div className="rounded-md border border-line bg-surface/30 px-4 py-3">
-          <div className="flex items-center justify-between">
-            <span className="flex items-center gap-2 text-sm font-medium text-ink">
-              <GameIcon game="rimworld" className="h-5 w-5" />
-              RimWorld
-            </span>
-            <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted">
-              Default
-            </span>
-          </div>
-          <p className="mt-1 text-xs text-muted">
-            Install detection + the source index are managed on the “RimWorld
-            index” tab.
-          </p>
-        </div>
-
-        <div className="rounded-md border border-line bg-surface/30 px-4 py-3">
-          <div className="flex items-center justify-between gap-2">
-            <span className="flex items-center gap-2 text-sm font-medium text-ink">
-              <GameIcon game="minecraft" className="h-5 w-5" />
-              Minecraft (NeoForge 1.21.1){' '}
-              <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-warning">
-                Beta
-              </span>
-            </span>
-            <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted">
-              {mcStatus === null ? '…' : mcLabel}
-            </span>
-          </div>
-          <p className="mt-1 text-xs text-muted">
-            Modmixer auto-provisions Java 21 + the Gradle toolchain. Setup builds
-            the Minecraft/NeoForge source index (a one-time decompile that can
-            take a few minutes).
-          </p>
-          <div className="mt-2 flex justify-end">
-            <button
-              onClick={setupMc}
-              disabled={mcStatus === 'building' || mcStatus === null}
-              className="rounded-md border border-line bg-paper px-3 py-1 text-[10px] uppercase tracking-[0.18em] text-muted transition-colors hover:border-ink/40 hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {mcStatus === 'building'
-                ? 'Setting up…'
-                : mcStatus === 'fresh'
-                  ? 'Rebuild index'
-                  : 'Set up Minecraft'}
-            </button>
-          </div>
-        </div>
+        {getSelectableGames().map((game) => (
+          <GameSetupCard key={game.id} game={game} />
+        ))}
       </div>
     </div>
+  );
+}
+
+/**
+ * One per-game setup card, rendered entirely from the game's adapter-produced
+ * GameSetupStatus (status + facts + rebuild). Adding a game needs no change
+ * here — it appears via getSelectableGames() with its own state/facts/copy.
+ */
+function GameSetupCard({ game }: { game: GameDefinition }) {
+  const [status, setStatus] = useState<GameSetupStatus | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void window.modmixer.getGameSetupStatus(game.id).then((s) => {
+      if (!cancelled) setStatus(s);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [game.id]);
+
+  // Poll while building so the card advances without reopening the dialog.
+  useEffect(() => {
+    if (status?.state !== 'building') return;
+    const id = window.setInterval(() => {
+      void window.modmixer.getGameSetupStatus(game.id).then(setStatus);
+    }, 2500);
+    return () => window.clearInterval(id);
+  }, [status?.state, game.id]);
+
+  const rebuild = useCallback(() => {
+    void window.modmixer
+      .rebuildGameSetup(game.id, { force: true })
+      .then(setStatus);
+  }, [game.id]);
+
+  return (
+    <div className="rounded-md border border-line bg-surface/30 px-4 py-3">
+      <div className="flex items-center justify-between gap-2">
+        <span className="flex items-center gap-2 text-sm font-medium text-ink">
+          <GameIcon game={game.id} className="h-5 w-5" />
+          {game.displayName}
+          {game.beta && (
+            <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-warning">
+              Beta
+            </span>
+          )}
+        </span>
+        <SetupStateBadge state={status?.state ?? null} />
+      </div>
+
+      {status?.detail && (
+        <p className="mt-1 text-xs text-muted">{status.detail}</p>
+      )}
+
+      {status && (
+        <>
+          <p className="mt-2 text-sm text-ink">{status.headline}</p>
+          {status.blockedReason && (
+            <p className="mt-1 text-xs text-warning">{status.blockedReason}</p>
+          )}
+          {status.facts.length > 0 && (
+            <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-sm text-ink">
+              {status.facts.map((f) => (
+                <Fragment key={f.label}>
+                  <dt className="text-muted">{f.label}</dt>
+                  <dd className="font-mono text-xs">{f.value}</dd>
+                </Fragment>
+              ))}
+            </dl>
+          )}
+          <div className="mt-2 flex justify-end">
+            <button
+              onClick={rebuild}
+              disabled={!status.canRebuild}
+              className="rounded-md border border-line bg-paper px-3 py-1 text-[10px] uppercase tracking-[0.18em] text-muted transition-colors hover:border-ink/40 hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {status.rebuildLabel}
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function SetupStateBadge({ state }: { state: GameSetupState | null }) {
+  if (state === null) {
+    return (
+      <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted">
+        …
+      </span>
+    );
+  }
+  const tone =
+    state === 'fresh'
+      ? 'text-ready'
+      : state === 'building'
+        ? 'text-accent'
+        : state === 'stale'
+          ? 'text-warning'
+          : 'text-muted';
+  const label =
+    state === 'fresh'
+      ? 'Ready'
+      : state === 'building'
+        ? 'Setting up…'
+        : state === 'stale'
+          ? 'Update available'
+          : state === 'blocked'
+            ? 'Blocked'
+            : 'Not set up';
+  return (
+    <span
+      className={`font-mono text-[10px] uppercase tracking-[0.18em] ${tone}`}
+    >
+      {label}
+    </span>
   );
 }
 
@@ -1523,142 +1561,6 @@ function ProviderRow({
       )}
     </div>
   );
-}
-
-function IndexSection() {
-  const [snapshot, setSnapshot] = useState<
-    Awaited<ReturnType<typeof window.modmixer.getIndexSnapshot>> | null
-  >(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    void window.modmixer.getIndexSnapshot().then((s) => {
-      if (!cancelled) setSnapshot(s);
-    });
-    const unsub = window.modmixer.onIndexProgress(() => {
-      void window.modmixer.getIndexSnapshot().then((s) => {
-        if (!cancelled) setSnapshot(s);
-      });
-    });
-    return () => {
-      cancelled = true;
-      unsub();
-    };
-  }, []);
-
-  if (!snapshot) {
-    return <p className="text-sm text-muted">Loading…</p>;
-  }
-
-  const { status, rebuilding } = snapshot;
-  const meta = 'meta' in status ? status.meta : null;
-
-  const startRebuild = () => {
-    void window.modmixer.rebuildIndex({ force: true });
-  };
-
-  return (
-    <div className="space-y-5">
-      <p className="text-sm text-muted">
-        The RimWorld index powers the agent's def lookups and C# source
-        search. It's built from your local install on first launch and
-        rebuilt automatically when RimWorld updates.
-      </p>
-
-      <div className="rounded-md border border-line bg-surface/40 p-3">
-        <div className="flex items-center justify-between">
-          <h3 className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted">
-            Status
-          </h3>
-          <StatusBadge status={status.type} rebuilding={rebuilding} />
-        </div>
-        {status.type === 'no-rimworld' && (
-          <p className="mt-2 text-sm text-ink">
-            RimWorld install not detected — the index can't be built. Make
-            sure RimWorld is installed via Steam, then return here.
-          </p>
-        )}
-        {status.type === 'absent' && (
-          <p className="mt-2 text-sm text-ink">
-            No index yet. Click <strong>Rebuild</strong> below to build it
-            (~30-90s on first run).
-          </p>
-        )}
-        {status.type === 'stale' && (
-          <p className="mt-2 text-sm text-ink">
-            Index is out of date — {status.reason}. Rebuild to refresh.
-          </p>
-        )}
-        {status.type === 'fresh' && meta && (
-          <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-sm text-ink">
-            <dt className="text-muted">RimWorld</dt>
-            <dd className="font-mono text-xs">{meta.rimworldVersion}</dd>
-            <dt className="text-muted">DLC packs</dt>
-            <dd className="font-mono text-xs">
-              {meta.dlcs.length > 0 ? meta.dlcs.join(', ') : '(none)'}
-            </dd>
-            <dt className="text-muted">Defs</dt>
-            <dd className="font-mono text-xs">{meta.defCount.toLocaleString()}</dd>
-            <dt className="text-muted">C# symbols</dt>
-            <dd className="font-mono text-xs">
-              {meta.symbolCount.toLocaleString()}
-            </dd>
-            <dt className="text-muted">Source size</dt>
-            <dd className="font-mono text-xs">{formatBytes(meta.sourceBytes)}</dd>
-            <dt className="text-muted">Built</dt>
-            <dd className="font-mono text-xs">
-              {new Date(meta.builtAt).toLocaleString()}
-            </dd>
-          </dl>
-        )}
-      </div>
-
-      <div className="flex justify-end gap-2">
-        <button
-          type="button"
-          onClick={startRebuild}
-          disabled={rebuilding || status.type === 'no-rimworld'}
-          className="rounded-md bg-accent px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-accent-foreground transition-opacity hover:bg-accent-soft disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          {rebuilding ? 'Building…' : 'Rebuild'}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function StatusBadge({
-  status,
-  rebuilding,
-}: {
-  status: 'fresh' | 'stale' | 'absent' | 'no-rimworld' | 'building';
-  rebuilding: boolean;
-}) {
-  if (rebuilding) {
-    return (
-      <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-accent">
-        building
-      </span>
-    );
-  }
-  const tone =
-    status === 'fresh'
-      ? 'text-ready'
-      : status === 'no-rimworld'
-        ? 'text-muted'
-        : 'text-warning';
-  return (
-    <span className={`font-mono text-[10px] uppercase tracking-[0.18em] ${tone}`}>
-      {status}
-    </span>
-  );
-}
-
-function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
-  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
 
 function StatusPill({ link }: { link: OAuthLink }) {

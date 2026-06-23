@@ -69,3 +69,40 @@ export interface GameDefinition {
    */
   beta: boolean;
 }
+
+/** Live state of a game's local setup (toolchain + code index). */
+export type GameSetupState =
+  | 'absent' // never built
+  | 'building' // (re)build in progress
+  | 'fresh' // built and current
+  | 'stale' // built but out of date (game/toolchain changed)
+  | 'blocked'; // can't build — a prerequisite is missing (e.g. no install)
+
+/** A labeled key/value shown in a game's setup card, e.g. "Defs" → "1,234". */
+export interface GameSetupFact {
+  label: string;
+  value: string;
+}
+
+/**
+ * Uniform, renderer-safe description of a game's setup status. Produced by the
+ * game's adapter (main-only, which knows how to detect the install + read the
+ * index meta) and rendered generically by Settings → Games. A new game surfaces
+ * its own state/facts/copy here without any renderer or IPC changes — this is
+ * what keeps the per-game setup cards symmetric and additive.
+ */
+export interface GameSetupStatus {
+  state: GameSetupState;
+  /** One-line status sentence. */
+  headline: string;
+  /** Why setup can't proceed (only when state === 'blocked'). */
+  blockedReason?: string;
+  /** Longer copy describing what "setup" does for this game. */
+  detail?: string;
+  /** Pre-formatted facts shown once set up (version, counts, size, built-at). */
+  facts: GameSetupFact[];
+  /** Whether the rebuild button is enabled. */
+  canRebuild: boolean;
+  /** Rebuild button label, e.g. "Rebuild" or "Set up Minecraft". */
+  rebuildLabel: string;
+}

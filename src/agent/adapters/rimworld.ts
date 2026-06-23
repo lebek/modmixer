@@ -7,10 +7,12 @@ import { getGame } from '../games/registry.js';
 import { scaffoldRimworldMod } from '../rimworld/scaffold.js';
 import { buildRimworldMod } from '../rimworld/build.js';
 import { runRimworldTestCycle } from '../rimworld/test.js';
+import { rimworldSetup } from '../rimworld/setup.js';
 import type { GameAdapter } from './types.js';
 
 export const RimWorldAdapter: GameAdapter = {
   def: getGame('rimworld'),
+  setup: rimworldSetup,
   scaffold: scaffoldRimworldMod,
   build: buildRimworldMod,
   test: runRimworldTestCycle,

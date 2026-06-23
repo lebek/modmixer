@@ -51,6 +51,11 @@ function writeMcMeta(meta: MinecraftIndexMeta): void {
   fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2));
 }
 
+/** Public read of the Minecraft index meta (counts/size/built-at), or null. */
+export function getMinecraftIndexMeta(): MinecraftIndexMeta | null {
+  return readMcMeta();
+}
+
 export type MinecraftIndexStatus = 'absent' | 'fresh' | 'stale' | 'building';
 
 let building: AbortController | null = null;

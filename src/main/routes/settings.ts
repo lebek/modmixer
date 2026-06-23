@@ -12,11 +12,6 @@ import {
   seedAllCommunityLoreFromShipped,
 } from '../../agent/lore.js';
 import { syncCommunityLore } from '../../agent/community-lore-sync.js';
-import {
-  getMinecraftIndexStatus,
-  ensureMinecraftIndexInBackground,
-  type MinecraftIndexStatus,
-} from '../../agent/index/rebuild-minecraft.js';
 import { resolveGameId } from '../../agent/games/registry.js';
 import type { GameId } from '../../agent/games/types.js';
 import type { RouteContext } from './context.js';
@@ -77,17 +72,9 @@ export function registerSettingsRoutes(ctx: RouteContext): void {
     (_evt, enabled: boolean) => saveSettings({ minecraftEnabled: enabled }),
   );
 
-  // Minecraft "setup" = building its source index (which also auto-provisions
-  // Java 21 + vendors the toolchain). Status drives the Settings → Games page;
-  // rebuild kicks the build off in the background.
-  ipc.handle(
-    'modmixer:minecraft:index-status',
-    (): MinecraftIndexStatus => getMinecraftIndexStatus(),
-  );
-  ipc.handle('modmixer:minecraft:index-rebuild', (): MinecraftIndexStatus => {
-    ensureMinecraftIndexInBackground();
-    return getMinecraftIndexStatus();
-  });
+  // Minecraft setup (toolchain + source index) is served by the uniform
+  // game-setup IPC in system.ts (getAdapter('minecraft').setup), same as every
+  // other game — no Minecraft-specific settings channel.
 
   ipc.handle('modmixer:settings:set-selected-game', (_evt, game: GameId) =>
     saveSettings({ selectedGameId: resolveGameId(game) }),

@@ -7,6 +7,9 @@ import {
   getIndexSnapshot,
   startRebuild,
 } from '../../agent/index/main-bridge.js';
+import { getAdapter } from '../../agent/adapters/index.js';
+import { resolveGameId } from '../../agent/games/registry.js';
+import type { GameId } from '../../agent/games/types.js';
 import type { RouteContext } from './context.js';
 
 /**
@@ -28,6 +31,17 @@ export function registerSystemRoutes(ctx: RouteContext): void {
     cancelActiveRebuild();
     return getIndexSnapshot();
   });
+
+  // Per-game setup (Settings → Games). Uniform across games — each game's
+  // adapter knows how to read its own toolchain/index state and rebuild.
+  ipc.handle('modmixer:game-setup:status', (_evt, game: GameId) =>
+    getAdapter(resolveGameId(game)).setup.getStatus(),
+  );
+  ipc.handle(
+    'modmixer:game-setup:rebuild',
+    (_evt, game: GameId, opts?: { force?: boolean }) =>
+      getAdapter(resolveGameId(game)).setup.rebuild(opts),
+  );
 
   ipc.handle('modmixer:monitor:get-state', () => monitor.getState());
   ipc.handle('modmixer:monitor:get-snapshot', () => monitor.getLastSnapshot());

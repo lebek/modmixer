@@ -20,6 +20,7 @@ import {
   quitMinecraftClient,
   launchMinecraftClient,
 } from '../minecraft/launch.js';
+import { minecraftSetup } from '../minecraft/setup.js';
 import type {
   BuildModDetails,
   GameAdapter,
@@ -231,6 +232,7 @@ async function test(
 
 export const MinecraftAdapter: GameAdapter = {
   def: getGame('minecraft'),
+  setup: minecraftSetup,
   scaffold,
   build,
   test,

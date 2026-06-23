@@ -23,7 +23,7 @@ import type {
   WorkspaceMod,
   WorkspacePaths,
 } from '../agent/workspace';
-import type { GameId } from '../agent/games/types';
+import type { GameId, GameSetupStatus } from '../agent/games/types';
 import type { SchematicData } from '../agent/schematic';
 import type { DefEntry } from '../agent/defs-scan';
 import type { EnableResult, DisableResult } from '../agent/game';
@@ -49,7 +49,6 @@ import type {
   ModrinthPublishResult,
   ModrinthPublishProgressEvent,
 } from '../agent/minecraft/modrinth';
-import type { MinecraftIndexStatus } from '../agent/index/rebuild-minecraft';
 import type { SaveRecord, SnapshotsChangedEvent } from '../agent/snapshots';
 import type { ConfirmationRequest } from '../agent/security/confirmation-gate';
 import type { IndexSnapshot } from '../agent/index/main-bridge';
@@ -171,8 +170,13 @@ export interface Channels {
   'modmixer:settings:set-thinking-level': (level: ThinkingLevel) => Settings;
   'modmixer:settings:set-multi-chat': (enabled: boolean) => Settings;
   'modmixer:settings:set-minecraft-enabled': (enabled: boolean) => Settings;
-  'modmixer:minecraft:index-status': () => MinecraftIndexStatus;
-  'modmixer:minecraft:index-rebuild': () => MinecraftIndexStatus;
+  // Per-game setup (toolchain + code index) for Settings → Games. Dispatches to
+  // getAdapter(game).setup; one uniform surface for every game.
+  'modmixer:game-setup:status': (game: GameId) => GameSetupStatus;
+  'modmixer:game-setup:rebuild': (
+    game: GameId,
+    opts?: { force?: boolean },
+  ) => GameSetupStatus;
   'modmixer:settings:set-selected-game': (game: GameId) => Settings;
   'modmixer:settings:set-community-lore': (enabled: boolean) => Settings;
   'modmixer:settings:set-auto-launch': (enabled: boolean) => Settings;

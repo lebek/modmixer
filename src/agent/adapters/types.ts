@@ -15,7 +15,7 @@
  * forces to be complete — no more "forgot to gate" call sites.
  */
 import type { AgentToolResult } from '@mariozechner/pi-agent-core';
-import type { GameDefinition } from '../games/types.js';
+import type { GameDefinition, GameSetupStatus } from '../games/types.js';
 import type { LintFinding } from '../build-lint.js';
 import type { BuildErrorHint } from '../build-error-hints.js';
 import type { ShipAndLaunchDetails } from '../ship.js';
@@ -116,9 +116,26 @@ export interface TestCycleContext {
  * minecraft}.ts`, dispatched by `getAdapter()`. Grows one method per concern as
  * we migrate the scattered `if (game === 'minecraft')` branches into here.
  */
+/**
+ * A game's local setup (toolchain provisioning + code-index build) for the
+ * Settings → Games card. The adapter knows how to read its own install/index
+ * state and produce the uniform, renderer-safe GameSetupStatus.
+ */
+export interface GameSetupAdapter {
+  /** Current setup status (cheap — reads meta/fingerprints, never builds). */
+  getStatus(): Promise<GameSetupStatus>;
+  /**
+   * Kick off a (re)build of the index in the background and return the
+   * now-building status. `force` rebuilds even when already fresh.
+   */
+  rebuild(opts?: { force?: boolean }): Promise<GameSetupStatus>;
+}
+
 export interface GameAdapter {
   /** The renderer-safe descriptor (identity, display, capabilities). */
   readonly def: GameDefinition;
+  /** Toolchain + index setup status/actions for Settings → Games. */
+  readonly setup: GameSetupAdapter;
   /**
    * Lay down (or re-stamp) the mod's project in `modDir`. The folder is already
    * resolved by the tool; the adapter owns the project shape.
