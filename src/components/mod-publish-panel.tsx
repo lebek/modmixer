@@ -23,7 +23,7 @@ export function ModPublishPanel(props: {
   // lives in gradle.properties rather than About.xml — a separate panel. Branch
   // here (before any hooks) so each panel keeps a stable hook order.
   if (props.mod.prefs.game === 'minecraft') {
-    return <MinecraftPublishPanel mod={props.mod} />;
+    return <MinecraftPublishPanel mod={props.mod} onDeleted={props.onDeleted} />;
   }
   return <RimWorldPublishPanel {...props} />;
 }

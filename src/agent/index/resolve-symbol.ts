@@ -82,7 +82,7 @@ const TYPE_KINDS = new Set([
  * "no such symbol" or "index not built" — callers that care should check
  * the index status first.
  *
- * Capped at 25 matches (matches read_csharp_symbol). For something with
+ * Capped at 25 matches (matches read_symbol). For something with
  * thousands of hits (e.g. `Equals`) the agent should narrow with `kind`.
  */
 export function resolveSymbol(

@@ -217,7 +217,7 @@ export function buildCustomTools(
     setModMetadataTool,
     updateSchematicTool,
     buildModTool,
-    createRunTestCycleTool(conversationId),
+    createRunTestCycleTool(conversationId, game),
     notifyTestStatusTool,
     monitorGetErrorTool,
     monitorPollTool,
@@ -705,6 +705,9 @@ export class AgentHost {
   private monitoringIsolated = false;
   /** Display name of the game under test, for teardown messaging. */
   private monitoringGameName = 'the game';
+  // The game of the mod under test — gates whether disconnect teardown runs
+  // RimWorld-specific bridge cleanup (Mods/ junction + ModsConfig strip).
+  private monitoringGame: GameId = 'rimworld';
   /**
    * Did we see a bridge_hello during this monitoring session? The
    * "test session ended" toast only fires after this flips true; otherwise
@@ -2111,6 +2114,7 @@ export class AgentHost {
       const mod = await getWorkspaceMod(opts.modFolder);
       if (mod) {
         this.monitoringGameName = getGame(mod.prefs.game).displayName;
+        this.monitoringGame = mod.prefs.game;
         modUnderTest = {
           name: mod.about.name,
           packageId: mod.about.packageId,
@@ -2165,6 +2169,7 @@ export class AgentHost {
     }
     this.monitoringConversationId = null;
     this.monitoringIsolated = false;
+    this.monitoringGame = 'rimworld';
     this.bridgeSeenConnected = false;
     this.bridgeErrorsSeen = false;
   }
@@ -2184,8 +2189,15 @@ export class AgentHost {
       `${this.monitoringGameName} closed — test session ended.`,
     );
     const wasNonIsolated = !this.monitoringIsolated;
+    const monitoredGame = this.monitoringGame;
     this.stopMonitoring();
-    void this.teardownBridgeInstall(wasNonIsolated);
+    // Bridge teardown (Mods/ junction removal + ModsConfig <activeMods> strip)
+    // is RimWorld-specific. A Minecraft test loads its bridge via gradlew
+    // runClient (no Mods/ install, no ModsConfig), so running the teardown
+    // would needlessly mutate the user's real RimWorld config.
+    if (monitoredGame === 'rimworld') {
+      void this.teardownBridgeInstall(wasNonIsolated);
+    }
   }
 
   /**
@@ -2472,7 +2484,7 @@ function liveStatusForTool(toolName: string): string {
     case 'ls':
     case 'search_defs':
     case 'search_source':
-    case 'read_csharp_symbol':
+    case 'read_symbol':
     case 'read_lore':
     case 'decompile_dll':
     case 'list_installed_mods':

@@ -5,13 +5,13 @@ import { sendToast, type ToastSeverity } from '../notifications.js';
 const Params = Type.Object({
   summary: Type.String({
     description:
-      'One short line shown over the game as a native OS toast. Keep it ~80 chars or less — the user is in fullscreen RimWorld.',
+      'One short line shown over the game as a native OS toast. Keep it ~80 chars or less — the user is in the fullscreen game.',
   }),
   severity: Type.Union(
     [Type.Literal('info'), Type.Literal('warning'), Type.Literal('error')],
     {
       description:
-        "'info' = unrelated/ignored (e.g. another mod's error). 'warning' = non-fatal in this mod (e.g. an unresolvable soundDef reference, or an unexpected asset-load error worth investigating after the run) — test continues. 'error' = critical issue, fix needed before retesting.",
+        "'info' = unrelated/ignored (e.g. another mod's error). 'warning' = non-fatal in this mod (e.g. an unresolved reference or asset-load error worth investigating after the run) — test continues. 'error' = critical issue, fix needed before retesting.",
     },
   ),
 });

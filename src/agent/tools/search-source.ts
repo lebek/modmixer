@@ -60,8 +60,8 @@ export function createSearchSourceTool(
   name: 'search_source',
   label: isMc ? 'Search Minecraft source' : 'Search RimWorld source',
   description: isMc
-    ? 'Ripgrep over the decompiled Minecraft + NeoForge Java source (mojmap + Parchment names). Use for finding call sites, event/registry usage, vanilla behaviour, or any pattern that isn\'t a clean type/method name. For symbol-level lookup (a Java class/method by name) prefer read_csharp_symbol.'
-    : 'Ripgrep over the decompiled RimWorld C# source AND the indexed Defs XML. Use for finding call sites ("StealAIUtility\\\\b"), patch targets, def cross-references like `<li>Designator_AreaHomeExpand</li>`, attribute values, or any pattern that isn\'t a clean type/method name. For symbol-level C# lookup (by short name or FQN) prefer read_csharp_symbol; for def-by-name lookup prefer search_defs. Zero matches here often means the answer lives in an XML def — try search_defs as the fallback.',
+    ? 'Ripgrep over the decompiled Minecraft + NeoForge Java source (mojmap + Parchment names). Use for finding call sites, event/registry usage, vanilla behaviour, or any pattern that isn\'t a clean type/method name. For symbol-level lookup (a Java class/method by name) prefer read_symbol.'
+    : 'Ripgrep over the decompiled RimWorld C# source AND the indexed Defs XML. Use for finding call sites ("StealAIUtility\\\\b"), patch targets, def cross-references like `<li>Designator_AreaHomeExpand</li>`, attribute values, or any pattern that isn\'t a clean type/method name. For symbol-level C# lookup (by short name or FQN) prefer read_symbol; for def-by-name lookup prefer search_defs. Zero matches here often means the answer lives in an XML def — try search_defs as the fallback.',
   parameters: Params,
   async execute(_id, params, signal): Promise<AgentToolResult<{ matchedLines: number; truncated: boolean }>> {
     const notReady = indexNotReady(game);
@@ -141,7 +141,7 @@ export function createSearchSourceTool(
         );
       }
       tips.push(
-        'for def-by-name lookup use search_defs, for a C# symbol (by short name or FQN) use read_csharp_symbol',
+        'for def-by-name lookup use search_defs, for a C# symbol (by short name or FQN) use read_symbol',
       );
       const tipsLine = `Tips: ${tips.join('; ')}.`;
       return {

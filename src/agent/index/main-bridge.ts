@@ -9,6 +9,8 @@ import {
 import { resolveIlspycmd } from './ilspycmd.js';
 import { warmSearchCache } from './warm-cache.js';
 import type { IndexProgressEvent } from './progress.js';
+import { loadSettings } from '../settings.js';
+import { resolveGameId } from '../games/registry.js';
 
 /**
  * The most recent progress event seen, kept on the main side so the renderer
@@ -77,23 +79,33 @@ export function cancelActiveRebuild(): void {
  * if the index is stale or absent. Idempotent — safe to call from anywhere.
  *
  * Pre-checks that ilspycmd is resolvable before doing anything else. C# symbol
- * indexing is load-bearing for the agent (search_source, read_csharp_symbol,
+ * indexing is load-bearing for the agent (search_source, read_symbol,
  * scaffolding against Verse APIs), so a missing decompiler is surfaced as an
  * error event regardless of cache freshness — the modal renders it the same
  * as a build failure.
  */
 export async function ensureIndexAtStartup(): Promise<void> {
+  // The RimWorld C# index is RimWorld-specific (ilspycmd / .NET decompile).
+  // Only build it eagerly when RimWorld is the user's active game: a Minecraft
+  // user (whose code index builds lazily via ensureMinecraftIndexInBackground)
+  // should never eat a RimWorld decompile or see a .NET/ilspycmd prompt at
+  // startup. resolveGameId coerces an unset value to 'rimworld', so existing
+  // RimWorld users are unaffected.
+  if (resolveGameId(loadSettings().selectedGameId) !== 'rimworld') return;
+  // No RimWorld install detected — nothing to index, and no reason to warn
+  // about a missing decompiler. Bail before the ilspycmd check below.
+  const status = getIndexStatus();
+  if (status.type === 'no-rimworld') return;
   if (!resolveIlspycmd()) {
     emit({
       type: 'error',
       message:
         'ilspycmd not found. Install the .NET SDK and run `dotnet tool install -g ilspycmd`, ' +
         'or vendor a binary at resources/ilspycmd/<platform>-<arch>/. The C# symbol index ' +
-        '(search_source, read_csharp_symbol, scaffold-mod) cannot work without it.',
+        '(search_source, read_symbol, scaffold-mod) cannot work without it.',
     });
     return;
   }
-  const status = getIndexStatus();
   if (status.type === 'fresh') {
     // Index is usable but the OS file cache / Defender scan cache for it may
     // be cold (reboot, signature update, eviction) — that's a ~40s first
@@ -101,7 +113,6 @@ export async function ensureIndexAtStartup(): Promise<void> {
     void warmSearchCache('startup');
     return;
   }
-  if (status.type === 'no-rimworld') return;
   await startRebuild();
 }
 

@@ -167,7 +167,7 @@ export function extractHints(
       }
       // Drop candidates with no namespace — those don't tell the agent
       // anything actionable. Keep at most 5; if a name is genuinely
-      // ambiguous the agent should switch to read_csharp_symbol.
+      // ambiguous the agent should switch to read_symbol.
       candidates = candidates
         .filter((c) => c.namespace !== null)
         .slice(0, 5);

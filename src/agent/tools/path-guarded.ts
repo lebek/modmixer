@@ -103,7 +103,7 @@ function wrapPathTool(
 /**
  * True iff `absPath` is inside the indexed RimWorld C# source corpus
  * (`$MM/index/Source/...`) and is a .cs file. Used to nudge the agent toward
- * `read_csharp_symbol`, which returns a class/method body without juggling
+ * `read_symbol`, which returns a class/method body without juggling
  * line offsets and reuses the symbol index instead of re-reading the same
  * file at adjacent ranges. Failures (e.g. no index built yet) → false.
  */
@@ -120,16 +120,16 @@ function isIndexedCsharpSource(absPath: string): boolean {
 }
 
 const READ_CSHARP_SYMBOL_HINT =
-  '[hint] This file is in the RimWorld C# index. For class/method-level reads, `read_csharp_symbol "<SymbolName>"` returns the symbol body in one call without juggling offsets — use it when you know which symbol you need; this `read` is fine when you genuinely need surrounding lines.';
+  '[hint] This file is in the RimWorld C# index. For class/method-level reads, `read_symbol "<SymbolName>"` returns the symbol body in one call without juggling offsets — use it when you know which symbol you need; this `read` is fine when you genuinely need surrounding lines.';
 
 // Default line cap injected into unbounded reads of indexed C# source files.
 // `read` without a `limit`/`offset` on a 600-line .cs file was a recurring
 // context sink (run 2 read 14 KB of IncidentWorker_RaidEnemy.cs in one call).
-// Anything past this many lines should come from `read_csharp_symbol` or an
+// Anything past this many lines should come from `read_symbol` or an
 // explicit slice.
 const INDEXED_CS_DEFAULT_LIMIT = 120;
 
-const READ_CSHARP_TRUNCATED_HINT = `[hint] Capped to first ${INDEXED_CS_DEFAULT_LIMIT} lines because this is an indexed RimWorld C# source file. To read a specific class/method body, call \`read_csharp_symbol "<SymbolName>"\` — it returns the body without juggling offsets. To read further into this file, re-call \`read\` with explicit \`offset\` + \`limit\`.`;
+const READ_CSHARP_TRUNCATED_HINT = `[hint] Capped to first ${INDEXED_CS_DEFAULT_LIMIT} lines because this is an indexed RimWorld C# source file. To read a specific class/method body, call \`read_symbol "<SymbolName>"\` — it returns the body without juggling offsets. To read further into this file, re-call \`read\` with explicit \`offset\` + \`limit\`.`;
 
 /**
  * Note returned in place of an image when the active model has no vision

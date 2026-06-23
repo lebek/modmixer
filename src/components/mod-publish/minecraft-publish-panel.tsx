@@ -7,9 +7,16 @@ import type {
 import { useAsyncAction } from '@/lib/use-async-action';
 import { ErrorBanner, Field, Section } from './ui';
 import { MinecraftPublishConfirmDialog } from './minecraft-publish-confirm-dialog';
+import { DangerZone } from './danger-zone';
 
 /** Minecraft mods publish to Modrinth (not Steam Workshop). */
-export function MinecraftPublishPanel({ mod }: { mod: WorkspaceMod }) {
+export function MinecraftPublishPanel({
+  mod,
+  onDeleted,
+}: {
+  mod: WorkspaceMod;
+  onDeleted?: () => void;
+}) {
   const [hasToken, setHasToken] = useState<boolean | null>(null);
   const [tokenInput, setTokenInput] = useState('');
   // Reveals the token form even when a token is already stored, so a wrong or
@@ -218,6 +225,14 @@ export function MinecraftPublishPanel({ mod }: { mod: WorkspaceMod }) {
               )}
             </div>
           </Section>
+
+          <DangerZone
+            game="minecraft"
+            modFolder={mod.folder}
+            expectedConfirmText={mod.about.name || mod.folder}
+            hasWorkshopItem={!!mod.prefs.modrinthProjectId}
+            onDeleted={onDeleted}
+          />
         </div>
       </div>
 

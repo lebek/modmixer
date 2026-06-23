@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useAsyncAction } from '@/lib/use-async-action';
+import type { GameId } from '../../agent/games/types';
 
 /**
  * Confirmation-gated mod deletion. The user must type the mod's display
@@ -11,11 +12,14 @@ export function DangerZone({
   expectedConfirmText,
   hasWorkshopItem,
   onDeleted,
+  game = 'rimworld',
 }: {
   modFolder: string;
   expectedConfirmText: string;
+  /** Whether a published remote item exists (Workshop item / Modrinth project). */
   hasWorkshopItem: boolean;
   onDeleted?: () => void;
+  game?: GameId;
 }) {
   const [open, setOpen] = useState(false);
   const [confirmText, setConfirmText] = useState('');
@@ -35,13 +39,28 @@ export function DangerZone({
           Danger zone
         </h2>
         <p className="mt-0.5 text-xs text-muted">
-          Deleting removes the mod folder from disk, the symlink in
-          RimWorld's Mods/ directory, the entry in ModsConfig.xml, and any
-          agent chats for this mod. This cannot be undone.
-          {hasWorkshopItem && (
+          {game === 'minecraft' ? (
             <>
-              {' '}The Steam Workshop item is <em>not</em> removed — delete
-              it from the Workshop page yourself if you want it gone.
+              Deleting removes the mod folder (the NeoForge/Gradle project)
+              from disk and any agent chats for this mod. This cannot be undone.
+              {hasWorkshopItem && (
+                <>
+                  {' '}The Modrinth project is <em>not</em> removed — delete it
+                  from its Modrinth page yourself if you want it gone.
+                </>
+              )}
+            </>
+          ) : (
+            <>
+              Deleting removes the mod folder from disk, the symlink in
+              RimWorld's Mods/ directory, the entry in ModsConfig.xml, and any
+              agent chats for this mod. This cannot be undone.
+              {hasWorkshopItem && (
+                <>
+                  {' '}The Steam Workshop item is <em>not</em> removed — delete
+                  it from the Workshop page yourself if you want it gone.
+                </>
+              )}
             </>
           )}
         </p>

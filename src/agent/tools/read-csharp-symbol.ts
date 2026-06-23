@@ -72,7 +72,7 @@ export function createReadCsharpSymbolTool(
 ): AgentTool<typeof Params, { hits: SymbolHit[]; matches?: SymbolMatch[] }> {
   const isMc = game === 'minecraft';
   return {
-  name: 'read_csharp_symbol',
+  name: 'read_symbol',
   label: isMc ? 'Read Java symbol' : 'Read C# symbol',
   description: isMc
     ? "Look up a Java type or member in the decompiled Minecraft + NeoForge source (mojmap + Parchment names). Pass a bare short name (\"DeferredRegister\", \"RegisterEvent\", \"BlockBehaviour\") → returns the body when one symbol matches, or candidate bodies inlined when a few share the name; pass a partial/full FQN (\"net.neoforged.neoforge.registries.DeferredRegister\") → returns that body. For textual occurrences (call sites, usages) use search_source."
@@ -104,7 +104,9 @@ export function createReadCsharpSymbolTool(
           content: [
             {
               type: 'text',
-              text: `No C# symbol named "${params.name}"${params.kind ? ` (kind=${params.kind})` : ''} in the indexed source. Try search_source for substring matches in C# / XML, or search_defs if "${params.name}" might be an XML def.`,
+              text: isMc
+                ? `No Java symbol named "${params.name}"${params.kind ? ` (kind=${params.kind})` : ''} in the indexed Minecraft + NeoForge source. Try search_source for substring matches, or search_defs if "${params.name}" might be a data/asset JSON id.`
+                : `No C# symbol named "${params.name}"${params.kind ? ` (kind=${params.kind})` : ''} in the indexed source. Try search_source for substring matches in C# / XML, or search_defs if "${params.name}" might be an XML def.`,
             },
           ],
           details: { hits: [], matches: [] },
@@ -128,7 +130,7 @@ export function createReadCsharpSymbolTool(
           }
         }
         return {
-          content: [{ type: 'text', text: formatMatches(matches) }],
+          content: [{ type: 'text', text: formatMatches(matches, isMc) }],
           details: { hits: [], matches },
         };
       }
@@ -163,7 +165,7 @@ export function createReadCsharpSymbolTool(
     // (e.g. "Pawn_NeedsTracker.ShouldHaveNeed", not "RimWorld.Pawn_NeedsTracker.…").
     // When the model prepends a namespace it knows from `using …;` ("RimWorld.",
     // "Verse."), drop one leading component at a time and retry. This collapses
-    // the previously-observed read_csharp_symbol("RimWorld.X.Y") → fail → retry
+    // the previously-observed read_symbol("RimWorld.X.Y") → fail → retry
     // ("X.Y") → success pattern into one call.
     const variants: string[] = [lookupName];
     const parts = lookupName.split('.');
@@ -196,7 +198,7 @@ export function createReadCsharpSymbolTool(
               type: 'text',
               text:
                 `No symbol exactly matched "${params.name}". Closest matches by short name "${tail}":\n\n` +
-                formatMatches(matches),
+                formatMatches(matches, isMc),
             },
           ],
           details: { hits: [], matches },
@@ -206,7 +208,9 @@ export function createReadCsharpSymbolTool(
         content: [
           {
             type: 'text',
-            text: `No C# symbol found matching "${params.name}"${params.kind ? ` (kind=${params.kind})` : ''}. Try search_source for substring matches, or search_defs if it might be an XML def.`,
+            text: isMc
+              ? `No Java symbol found matching "${params.name}"${params.kind ? ` (kind=${params.kind})` : ''}. Try search_source for substring matches, or search_defs if it might be a data/asset JSON id.`
+              : `No C# symbol found matching "${params.name}"${params.kind ? ` (kind=${params.kind})` : ''}. Try search_source for substring matches, or search_defs if it might be an XML def.`,
           },
         ],
         details: { hits: [] },
@@ -320,16 +324,19 @@ async function inlineMatchBodies(
   return { text, hits };
 }
 
-function formatMatches(matches: SymbolMatch[]): string {
+function formatMatches(matches: SymbolMatch[], isMc = false): string {
   const lines: string[] = [
     `Found ${matches.length} ${matches.length === 1 ? 'match' : 'matches'}. Re-call with the FQN to read the body:`,
     '',
   ];
   for (const m of matches) {
-    const ns = m.namespace ?? '<global>';
-    const ext = m.isExtensionMethod ? ' [extension method]' : '';
+    // Java imports the fully-qualified type; C# brings in the namespace.
+    // Extension methods are a C#-only concept, so skip that tag for Java.
+    const ext = !isMc && m.isExtensionMethod ? ' [extension method]' : '';
     lines.push(`* ${m.kind} ${m.fqn}${ext}`);
-    lines.push(`    using:  ${ns};`);
+    lines.push(
+      isMc ? `    import: ${m.fqn};` : `    using:  ${m.namespace ?? '<global>'};`,
+    );
     if (m.signature) lines.push(`    sig:    ${m.signature}`);
     lines.push(`    where:  ${m.filePath}:${m.startLine}-${m.endLine}`);
     lines.push('');

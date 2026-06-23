@@ -32,7 +32,7 @@ export interface PathPolicyRoots {
   playerLogDir: string | null;
   /**
    * RimWorld source/def index root ($MM/index/). Read-only for the agent —
-   * search_defs / read_csharp_symbol / search_source live here. The path
+   * search_defs / read_symbol / search_source live here. The path
    * lives under the user's userData so a hostile path argument can't escape
    * into other Electron app data via this allowance.
    */

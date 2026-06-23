@@ -4,6 +4,7 @@ import type { SchematicData } from '../agent/schematic';
 import type { DefEntry } from '../agent/defs-scan';
 import { Markdown } from './markdown';
 import { cn } from '@/lib/cn';
+import { resolveGameId } from '../agent/games/registry';
 
 export function ModSchematicPanel({ mod }: { mod: WorkspaceMod }) {
   const [schematic, setSchematic] = useState<SchematicData | null>(
@@ -11,6 +12,10 @@ export function ModSchematicPanel({ mod }: { mod: WorkspaceMod }) {
   );
   const [defs, setDefs] = useState<DefEntry[] | null>(null);
   const [scanning, setScanning] = useState(false);
+  // The Definitions section scans for RimWorld XML defs (Defs/*.xml). Other
+  // games (Minecraft/NeoForge) keep their data as JSON under
+  // src/main/resources/data/<modid>/, so skip the scan and hide the section.
+  const isRimWorld = resolveGameId(mod.prefs.game) === 'rimworld';
 
   useEffect(() => {
     setSchematic(mod.schematic);
@@ -19,6 +24,10 @@ export function ModSchematicPanel({ mod }: { mod: WorkspaceMod }) {
   useEffect(() => {
     let cancelled = false;
     const refresh = async () => {
+      if (!isRimWorld) {
+        setDefs([]);
+        return;
+      }
       setScanning(true);
       try {
         const list = await window.modmixer.scanModDefs(mod.folder);
@@ -39,7 +48,7 @@ export function ModSchematicPanel({ mod }: { mod: WorkspaceMod }) {
       cancelled = true;
       offMod();
     };
-  }, [mod.folder]);
+  }, [mod.folder, isRimWorld]);
 
   const grouped = groupByType(defs ?? []);
   const hasShort = !!schematic?.shortDescription;
@@ -77,6 +86,10 @@ export function ModSchematicPanel({ mod }: { mod: WorkspaceMod }) {
             )}
           </section>
 
+          {/* RimWorld XML defs (Defs/*.xml). NeoForge mods store data as JSON
+              under src/main/resources/data/<modid>/, so there's nothing to
+              scan — hide the section for non-RimWorld games. */}
+          {isRimWorld && (
           <section>
             <div className="mb-2 flex items-baseline justify-between">
               <SectionHeading>Definitions</SectionHeading>
@@ -103,6 +116,7 @@ export function ModSchematicPanel({ mod }: { mod: WorkspaceMod }) {
               </div>
             )}
           </section>
+          )}
         </div>
       </div>
     </div>

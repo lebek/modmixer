@@ -10,7 +10,7 @@ import {
 } from './lore.js';
 import { loadSettings, saveSettings } from './settings.js';
 import type { GameId } from './games/types.js';
-import { isGameId, listGames } from './games/registry.js';
+import { isGameId } from './games/registry.js';
 
 // Publishable Supabase credentials — designed to ship in clients. Rotation
 // is independent of any user-level secret. Keep these in sync with the
@@ -152,7 +152,11 @@ async function fetchReviewedHooks(
 export async function syncCommunityLore(): Promise<void> {
   const settings = loadSettings();
   if (!settings.useCommunityLore) return;
-  const games = listGames().map((g) => g.id);
+  // Community-lore sync is RimWorld-only for now (see baseLoreDir): every other
+  // game reads its shipped bundle, so pushing/pulling/writing its community
+  // cache is work that's never read back. Re-add a game here once its
+  // community-read path is enabled.
+  const games: GameId[] = ['rimworld'];
 
   // Make sure every game's cache has SOMETHING before the agent reads —
   // covers the first-launch path (default-on) and any emptied-cache scenario.
