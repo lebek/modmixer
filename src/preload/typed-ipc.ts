@@ -169,7 +169,6 @@ export interface Channels {
   'modmixer:settings:set-theme': (theme: ThemePreference) => Settings;
   'modmixer:settings:set-thinking-level': (level: ThinkingLevel) => Settings;
   'modmixer:settings:set-multi-chat': (enabled: boolean) => Settings;
-  'modmixer:settings:set-minecraft-enabled': (enabled: boolean) => Settings;
   // Per-game setup (toolchain + code index) for Settings → Games. Dispatches to
   // getAdapter(game).setup; one uniform surface for every game.
   'modmixer:game-setup:status': (game: GameId) => GameSetupStatus;

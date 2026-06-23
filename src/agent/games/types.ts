@@ -63,9 +63,9 @@ export interface GameDefinition {
   capabilities: GameCapabilities;
   buildTool: BuildTool;
   /**
-   * Gates the game in onboarding/settings/library pickers. RimWorld is always
-   * available; Minecraft ships behind the `minecraftEnabled` setting for the
-   * beta so existing users never see it until we flip the flag.
+   * Marks a game as still in beta — surfaced as a small "Beta" label in the
+   * picker / Games settings card. It does NOT gate availability: every game in
+   * getSelectableGames() is always selectable (setup happens lazily).
    */
   beta: boolean;
 }

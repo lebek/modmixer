@@ -67,11 +67,6 @@ export function registerSettingsRoutes(ctx: RouteContext): void {
     (_evt, enabled: boolean) => saveSettings({ multiChat: enabled }),
   );
 
-  ipc.handle(
-    'modmixer:settings:set-minecraft-enabled',
-    (_evt, enabled: boolean) => saveSettings({ minecraftEnabled: enabled }),
-  );
-
   // Minecraft setup (toolchain + source index) is served by the uniform
   // game-setup IPC in system.ts (getAdapter('minecraft').setup), same as every
   // other game — no Minecraft-specific settings channel.

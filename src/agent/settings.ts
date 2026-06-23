@@ -128,12 +128,6 @@ export interface Settings {
    */
   minecraftInstallOverride: string | null;
   /**
-   * Feature flag for Minecraft (NeoForge) support. Off by default so existing
-   * RimWorld users never see Minecraft in onboarding/settings/library pickers
-   * until we enable it for the beta cohort. RimWorld is unaffected either way.
-   */
-  minecraftEnabled: boolean;
-  /**
    * The game that new mods default to and that onboarding set up first.
    * Defaults to 'rimworld'; becomes 'minecraft' only once the user enables and
    * sets up Minecraft. Per-mod game is still stored on each mod (ModPrefs.game).
@@ -228,7 +222,6 @@ function computeDefaults(): Settings {
     onboarding: null,
     rimworldInstallOverride: null,
     minecraftInstallOverride: null,
-    minecraftEnabled: false,
     selectedGameId: 'rimworld',
     openrouterModels: [],
     localProviders: [],
@@ -304,9 +297,6 @@ function normalize(raw: unknown, defaults: Settings): Settings {
   if (minecraftInstallOverride !== undefined) {
     next.minecraftInstallOverride = minecraftInstallOverride;
   }
-
-  const minecraftEnabled = readBool(obj.minecraftEnabled);
-  if (minecraftEnabled !== undefined) next.minecraftEnabled = minecraftEnabled;
 
   if (obj.selectedGameId !== undefined) {
     next.selectedGameId = resolveGameId(obj.selectedGameId);

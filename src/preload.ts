@@ -81,8 +81,6 @@ const api = {
     invoke('modmixer:settings:set-thinking-level', level),
   setMultiChat: (enabled: boolean) =>
     invoke('modmixer:settings:set-multi-chat', enabled),
-  setMinecraftEnabled: (enabled: boolean) =>
-    invoke('modmixer:settings:set-minecraft-enabled', enabled),
   getGameSetupStatus: (game: 'rimworld' | 'minecraft') =>
     invoke('modmixer:game-setup:status', game),
   rebuildGameSetup: (
