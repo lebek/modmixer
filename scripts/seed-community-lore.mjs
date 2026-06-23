@@ -67,5 +67,5 @@ const values = rows
 
 process.stdout.write(`-- ${rows.length} ${GAME} entries from ${path.relative(path.resolve(__dirname, '..'), LORE_DIR)}/\n`);
 process.stdout.write(
-  `insert into public.community_lore (game_id, topic, hook, markdown) values\n${values}\non conflict (game_id, topic, hook) do update set markdown = excluded.markdown, updated_at = now();\n`,
+  `insert into public.community_lore (game, topic, hook, markdown) values\n${values}\non conflict (game, topic, hook) do update set markdown = excluded.markdown, updated_at = now();\n`,
 );

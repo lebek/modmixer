@@ -38,8 +38,8 @@ async function pushUserLore(deviceId: string, game: GameId): Promise<number> {
   const rows = entries.map((e) => ({
     device_id: deviceId,
     // RimWorld and Minecraft share topic names (recipes, build, test-loop, …),
-    // so game_id is part of the row identity, not just a label.
-    game_id: game,
+    // so `game` is part of the row identity (it's in the PK), not just a label.
+    game,
     topic: e.topic,
     hook: e.hook,
     markdown: e.markdown,
@@ -50,9 +50,8 @@ async function pushUserLore(deviceId: string, game: GameId): Promise<number> {
     client_model: e.clientModel ?? null,
   }));
   const res = await fetch(
-    // Target the game-aware unique index explicitly so the UPSERT keys on
-    // (device_id, game_id, topic, hook) rather than guessing a constraint.
-    `${SUPABASE_URL}/rest/v1/lore_submissions?on_conflict=device_id,game_id,topic,hook`,
+    // Target the primary key explicitly: (game, device_id, topic, hook).
+    `${SUPABASE_URL}/rest/v1/lore_submissions?on_conflict=game,device_id,topic,hook`,
     {
       method: 'POST',
       headers: {
@@ -77,7 +76,7 @@ async function pullCommunityLore(
   game: GameId,
 ): Promise<Array<{ topic: LoreTopic; hook: string; markdown: string }>> {
   const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/community_lore?game_id=eq.${game}&select=topic,hook,markdown`,
+    `${SUPABASE_URL}/rest/v1/community_lore?game=eq.${game}&select=topic,hook,markdown`,
     { headers: authHeaders() },
   );
   if (!res.ok) {
@@ -103,7 +102,7 @@ async function pullCommunityLore(
  * pull; the rest were judged not-to-be-kept); `pending` and `needs_edit`
  * are still in flight and are deliberately excluded.
  *
- * Returns each hook's `game_id` so the prune deletes the right game's local
+ * Returns each hook's `game` so the prune deletes the right game's local
  * copy — topic+hook alone is ambiguous now that the taxonomies overlap.
  *
  * It's a SECURITY DEFINER RPC so the anon role can read its own rows'
@@ -126,15 +125,15 @@ async function fetchReviewedHooks(
     );
   }
   const rows = (await res.json()) as Array<{
-    game_id: string;
+    game: string;
     topic: string;
     hook: string;
     reviewed_at: string | null;
   }>;
   return rows
-    .filter((r) => isGameId(r.game_id) && isLoreTopicForGame(r.topic, r.game_id))
+    .filter((r) => isGameId(r.game) && isLoreTopicForGame(r.topic, r.game))
     .map((r) => ({
-      game: r.game_id as GameId,
+      game: r.game as GameId,
       topic: r.topic as LoreTopic,
       hook: r.hook,
       reviewedAt: r.reviewed_at ?? undefined,
@@ -185,7 +184,7 @@ export async function syncCommunityLore(): Promise<void> {
   // Pull per game; prune that game's reviewed local entries only after a
   // successful pull (so the curated copy is cached before the local original
   // is deleted). The reviewed-hooks RPC is device-scoped and returns every
-  // game, so it's fetched at most once and partitioned by game_id.
+  // game, so it's fetched at most once and partitioned by game.
   let reviewed: Array<{
     game: GameId;
     topic: LoreTopic;
