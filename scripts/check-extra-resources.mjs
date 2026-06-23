@@ -17,8 +17,15 @@
 //     sqlite3 was shipped via dist/, but its hoisted runtime deps were not,
 //     so lib/database.js's require('bindings') threw on first index build.
 //
-// Run as part of `release.mjs` preflight so a bad config fails before a tag
-// is cut.
+//  3. Every non-staged extraResource entry actually exists on disk (plus key
+//     fetched files inside placeholder dirs — see REQUIRED_FILES). Catches a
+//     forgotten fetch/build step that would otherwise ship an installer with a
+//     missing asset that only crashes at the feature's runtime — the Minecraft
+//     bridge jar / NeoForge MDK / tree-sitter-java grammar each shipped missing
+//     this way. Run in release.yml after the fetch steps so CI fails loudly.
+//
+// Run as part of `release.mjs` preflight AND in release.yml (after `npm ci` +
+// the fetch steps) so a bad config or missing asset fails before a tag is cut.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -57,6 +64,17 @@ const NON_RUNTIME_DEPS = {
   'better-sqlite3': new Set(['prebuild-install']),
   // @types/node: type-only declaration package, has no runtime entry point.
   'steamworks.js': new Set(['@types/node']),
+};
+
+// Committed placeholder dirs whose shipped CONTENTS are fetched at build time,
+// so "the directory exists" is not enough — assert the specific files are
+// present. resources/tree-sitter holds the tree-sitter grammars (C# fetched in
+// postinstall, Java by `npm run fetch:tree-sitter-java`); without the Java wasm
+// the Minecraft source index is dead in a packaged build, yet the dir itself
+// (a committed .gitignore) would still look present. Keep this tight — only
+// list files whose absence silently breaks a shipped feature.
+const REQUIRED_FILES = {
+  'resources/tree-sitter': ['tree-sitter-c-sharp.wasm', 'tree-sitter-java.wasm'],
 };
 
 /**
@@ -213,12 +231,56 @@ function checkStagedDeps(extraResources, forgeSrc) {
   return missing;
 }
 
+/**
+ * Verify every extraResource entry actually exists on disk, so a forgotten
+ * fetch/build step fails loudly here instead of silently shipping an installer
+ * with a missing asset (which then crashes only at the feature's runtime — the
+ * MC bridge jar / NeoForge MDK / tree-sitter-java grammar were each missing
+ * from packaged builds this way). Entries under `dist/` are staged by the
+ * generateAssets hooks during `electron-forge package`, so they don't exist
+ * when this runs in preflight — skip them.
+ */
+function checkExtraResourcesExist(extraResources) {
+  const missing = [];
+  for (const entry of extraResources) {
+    const norm = entry.replace(/\\/g, '/');
+    if (norm.startsWith('dist/')) continue; // staged at package time
+    const abs = path.join(repoRoot, norm);
+    if (!fs.existsSync(abs)) {
+      missing.push(norm);
+      continue;
+    }
+    for (const file of REQUIRED_FILES[norm] ?? []) {
+      if (!fs.existsSync(path.join(abs, file))) missing.push(`${norm}/${file}`);
+    }
+  }
+  return missing;
+}
+
 function main() {
   const externals = readExternals().filter(
     (s) => !RUNTIME_PROVIDED.has(s) && !s.startsWith('node:'),
   );
   const extraResources = readExtraResources();
   const forgeSrc = stripComments(fs.readFileSync(FORGE_CONFIG, 'utf8'));
+
+  const missingResources = checkExtraResourcesExist(extraResources);
+  if (missingResources.length > 0) {
+    console.error(
+      'check-extra-resources: extraResource entries are missing on disk — a fetch/build step did not run:',
+    );
+    for (const m of missingResources) console.error(`  - ${m}`);
+    console.error(
+      '\nFix: run the matching fetch/build step before packaging, e.g.',
+    );
+    console.error('  npm run fetch:tree-sitter-java   # resources/tree-sitter/tree-sitter-java.wasm');
+    console.error('  npm run fetch:neoforge-mdk       # vendor/neoforge-mdk');
+    console.error('  npm run fetch:ilspycmd           # resources/ilspycmd/<platform>');
+    console.error(
+      'In CI these run after `npm ci` (release.yml); they are kept out of postinstall.',
+    );
+    process.exit(1);
+  }
 
   const hasStagedNodeModules = extraResources.some(
     (r) => r.replace(/\\/g, '/') === 'dist/node_modules',
@@ -266,7 +328,7 @@ function main() {
   }
 
   console.log(
-    `check-extra-resources: OK — ${externals.length} external${externals.length === 1 ? '' : 's'} all have shipping entries; staged-package deps verified.`,
+    `check-extra-resources: OK — ${externals.length} external${externals.length === 1 ? '' : 's'} all have shipping entries; ${extraResources.length} extraResource entries present on disk; staged-package deps verified.`,
   );
 }
 

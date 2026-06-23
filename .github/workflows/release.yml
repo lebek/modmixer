@@ -98,6 +98,12 @@ jobs:
           npm run fetch:tree-sitter-java
           npm run fetch:neoforge-mdk
 
+      - name: Verify packaged assets are present
+        # Fails loudly if any extraResource entry (or a key fetched file inside
+        # one) is missing on disk — so a forgotten/broken fetch step above can't
+        # silently ship an installer that crashes only at the feature's runtime.
+        run: npm run lint:externals
+
       # Smoke test the packaged app BEFORE signing/publishing. Catches the
       # class of bug where an external in vite.main.config.ts isn't shipped
       # via extraResource (the v0.4.4 web-tree-sitter crash). Runs unsigned
