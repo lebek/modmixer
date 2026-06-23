@@ -87,6 +87,17 @@ jobs:
         # extraResource, so each runner contributes its own platform.
         run: npm run fetch:ilspycmd
 
+      - name: Fetch Minecraft toolchain assets
+        # Build-time fetches kept out of postinstall (so RimWorld-only installs
+        # stay lean): the tree-sitter Java grammar (MC source index) and the
+        # NeoForge MDK template (MC mod scaffolding). forge.config.ts ships
+        # resources/tree-sitter + vendor/neoforge-mdk into the installer; the
+        # bridge jar is already committed under resources/. Without this, every
+        # MC flow (create / index / test) is dead in packaged builds.
+        run: |
+          npm run fetch:tree-sitter-java
+          npm run fetch:neoforge-mdk
+
       # Smoke test the packaged app BEFORE signing/publishing. Catches the
       # class of bug where an external in vite.main.config.ts isn't shipped
       # via extraResource (the v0.4.4 web-tree-sitter crash). Runs unsigned

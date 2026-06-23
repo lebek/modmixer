@@ -238,9 +238,19 @@ const config: ForgeConfig = {
       // only the matching <platform>-<arch> subdir for the build host needs
       // a binary present (see resources/ilspycmd/README.md). The tree-sitter
       // C# grammar wasm (~1 MB) is fetched at install time by
-      // scripts/fetch-tree-sitter-csharp.mjs.
+      // scripts/fetch-tree-sitter-csharp.mjs; the Java grammar (Minecraft
+      // source index) by scripts/fetch-tree-sitter-java.mjs at build time.
       'resources/ilspycmd',
       'resources/tree-sitter',
+      // --- Minecraft (NeoForge) toolchain assets ---
+      // MC mods are scaffolded by copying this MDK template (fetched, not
+      // committed — scripts/fetch-neoforge-mdk.mjs). scaffold.ts resolves it at
+      // resourcesPath/neoforge-mdk/template in packaged builds.
+      'vendor/neoforge-mdk',
+      // The NeoForge diagnostics bridge jar, passed to `gradlew runClient` via
+      // -PmodmixerBridgeJar. launch.ts resolves it at
+      // resourcesPath/modmixer-bridge.jar in packaged builds.
+      'resources/modmixer-bridge.jar',
       // Bundled ripgrep — used by search_source against the decompiled
       // RimWorld source corpus. @vscode/ripgrep installs platform binaries
       // under node_modules/@vscode/ripgrep/bin/, which we ship as-is.
