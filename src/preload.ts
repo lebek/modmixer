@@ -165,12 +165,12 @@ const api = {
   ) => on('modmixer:mod:changed', handler),
   getWorkspacePaths: () => invoke('modmixer:workspace:paths'),
   enableModInGame: (folder: string) =>
-    invoke('modmixer:mods:enable-in-game', folder),
+    invoke('modmixer:rimworld:enable-mod', folder),
   disableModInGame: (folder: string) =>
-    invoke('modmixer:mods:disable-in-game', folder),
-  launchRimWorld: () => invoke('modmixer:game:launch'),
-  isRimWorldRunning: () => invoke('modmixer:game:is-running'),
-  quitRimWorld: () => invoke('modmixer:game:quit'),
+    invoke('modmixer:rimworld:disable-mod', folder),
+  launchRimWorld: () => invoke('modmixer:rimworld:launch'),
+  isRimWorldRunning: () => invoke('modmixer:rimworld:is-running'),
+  quitRimWorld: () => invoke('modmixer:rimworld:quit'),
 
   // Assets
   scanAssets: (folder: string) => invoke('modmixer:assets:scan', folder),

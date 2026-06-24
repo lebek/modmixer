@@ -7,53 +7,69 @@ import { getIndexStatus } from '../index/rebuild.js';
 import { ensureMinecraftIndexInBackground } from '../index/rebuild-minecraft.js';
 import type { GameId } from '../games/types.js';
 
-const Params = Type.Object({
-  query: Type.String({
-    description:
-      'Search term. Matched against defName (substring), label, and description (FTS). Empty string returns the first results filtered only by defType/pack. Ignored when descendantsOf or referencedBy is set.',
-  }),
-  defType: Type.Optional(
-    Type.String({
-      description:
-        'Filter to a single XML def type (e.g. "ThingDef", "JobDef", "RecipeDef"). Omit to search all types.',
+// Built per-game so the schema the model reads matches the corpus it's actually
+// searching: RimWorld XML defs (ThingDef/JobDef, ParentName inheritance, C#
+// cross-refs) vs Minecraft data JSON (recipe/loot_table/tags, no inheritance).
+// Shape is identical across games, so `typeof Params` stays a stable type anchor.
+function searchDefsParams(game: GameId) {
+  const isMc = game === 'minecraft';
+  return Type.Object({
+    query: Type.String({
+      description: isMc
+        ? 'Search term, matched against the entry id (substring) and indexed text (FTS) — e.g. "diamond_sword", "oak_planks". Empty string returns the first results filtered only by defType.'
+        : 'Search term. Matched against defName (substring), label, and description (FTS). Empty string returns the first results filtered only by defType/pack. Ignored when descendantsOf or referencedBy is set.',
     }),
-  ),
-  pack: Type.Optional(
-    Type.String({
-      description:
-        'Filter to a single pack: "Core", a DLC name ("Royalty"/"Ideology"/etc.), or "Mod:<id>" for a user mod. Omit to search everything.',
-    }),
-  ),
-  limit: Type.Optional(
-    Type.Number({
-      description: 'Max rows to return (default 25, hard cap 200).',
-    }),
-  ),
-  merged: Type.Optional(
-    Type.Boolean({
-      description:
-        'When a single def matches, return its full XML with ParentName inheritance folded in. Default true (merged); pass false for the raw authored XML.',
-    }),
-  ),
-  descendantsOf: Type.Optional(
-    Type.String({
-      description:
-        'Set to find every def that extends a given parent via ParentName="..." (e.g. "BaseFilth"). Mutually exclusive with query / referencedBy.',
-    }),
-  ),
-  recursive: Type.Optional(
-    Type.Boolean({
-      description:
-        'For descendantsOf: walk transitive children (descendants of descendants). Default false (one level).',
-    }),
-  ),
-  referencedBy: Type.Optional(
-    Type.String({
-      description:
-        'Set to a defName to find every C# location that references it by string literal. Bridges the def index and the source index — answers "what code reads this def?".',
-    }),
-  ),
-});
+    defType: Type.Optional(
+      Type.String({
+        description: isMc
+          ? 'Filter to a single data category, e.g. "recipe", "loot_table", "tags", "advancement", "models", "blockstates", "lang". Omit to search all.'
+          : 'Filter to a single XML def type (e.g. "ThingDef", "JobDef", "RecipeDef"). Omit to search all types.',
+      }),
+    ),
+    pack: Type.Optional(
+      Type.String({
+        description: isMc
+          ? 'Filter to a single namespace (e.g. "minecraft"). Omit to search everything.'
+          : 'Filter to a single pack: "Core", a DLC name ("Royalty"/"Ideology"/etc.), or "Mod:<id>" for a user mod. Omit to search everything.',
+      }),
+    ),
+    limit: Type.Optional(
+      Type.Number({
+        description: 'Max rows to return (default 25, hard cap 200).',
+      }),
+    ),
+    merged: Type.Optional(
+      Type.Boolean({
+        description: isMc
+          ? 'RimWorld-only (folds ParentName inheritance into one def). No effect on Minecraft data — omit.'
+          : 'When a single def matches, return its full XML with ParentName inheritance folded in. Default true (merged); pass false for the raw authored XML.',
+      }),
+    ),
+    descendantsOf: Type.Optional(
+      Type.String({
+        description: isMc
+          ? 'RimWorld-only (def inheritance via ParentName). Not applicable to Minecraft data — omit.'
+          : 'Set to find every def that extends a given parent via ParentName="..." (e.g. "BaseFilth"). Mutually exclusive with query / referencedBy.',
+      }),
+    ),
+    recursive: Type.Optional(
+      Type.Boolean({
+        description: isMc
+          ? 'RimWorld-only companion to descendantsOf. Not applicable to Minecraft — omit.'
+          : 'For descendantsOf: walk transitive children (descendants of descendants). Default false (one level).',
+      }),
+    ),
+    referencedBy: Type.Optional(
+      Type.String({
+        description: isMc
+          ? 'RimWorld-only (finds C# code referencing a defName). Not applicable to Minecraft — use search_source over the Java sources instead.'
+          : 'Set to a defName to find every C# location that references it by string literal. Bridges the def index and the source index — answers "what code reads this def?".',
+      }),
+    ),
+  });
+}
+
+const Params = searchDefsParams('rimworld');
 
 interface SearchDefsHit {
   pack: string;
@@ -117,7 +133,7 @@ export function createSearchDefsTool(game: GameId = 'rimworld'): AgentTool<typeo
   description: isMc
     ? "Look up Minecraft data/asset JSON in the indexed vanilla corpus by namespaced id. Search recipes, loot tables, tags, advancements, worldgen, models, blockstates, and lang (e.g. \"diamond_sword\", \"oak_planks\"). Filter by defType (recipe, loot_table, tags, advancement, models, blockstates, lang). When exactly one entry matches, its full JSON is returned inline — handy as a template to copy from. For Java code BEHAVIOR (how a registry/event works) use read_symbol or search_source instead."
     : "Look up XML defs in the indexed Core + DLCs corpus. Three modes in one tool:\n\n• default — search by defName / label / description / abstract Name. Pass a single keyword (\"Pirate\") or a few whitespace-separated terms (\"BaseHuman raider\") — terms are AND'd. Abstract defs (those with `Name=\"…\"` and no `defName`, e.g. `FactionBase`) are matched on their Name attribute. When exactly one def matches, the full merged XML is returned inline.\n• descendantsOf=<Name> — find every def that extends a parent via ParentName (e.g. \"BaseFilth\"). Pass recursive=true to walk transitively.\n• referencedBy=<defName> — find every C# source location that mentions this defName by string literal.\n\nTemplate-fetch idiom: when you know the exact defName and just want its full XML to copy from (e.g. \"show me the Pirate FactionDef as a template\"), call with `limit=1` (and optionally `merged=true` to fold ParentName inheritance inline). That collapses the common search → identify → re-fetch chain into one call.\n\nThis tells you what XML data exists. For code BEHAVIOR (how does X work, why isn't Y firing, what's the right API pattern) start with search_source or read_symbol — the def database can't tell you how the engine consumes a def. Zero results here doesn't mean nothing exists; it usually means the answer lives in C# source, not XML.",
-  parameters: Params,
+  parameters: searchDefsParams(game),
   async execute(_id, params): Promise<AgentToolResult<Details>> {
     const notReady = defsIndexNotReady(game);
     if (notReady) {

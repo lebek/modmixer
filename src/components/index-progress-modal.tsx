@@ -4,7 +4,7 @@ import type { IndexSnapshot } from '@/agent/index/main-bridge';
 
 const PHASE_LABEL: Record<IndexPhase, string> = {
   defs: 'Indexing defs',
-  decompile: 'Decompiling RimWorld assemblies',
+  decompile: 'Decompiling game assemblies',
   symbols: 'Indexing C# symbols',
 };
 
@@ -16,6 +16,11 @@ const PHASE_LABEL: Record<IndexPhase, string> = {
  *
  * Renders nothing when there's nothing happening (status fresh + not
  * rebuilding) so we don't flicker on every re-render.
+ *
+ * This tracks the RimWorld code index specifically — the Minecraft index has
+ * its own progress in Settings → Games and never feeds this channel (its status
+ * reads `no-rimworld` here, which hides the modal). Labels are kept game-neutral
+ * so they stay accurate if that ever changes.
  */
 export function IndexProgressModal() {
   const [snapshot, setSnapshot] = useState<IndexSnapshot | null>(null);
@@ -55,14 +60,14 @@ export function IndexProgressModal() {
   if (idle && snapshot.status.type === 'no-rimworld') return null;
 
   // What to show as the title + subtitle.
-  let title = 'Building RimWorld index';
+  let title = 'Building code index';
   let subtitle: string | null = null;
   let phaseFraction: number | null = null;
   let isError = false;
   let isDone = false;
 
   if (latest?.type === 'phase') {
-    title = PHASE_LABEL[latest.phase] ?? 'Building RimWorld index';
+    title = PHASE_LABEL[latest.phase] ?? 'Building code index';
     subtitle = latest.message;
     if (typeof latest.fraction === 'number') phaseFraction = latest.fraction;
   } else if (latest?.type === 'starting') {
@@ -76,10 +81,10 @@ export function IndexProgressModal() {
     subtitle = latest.message;
     isError = true;
   } else if (snapshot.status.type === 'absent') {
-    title = 'Building RimWorld index';
+    title = 'Building code index';
     subtitle = 'First-run setup — this takes a minute. Subsequent launches are instant.';
   } else if (snapshot.status.type === 'stale') {
-    title = 'Updating RimWorld index';
+    title = 'Updating code index';
     subtitle = `Reason: ${snapshot.status.reason}.`;
   }
 

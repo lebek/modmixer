@@ -35,6 +35,11 @@ const ROOTS: PathPolicyRoots = {
   ),
   indexDir: path.join(HOME, 'Library/Application Support/Modmixer/index'),
   cookbookDir: path.join(HOME, 'Library/Application Support/Modmixer/cookbook'),
+  minecraftRoots: [
+    path.join(HOME, 'Library/Application Support/Modmixer/toolchain'),
+    path.join(HOME, '.gradle'),
+    path.join(HOME, '.neoformruntime'),
+  ],
 };
 
 describe('assertPathAllowed', () => {
@@ -61,6 +66,16 @@ describe('assertPathAllowed', () => {
   it('accepts a cookbook section path', () => {
     const ok = path.join(ROOTS.cookbookDir, 'ce-compat/ranged-weapons.md');
     assert.equal(assertPathAllowed(ok, ROOTS), ok);
+  });
+
+  it('accepts a Minecraft toolchain / Gradle-cache path', () => {
+    const jdk = path.join(ROOTS.minecraftRoots[0], 'jdk-21/bin/java');
+    assert.equal(assertPathAllowed(jdk, ROOTS), jdk);
+    const dep = path.join(
+      ROOTS.minecraftRoots[1],
+      'caches/modules-2/files-2.1/net.neoforged/neoforge/sources.jar',
+    );
+    assert.equal(assertPathAllowed(dep, ROOTS), dep);
   });
 
   it('rejects /etc/passwd', () => {

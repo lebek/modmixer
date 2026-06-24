@@ -25,24 +25,35 @@ function symbolIndexNotReady(game: GameId): string | null {
   return null;
 }
 
-const Params = Type.Object({
-  name: Type.String({
-    description:
-      'Symbol to look up. Accepts (a) a bare short name like "DrawAt" or "WorkTypeDef" — returns the body when one symbol matches, every candidate body inlined when only a few share the name, or a disambiguation list with namespace + signature when many do; (b) a partial FQN like "LetterMaker.MakeLetter" — returns the body if unique, all overloads if not; (c) a full FQN like "RimWorld.LetterMaker.MakeLetter" — returns just that one body.',
-  }),
-  kind: Type.Optional(
-    Type.String({
-      description:
-        'Optional kind filter: "class" | "struct" | "interface" | "enum" | "record" | "delegate" | "method" | "constructor" | "property" | "indexer" | "field" | "event".',
+// Built per-game so the examples + kind filter match the indexed language:
+// RimWorld C# (FQN like RimWorld.LetterMaker, struct/delegate/property kinds) vs
+// Minecraft Java (FQN like net.neoforged…, class/interface/record kinds). Same
+// shape, so `typeof Params` stays a stable type anchor.
+function readSymbolParams(game: GameId) {
+  const isMc = game === 'minecraft';
+  return Type.Object({
+    name: Type.String({
+      description: isMc
+        ? 'Symbol to look up. Accepts (a) a bare short name like "DeferredRegister" or "BlockBehaviour" — returns the body when one symbol matches, every candidate body inlined when only a few share the name, or a disambiguation list with package + signature when many do; (b) a partial FQN like "registries.DeferredRegister"; (c) a full FQN like "net.neoforged.neoforge.registries.DeferredRegister" — returns just that one body.'
+        : 'Symbol to look up. Accepts (a) a bare short name like "DrawAt" or "WorkTypeDef" — returns the body when one symbol matches, every candidate body inlined when only a few share the name, or a disambiguation list with namespace + signature when many do; (b) a partial FQN like "LetterMaker.MakeLetter" — returns the body if unique, all overloads if not; (c) a full FQN like "RimWorld.LetterMaker.MakeLetter" — returns just that one body.',
     }),
-  ),
-  maxBytes: Type.Optional(
-    Type.Number({
-      description:
-        'Per-symbol body cap in bytes. Default 4096; raise this when you need more context (max 32768).',
-    }),
-  ),
-});
+    kind: Type.Optional(
+      Type.String({
+        description: isMc
+          ? 'Optional kind filter: "class" | "interface" | "enum" | "record" | "method" | "constructor" | "field".'
+          : 'Optional kind filter: "class" | "struct" | "interface" | "enum" | "record" | "delegate" | "method" | "constructor" | "property" | "indexer" | "field" | "event".',
+      }),
+    ),
+    maxBytes: Type.Optional(
+      Type.Number({
+        description:
+          'Per-symbol body cap in bytes. Default 4096; raise this when you need more context (max 32768).',
+      }),
+    ),
+  });
+}
+
+const Params = readSymbolParams('rimworld');
 
 interface SymbolHit {
   fqn: string;
@@ -77,7 +88,7 @@ export function createReadCsharpSymbolTool(
   description: isMc
     ? "Look up a Java type or member in the decompiled Minecraft + NeoForge source (mojmap + Parchment names). Pass a bare short name (\"DeferredRegister\", \"RegisterEvent\", \"BlockBehaviour\") → returns the body when one symbol matches, or candidate bodies inlined when a few share the name; pass a partial/full FQN (\"net.neoforged.neoforge.registries.DeferredRegister\") → returns that body. For textual occurrences (call sites, usages) use search_source."
     : "Look up a C# type or member in the decompiled RimWorld source. Handles both 'what is this and where does it live' and 'show me the body' in one call:\n\n• Pass a bare short name (\"DrawAt\", \"WorkTypeDef\") → returns the body when one symbol matches, or every candidate body inlined when only a few symbols share the name (no follow-up call needed). When many symbols share the name, returns the symbol-table entries instead — namespace, kind, FQN, signature — so you can pick one.\n• Pass a partial FQN (\"LetterMaker.MakeLetter\") or full FQN (\"RimWorld.LetterMaker.MakeLetter\") → returns the symbol body. All overloads are returned together when ambiguous.\n\nFor textual occurrences (call sites, string literals), use search_source. For XML def lookup, use search_defs.",
-  parameters: Params,
+  parameters: readSymbolParams(game),
   async execute(_id, params): Promise<AgentToolResult<{ hits: SymbolHit[]; matches?: SymbolMatch[] }>> {
     const notReady = symbolIndexNotReady(game);
     if (notReady) {

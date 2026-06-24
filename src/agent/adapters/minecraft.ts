@@ -10,6 +10,7 @@ import type { AgentToolResult } from '@mariozechner/pi-agent-core';
 import { getGame } from '../games/registry.js';
 import { getWorkspacePaths } from '../workspace.js';
 import { buildMod as buildMinecraftMod } from '../minecraft/gradle.js';
+import { launchModeHint } from '../launch-mode.js';
 import {
   createMinecraftMod,
   readMinecraftMeta,
@@ -105,8 +106,13 @@ async function build(
   const status = result.ok
     ? `BUILD SUCCEEDED${result.jarPath ? ` → ${result.jarPath}` : ''}`
     : 'BUILD FAILED';
+  // On a green build only — mirror the RimWorld build's launch-policy reminder
+  // so the user's autoLaunch setting governs Minecraft testing too. A red
+  // build's next step is fixing errors, not testing, so it gets no hint.
+  const text =
+    `${status}\n\n${result.output}` + (result.ok ? launchModeHint() : '');
   return {
-    content: [{ type: 'text', text: `${status}\n\n${result.output}` }],
+    content: [{ type: 'text', text }],
     details: {
       exitCode,
       stdout: result.output,

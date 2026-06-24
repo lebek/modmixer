@@ -116,6 +116,15 @@ export function registerModRoutes(ctx: RouteContext): void {
     result: ImportModResult;
     mods: WorkspaceMod[];
   } | null> => {
+    // Folder import synthesizes a RimWorld About.xml, so it's RimWorld-only for
+    // now. The UI hides the button for other games (mods-view's canImport);
+    // this is the matching server-side backstop so the channel can't quietly
+    // produce a RimWorld mod while the user is on, say, the Minecraft tab.
+    if (loadSettings().selectedGameId !== 'rimworld') {
+      throw new Error(
+        'Importing an existing mod folder is only supported for RimWorld right now.',
+      );
+    }
     const win = getWindow();
     if (!win) return null;
     const dialogResult = await dialog.showOpenDialog(win, {
@@ -176,15 +185,15 @@ export function registerModRoutes(ctx: RouteContext): void {
     },
   );
 
-  ipc.handle('modmixer:mods:enable-in-game', (_evt, folder: string) =>
+  ipc.handle('modmixer:rimworld:enable-mod', (_evt, folder: string) =>
     enableModInGame(folder),
   );
 
-  ipc.handle('modmixer:mods:disable-in-game', (_evt, folder: string) =>
+  ipc.handle('modmixer:rimworld:disable-mod', (_evt, folder: string) =>
     disableModInGame(folder),
   );
 
-  ipc.handle('modmixer:game:launch', () => launchRimWorld());
-  ipc.handle('modmixer:game:is-running', () => isRimWorldRunning());
-  ipc.handle('modmixer:game:quit', () => quitRimWorld());
+  ipc.handle('modmixer:rimworld:launch', () => launchRimWorld());
+  ipc.handle('modmixer:rimworld:is-running', () => isRimWorldRunning());
+  ipc.handle('modmixer:rimworld:quit', () => quitRimWorld());
 }

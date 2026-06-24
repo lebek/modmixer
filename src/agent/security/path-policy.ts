@@ -44,6 +44,14 @@ export interface PathPolicyRoots {
    * the ordinary read tool instead of needing a dedicated cookbook tool.
    */
   cookbookDir: string;
+  /**
+   * Minecraft toolchain + build-cache roots, allowed read-side so the agent can
+   * `read`/`grep` the bundled JDK, the Gradle user home, and the NeoForm runtime
+   * cache when chasing a Gradle stacktrace into a decompiled dependency. Same
+   * read-only-generated-artifact risk profile as RimWorld's dataDir/workshopDir.
+   * Empty when no Minecraft toolchain is provisioned.
+   */
+  minecraftRoots: readonly string[];
 }
 
 export class PathPolicyError extends Error {
@@ -178,6 +186,7 @@ export function assertPathAllowed(
     roots.playerLogDir,
     roots.indexDir,
     roots.cookbookDir,
+    ...roots.minecraftRoots,
     ...extraRoots,
   ].filter((p): p is string => typeof p === 'string' && p.length > 0);
 
@@ -186,7 +195,7 @@ export function assertPathAllowed(
   }
 
   throw new PathPolicyError(
-    `${label} ${abs} is outside the modmixer workspace and known RimWorld install paths.`,
+    `${label} ${abs} is outside the modmixer workspace and the allowed game install / toolchain paths.`,
     'allowlist',
   );
 }

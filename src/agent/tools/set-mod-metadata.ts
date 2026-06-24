@@ -26,13 +26,13 @@ const Params = Type.Object({
   author: Type.Optional(
     Type.String({
       description:
-        "Author display name shown in RimWorld's mod list. Free-form (e.g. \"Peter\"); not the same as the sluggified packageId prefix.",
+        "Author display name shown in the game's mod list (RimWorld: About.xml <author>; Minecraft: gradle.properties). Free-form (e.g. \"Peter\"); not the same as the sluggified packageId prefix.",
     }),
   ),
   description: Type.Optional(
     Type.String({
       description:
-        "Player-facing description shown in RimWorld's in-game mod list and on the Steam Workshop page. The user owns this — write to it only when they ask for a copy edit, marketing rewrite, or initial draft. The agent's own running notes about the mod live in the Schematic (use update_schematic for those).",
+        "Player-facing description shown in the game's mod list and on its published page (RimWorld: in-game list + Steam Workshop; Minecraft: Modrinth). The user owns this — write to it only when they ask for a copy edit, marketing rewrite, or initial draft. The agent's own running notes about the mod live in the Schematic (use update_schematic for those).",
     }),
   ),
 });

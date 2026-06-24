@@ -43,7 +43,7 @@ function gatherContext(): PromptContext {
   }
   return {
     workspaceDir: ws.workspaceDir,
-    rimworldModsDir: ws.rimworldModsDir,
+    rimworldModsDir: rw.modsDir,
     managedDir: rw.managedDir,
     playerLog: rw.playerLog,
     modsConfig: rw.modsConfig,
@@ -52,6 +52,19 @@ function gatherContext(): PromptContext {
     gameVersion: cachedGameVersion.value,
     autoLaunch: loadSettings().autoLaunch,
   };
+}
+
+/**
+ * The user's in-game launch policy, rendered for the system prompt. Shared by
+ * the RimWorld and Minecraft prompts so the single `autoLaunch` setting governs
+ * run_test_cycle behavior for every game with a test loop. Frozen into the
+ * conversation at build time, like the rest of the prompt; the live, per-cycle
+ * reminder is launchModeHint() in launch-mode.ts.
+ */
+function launchModeBlock(autoLaunch: boolean): string {
+  return autoLaunch
+    ? 'Launch mode — proactive: the user opted into automatic testing. After a green build (or whenever a change is ready to try), go straight to run_test_cycle without asking permission. The macro runs end-to-end including monitoring.'
+    : 'Launch mode — ask first: never run run_test_cycle silently. Confirm with the user first ("Want me to test this in the game?"), and tell them either path works — they can reply here OR press the Launch button in the top bar. Once they confirm (or press Launch), the macro runs end-to-end including monitoring.';
 }
 
 const SHARED_RULES = `Workspace lifecycle:
@@ -264,11 +277,7 @@ Build → launch loop for code changes:
 2. If green, run the test-in-game flow above.
 3. If red, fix the compile errors and rebuild.
 
-${
-    ctx.autoLaunch
-      ? 'Launch mode — proactive: the user opted into automatic testing. After a green build (or whenever a change is ready to try), go straight to run_test_cycle without asking permission. The macro runs end-to-end including monitoring.'
-      : 'Launch mode — ask first: never run run_test_cycle silently. Confirm with the user first ("Want me to test this in the game?"), and tell them either path works — they can reply here OR press the Launch button in the top bar. Once they confirm (or press Launch), the macro runs end-to-end including monitoring.'
-  }`;
+${launchModeBlock(ctx.autoLaunch)}`;
 }
 
 /**
@@ -451,7 +460,7 @@ If the mod is still named "Untitled Mod" (id "untitledmod"), give it a sensible 
 
 function buildMinecraftSystemPrompt(scope: ConversationScope): string {
   const ws = getWorkspacePaths();
-  const defaultAuthor = loadSettings().defaultAuthor;
+  const { defaultAuthor, autoLaunch } = loadSettings();
   const head = `You are an expert Minecraft (NeoForge) modding assistant, operating inside Modmixer, an application that helps people build and diagnose Minecraft Java mods.
 
 ${minecraftPathsBlock(ws.workspaceDir, defaultAuthor)}`;
@@ -460,5 +469,6 @@ ${minecraftPathsBlock(ws.workspaceDir, defaultAuthor)}`;
     minecraftScopeBlock(scope),
     loreBlock('minecraft'),
     MINECRAFT_RULES,
+    launchModeBlock(autoLaunch),
   ].join('\n\n');
 }

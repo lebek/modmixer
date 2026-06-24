@@ -246,18 +246,20 @@ export interface Channels {
       incompatibleWith: string[];
     },
   ) => WorkspaceMod | null;
-  'modmixer:mods:enable-in-game': (folder: string) => EnableResult;
-  'modmixer:mods:disable-in-game': (folder: string) => DisableResult;
   'modmixer:workspace:paths': () => WorkspacePaths;
 
-  // Game
-  'modmixer:game:launch': () => {
+  // RimWorld game control — launch/quit/run-state + ModsConfig mod enable/disable.
+  // RimWorld-only by design (Steam + ModsConfig); named to signal that rather
+  // than the old game-neutral `modmixer:game:*` / `modmixer:mods:*-in-game`.
+  'modmixer:rimworld:enable-mod': (folder: string) => EnableResult;
+  'modmixer:rimworld:disable-mod': (folder: string) => DisableResult;
+  'modmixer:rimworld:launch': () => {
     executable: string;
     args: string[];
     alreadyRunning: boolean;
   };
-  'modmixer:game:is-running': () => boolean;
-  'modmixer:game:quit': () => { killed: boolean };
+  'modmixer:rimworld:is-running': () => boolean;
+  'modmixer:rimworld:quit': () => { killed: boolean };
 
   // Assets
   'modmixer:assets:scan': (folder: string) => AssetScan;

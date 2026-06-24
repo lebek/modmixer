@@ -1,4 +1,6 @@
+import { app } from 'electron';
 import path from 'node:path';
+import { homedir } from 'node:os';
 import { detectRimWorldPaths } from '../paths.js';
 import { getWorkspacePaths } from '../workspace.js';
 import { getIndexPaths } from '../index/paths.js';
@@ -21,6 +23,12 @@ export function getPathPolicyRoots(): PathPolicyRoots {
   const { workspaceDir } = getWorkspacePaths();
   const rim = detectRimWorldPaths();
   const idx = getIndexPaths();
+  // Minecraft toolchain + shared Gradle/NeoForm caches (read-side). Unlike
+  // RimWorld's install, these live outside every other allowed root, so the
+  // agent's guarded read/grep would be rejected without listing them — even
+  // though the Gradle build itself runs fine (it's spawned, not path-guarded).
+  const gradleUserHome =
+    process.env.GRADLE_USER_HOME ?? path.join(homedir(), '.gradle');
   cached = {
     workspaceDir,
     managedDir: rim.managedDir,
@@ -30,6 +38,11 @@ export function getPathPolicyRoots(): PathPolicyRoots {
     playerLogDir: rim.playerLog ? path.dirname(rim.playerLog) : null,
     indexDir: idx.root,
     cookbookDir: cookbookDir(),
+    minecraftRoots: [
+      path.join(app.getPath('userData'), 'toolchain'),
+      gradleUserHome,
+      path.join(homedir(), '.neoformruntime'),
+    ],
   };
   return cached;
 }

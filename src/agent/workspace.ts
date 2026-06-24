@@ -28,8 +28,6 @@ import {
 export interface WorkspacePaths {
   /** ModMixer's owned mods directory. The user's WIP mods live here. */
   workspaceDir: string;
-  /** RimWorld's Mods/ directory. Symlinks live here when a mod is active in game. */
-  rimworldModsDir: string;
 }
 
 export interface AboutMetadata {
@@ -81,18 +79,27 @@ export interface WorkspaceMod {
 export function getWorkspacePaths(): WorkspacePaths {
   const workspaceDir = path.join(app.getPath('userData'), 'workspace', 'Mods');
   fs.mkdirSync(workspaceDir, { recursive: true });
+  return { workspaceDir };
+}
+
+/**
+ * RimWorld's Mods/ directory, where syncModToGame drops symlinks. RimWorld-only,
+ * so it's kept out of getWorkspacePaths() — the ~25 game-neutral callers that
+ * only want the workspace dir shouldn't probe (or materialize) RimWorld paths.
+ * Creates the dir only when RimWorld is actually installed (its parent exists);
+ * otherwise we'd leave a stray empty .app bundle or ~/Library directory.
+ */
+export function getRimWorldModsDir(): string {
   const { modsDir } = detectRimWorldPaths();
-  // Only create modsDir if its parent already exists — i.e. RimWorld is
-  // actually installed. Otherwise we'd materialize a fake empty .app bundle
-  // or a stray ~/Library directory.
   if (fs.existsSync(path.dirname(modsDir))) {
     fs.mkdirSync(modsDir, { recursive: true });
   }
-  return { workspaceDir, rimworldModsDir: modsDir };
+  return modsDir;
 }
 
 export async function listWorkspaceMods(): Promise<WorkspaceMod[]> {
-  const { workspaceDir, rimworldModsDir } = getWorkspacePaths();
+  const { workspaceDir } = getWorkspacePaths();
+  const rimworldModsDir = getRimWorldModsDir();
   const entries = await fsp.readdir(workspaceDir, { withFileTypes: true });
   // Build each mod's record in parallel — the per-mod sub-reads are I/O-bound
   // and independent. Sequential made this scale linearly with mod count and
@@ -269,7 +276,8 @@ export interface SyncModResult {
 export async function syncModToGame(folder: string): Promise<SyncModResult> {
   const t0 = Date.now();
   console.log(`${SYNC_LOG_PREFIX} start folder=${folder}`);
-  const { workspaceDir, rimworldModsDir } = getWorkspacePaths();
+  const { workspaceDir } = getWorkspacePaths();
+  const rimworldModsDir = getRimWorldModsDir();
   const target = path.join(workspaceDir, folder);
   const link = path.join(rimworldModsDir, folder);
   if (!fs.existsSync(target)) {
@@ -407,7 +415,8 @@ async function readPackageIdLc(modPath: string): Promise<string> {
 }
 
 export async function unsyncModFromGame(folder: string): Promise<void> {
-  const { workspaceDir, rimworldModsDir } = getWorkspacePaths();
+  const { workspaceDir } = getWorkspacePaths();
+  const rimworldModsDir = getRimWorldModsDir();
   const target = path.join(workspaceDir, folder);
   const link = path.join(rimworldModsDir, folder);
   if (!(await isSymlinkedInto(folder, target, rimworldModsDir))) {
@@ -424,7 +433,7 @@ export async function unsyncModFromGame(folder: string): Promise<void> {
  * own data.
  */
 async function removeRimWorldLink(folder: string): Promise<void> {
-  const { rimworldModsDir } = getWorkspacePaths();
+  const rimworldModsDir = getRimWorldModsDir();
   const link = path.join(rimworldModsDir, folder);
   let st: fs.Stats;
   try {

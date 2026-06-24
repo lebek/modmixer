@@ -8,26 +8,36 @@ import { ensureMinecraftIndexInBackground } from '../index/rebuild-minecraft.js'
 import { resolveRipgrep } from '../index/ripgrep.js';
 import type { GameId } from '../games/types.js';
 
-const Params = Type.Object({
-  query: Type.String({
-    description:
-      'Regex pattern (ripgrep syntax) to search for in the decompiled RimWorld C# source AND the indexed Defs XML. Anchor with `\\b` for whole-word matches.',
-  }),
-  caseSensitive: Type.Optional(
-    Type.Boolean({ description: 'Match case (default false).' }),
-  ),
-  filePattern: Type.Optional(
-    Type.String({
-      description:
-        'Glob to restrict matches (e.g. "**/Verse/AI/*.cs" for C# only, "**/*.xml" for Defs only, "**/Designations/*.xml" for a single Defs subdir). Default: every file under both the C# source corpus and the Defs XML corpus.',
+// Built per-game so the param docs name the corpus actually being searched:
+// RimWorld decompiled C# + Defs XML vs Minecraft mojmap+Parchment Java sources.
+// Identical shape, so `typeof Params` remains a stable type anchor.
+function searchSourceParams(game: GameId) {
+  const isMc = game === 'minecraft';
+  return Type.Object({
+    query: Type.String({
+      description: isMc
+        ? 'Regex pattern (ripgrep syntax) to search across the decompiled Minecraft + NeoForge Java source (mojmap + Parchment names). Anchor with `\\b` for whole-word matches.'
+        : 'Regex pattern (ripgrep syntax) to search for in the decompiled RimWorld C# source AND the indexed Defs XML. Anchor with `\\b` for whole-word matches.',
     }),
-  ),
-  maxLines: Type.Optional(
-    Type.Number({
-      description: 'Hard cap on total result lines (default 200, max 800).',
-    }),
-  ),
-});
+    caseSensitive: Type.Optional(
+      Type.Boolean({ description: 'Match case (default false).' }),
+    ),
+    filePattern: Type.Optional(
+      Type.String({
+        description: isMc
+          ? 'Glob to restrict matches (e.g. "**/world/item/*.java" for one package, or "**/*.java"). Default: every indexed Java source file.'
+          : 'Glob to restrict matches (e.g. "**/Verse/AI/*.cs" for C# only, "**/*.xml" for Defs only, "**/Designations/*.xml" for a single Defs subdir). Default: every file under both the C# source corpus and the Defs XML corpus.',
+      }),
+    ),
+    maxLines: Type.Optional(
+      Type.Number({
+        description: 'Hard cap on total result lines (default 200, max 800).',
+      }),
+    ),
+  });
+}
+
+const Params = searchSourceParams('rimworld');
 
 const NO_INDEX_MSG =
   'RimWorld source index is not built yet (or built without C# decompile). Open Settings → RimWorld index → Rebuild.';
@@ -62,7 +72,7 @@ export function createSearchSourceTool(
   description: isMc
     ? 'Ripgrep over the decompiled Minecraft + NeoForge Java source (mojmap + Parchment names). Use for finding call sites, event/registry usage, vanilla behaviour, or any pattern that isn\'t a clean type/method name. For symbol-level lookup (a Java class/method by name) prefer read_symbol.'
     : 'Ripgrep over the decompiled RimWorld C# source AND the indexed Defs XML. Use for finding call sites ("StealAIUtility\\\\b"), patch targets, def cross-references like `<li>Designator_AreaHomeExpand</li>`, attribute values, or any pattern that isn\'t a clean type/method name. For symbol-level C# lookup (by short name or FQN) prefer read_symbol; for def-by-name lookup prefer search_defs. Zero matches here often means the answer lives in an XML def — try search_defs as the fallback.',
-  parameters: Params,
+  parameters: searchSourceParams(game),
   async execute(_id, params, signal): Promise<AgentToolResult<{ matchedLines: number; truncated: boolean }>> {
     const notReady = indexNotReady(game);
     if (notReady) {

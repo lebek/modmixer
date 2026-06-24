@@ -261,7 +261,7 @@ export function AppSettingsDialog({
                           className="mt-0.5"
                         />
                         <span className="text-sm text-ink">
-                          Launch RimWorld automatically when ready to test
+                          Launch the game automatically when ready to test
                           <span className="mt-0.5 block text-xs text-muted">
                             On: the agent launches as soon as a build is green
                             or a change is ready to try. Off (default): it asks
@@ -708,7 +708,7 @@ function AdvancedSection({
             </span>
             <span className="mt-0.5 block text-xs text-muted">
               The agent runs every action — editing files, deleting things,
-              running shell commands, changing your RimWorld install — without
+              running shell commands, changing your game install — without
               asking first. Saves clicks but removes the safety net. Stays on
               across restarts until you turn it off.
             </span>
