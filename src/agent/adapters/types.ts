@@ -20,6 +20,7 @@ import type { LintFinding } from '../build-lint.js';
 import type { BuildErrorHint } from '../build-error-hints.js';
 import type { ShipAndLaunchDetails } from '../ship.js';
 import type { AboutMetadata } from '../workspace.js';
+import type { ConversationScope } from '../conversations.js';
 
 /**
  * Inputs the scaffold_mod tool hands to a game's scaffolder. The tool resolves
@@ -171,6 +172,16 @@ export interface GameAdapter {
     modDir: string,
     opts: { author: string },
   ): Promise<void>;
+  /**
+   * Build the agent's system prompt for this game and conversation scope. The
+   * output is frozen into the conversation as a stable cache identifier, so an
+   * implementation MUST be deterministic per (scope, settings) — see
+   * buildSystemPrompt's invariant in system-prompt.ts.
+   */
+  buildSystemPrompt(
+    scope: ConversationScope,
+    opts?: { live?: boolean },
+  ): string;
   /**
    * Lay down (or re-stamp) the mod's project in `modDir`. The folder is already
    * resolved by the tool; the adapter owns the project shape.

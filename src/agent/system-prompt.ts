@@ -8,6 +8,8 @@ import { buildCookbookCatalogueSync } from './cookbook.js';
 import { readSchematicSync } from './schematic.js';
 import type { ConversationScope } from './conversations.js';
 import type { GameId } from './games/types.js';
+import { resolveGameId } from './games/registry.js';
+import { getAdapter } from './adapters/index.js';
 import {
   MINECRAFT_VERSION,
   NEOFORGE_VERSION,
@@ -375,13 +377,23 @@ export function buildSystemPrompt(
   scope: ConversationScope,
   opts?: { live?: boolean; game?: GameId },
 ): string {
-  // Minecraft mods take a completely separate prompt. RimWorld (the default)
-  // falls through to the original code path UNCHANGED, so its output stays
-  // byte-for-byte identical and the prompt-cache invariant above holds for
-  // every existing conversation.
-  if (opts?.game === 'minecraft') {
-    return buildMinecraftSystemPrompt(scope);
-  }
+  // Per-game prompt builders dispatch through the adapter. RimWorld (the
+  // default) keeps its exact original code path in buildRimworldSystemPrompt, so
+  // its output stays byte-for-byte identical and the prompt-cache invariant
+  // above holds for every existing conversation.
+  return getAdapter(resolveGameId(opts?.game)).buildSystemPrompt(scope, {
+    live: opts?.live,
+  });
+}
+
+/**
+ * RimWorld system prompt. Reached via the RimWorld adapter; the body is the
+ * original buildSystemPrompt code path, unchanged, to preserve byte-identity.
+ */
+export function buildRimworldSystemPrompt(
+  scope: ConversationScope,
+  opts?: { live?: boolean },
+): string {
   const ctx = gatherContext();
   const head = `You are an expert RimWorld modding assistant, operating inside Modmixer, an application that helps people build and diagnose RimWorld mods.
 
@@ -460,7 +472,7 @@ If the mod is still named "Untitled Mod" (id "untitledmod"), give it a sensible 
   return `No mod is open yet. When the user describes what they want to build, create the project with scaffold_mod (it lays down a NeoForge/Gradle project under a workspace folder), give it a name + id with set_mod_metadata (id = a short lowercase word like "coolblocks"), then edit src/main/java and src/main/resources under that folder.`;
 }
 
-function buildMinecraftSystemPrompt(scope: ConversationScope): string {
+export function buildMinecraftSystemPrompt(scope: ConversationScope): string {
   const ws = getWorkspacePaths();
   const { defaultAuthor, autoLaunch } = loadSettings();
   const head = `You are an expert Minecraft (NeoForge) modding assistant, operating inside Modmixer, an application that helps people build and diagnose Minecraft Java mods.

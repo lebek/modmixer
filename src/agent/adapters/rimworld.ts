@@ -10,6 +10,7 @@ import { scaffoldRimworldMod } from '../rimworld/scaffold.js';
 import { buildRimworldMod } from '../rimworld/build.js';
 import { runRimworldTestCycle } from '../rimworld/test.js';
 import { rimworldSetup } from '../rimworld/setup.js';
+import { buildRimworldSystemPrompt } from '../system-prompt.js';
 import {
   readModAbout,
   writeAbout,
@@ -63,6 +64,7 @@ export const RimWorldAdapter: GameAdapter = {
   readModMetadata: (_modDir, folder) => readModAbout(folder),
   writeModMetadata,
   createPlaceholder,
+  buildSystemPrompt: buildRimworldSystemPrompt,
   scaffold: scaffoldRimworldMod,
   build: buildRimworldMod,
   test: runRimworldTestCycle,

@@ -27,6 +27,7 @@ import {
   launchMinecraftClient,
 } from '../minecraft/launch.js';
 import { minecraftSetup } from '../minecraft/setup.js';
+import { buildMinecraftSystemPrompt } from '../system-prompt.js';
 import type {
   BuildModDetails,
   GameAdapter,
@@ -314,6 +315,7 @@ export const MinecraftAdapter: GameAdapter = {
   readModMetadata,
   writeModMetadata,
   createPlaceholder,
+  buildSystemPrompt: (scope) => buildMinecraftSystemPrompt(scope),
   scaffold,
   build,
   test,
