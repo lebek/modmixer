@@ -8,10 +8,10 @@ import {
 } from './rebuild.js';
 import { resolveIlspycmd } from './ilspycmd.js';
 import { warmSearchCache } from './warm-cache.js';
-import { ensureMinecraftIndexInBackground } from './rebuild-minecraft.js';
 import type { IndexProgressEvent } from './progress.js';
 import { loadSettings } from '../settings.js';
 import { resolveGameId } from '../games/registry.js';
+import { getAdapter } from '../adapters/index.js';
 
 /**
  * The most recent progress event seen, kept on the main side so the renderer
@@ -86,21 +86,21 @@ export function cancelActiveRebuild(): void {
  * as a build failure.
  */
 export async function ensureIndexAtStartup(): Promise<void> {
-  // Eagerly (re)build the *active* game's index at launch, but only when it's
-  // stale/absent — i.e. when the game's code/version changed. A fresh index is
-  // a no-op (RimWorld just warms its search cache). Each game's path is
-  // distinct: the RimWorld C# index needs ilspycmd / .NET decompile, while
-  // Minecraft auto-provisions its own toolchain. resolveGameId coerces an unset
-  // value to 'rimworld', so existing RimWorld users are unaffected.
+  // Eagerly (re)build the *active* game's index at launch, dispatched per game:
+  // RimWorld needs ilspycmd / .NET decompile (eager build), while Minecraft
+  // auto-provisions its toolchain (lazy). resolveGameId coerces an unset value
+  // to 'rimworld', so existing RimWorld users are unaffected.
   const game = resolveGameId(loadSettings().selectedGameId);
-  if (game === 'minecraft') {
-    // Rebuilds only on absent/stale (e.g. a pinned-toolchain bump); progress
-    // feeds the game-setup channel so the gate/modal surfaces it.
-    ensureMinecraftIndexInBackground();
-    return;
-  }
-  // No RimWorld install detected — nothing to index, and no reason to warn
-  // about a missing decompiler. Bail before the ilspycmd check below.
+  await getAdapter(game).index.ensureAtStartup();
+}
+
+/**
+ * RimWorld's eager startup index build. Only rebuilds on stale/absent — a fresh
+ * index just warms the (possibly cold) OS file cache. A missing ilspycmd is
+ * surfaced as an error event since the C# index is load-bearing. Bails quietly
+ * when no RimWorld install is detected.
+ */
+export async function ensureRimworldIndexAtStartup(): Promise<void> {
   const status = getIndexStatus();
   if (status.type === 'no-rimworld') return;
   if (!resolveIlspycmd()) {

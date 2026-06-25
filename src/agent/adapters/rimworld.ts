@@ -12,6 +12,8 @@ import { runRimworldTestCycle } from '../rimworld/test.js';
 import { rimworldSetup } from '../rimworld/setup.js';
 import { buildRimworldSystemPrompt } from '../system-prompt.js';
 import { rimworldResearchTools } from '../rimworld/research-tools.js';
+import { ensureRimworldIndexAtStartup } from '../index/main-bridge.js';
+import { getIndexStatus } from '../index/rebuild.js';
 import {
   readModAbout,
   writeAbout,
@@ -21,8 +23,19 @@ import {
 } from '../workspace.js';
 import type {
   GameAdapter,
+  GameIndexAdapter,
   MetadataWriteResult,
 } from './types.js';
+
+/** RimWorld index: eager startup build; symbol DB needs a pre-query status check. */
+const index: GameIndexAdapter = {
+  ensureAtStartup: ensureRimworldIndexAtStartup,
+  ensureForSession: () => {},
+  symbolDbReady: () => {
+    const status = getIndexStatus();
+    return status.type !== 'absent' && status.type !== 'no-rimworld';
+  },
+};
 
 /** RimWorld identity lives in About.xml. */
 async function writeModMetadata(
@@ -62,6 +75,7 @@ async function createPlaceholder(
 export const RimWorldAdapter: GameAdapter = {
   def: getGame('rimworld'),
   setup: rimworldSetup,
+  index,
   readModMetadata: (_modDir, folder) => readModAbout(folder),
   writeModMetadata,
   createPlaceholder,

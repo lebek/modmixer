@@ -133,6 +133,21 @@ export interface GameSetupAdapter {
   rebuild(opts?: { force?: boolean }): Promise<GameSetupStatus>;
 }
 
+/**
+ * Code-index orchestration for a game. Eager games (RimWorld) build at app
+ * startup; lazy games (Minecraft) kick a one-time background decompile the first
+ * time a chat opens. Keeps the index lifecycle off the shared startup/session
+ * code paths.
+ */
+export interface GameIndexAdapter {
+  /** Build/refresh this game's index at app startup (eager games do real work). */
+  ensureAtStartup(): Promise<void>;
+  /** Kick a background build when a chat opens (lazy games; eager games no-op). */
+  ensureForSession(): void;
+  /** True when the symbol DB is safe to query without a prior status check. */
+  symbolDbReady(): boolean;
+}
+
 export interface MetadataWriteResult {
   /** Canonical field names that actually changed (name/packageId/author/description). */
   changed: string[];
@@ -145,6 +160,8 @@ export interface GameAdapter {
   readonly def: GameDefinition;
   /** Toolchain + index setup status/actions for Settings → Games. */
   readonly setup: GameSetupAdapter;
+  /** Code-index lifecycle (startup build, per-session kick, query readiness). */
+  readonly index: GameIndexAdapter;
   /**
    * Read the mod's display identity into the shared AboutMetadata shape the UI
    * renders. RimWorld reads About.xml; Minecraft maps gradle.properties onto it.

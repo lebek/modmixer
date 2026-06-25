@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 import { openIndexDb } from './db.js';
-import { getIndexStatus } from './rebuild.js';
+import { getAdapter } from '../adapters/index.js';
 import type { GameId } from '../games/types.js';
 
 /**
@@ -90,15 +90,10 @@ export function resolveSymbol(
   options: { kind?: string; limit?: number; game?: GameId } = {},
 ): SymbolMatch[] {
   const game = options.game ?? 'rimworld';
-  // The RimWorld guard avoids touching a never-built shared DB; per-game DBs
-  // are created empty on open, so other games just query and get [] if absent
-  // (the calling tool has already checked the per-game index status).
-  if (game === 'rimworld') {
-    const status = getIndexStatus();
-    if (status.type === 'absent' || status.type === 'no-rimworld') {
-      return [];
-    }
-  }
+  // Some games (RimWorld) must not touch a never-built DB; their adapter gates
+  // the query on index status. Others create per-game DBs empty on open and just
+  // return [] if absent (the calling tool has already checked the index status).
+  if (!getAdapter(game).index.symbolDbReady()) return [];
   return resolveSymbolFromDb(openIndexDb(game), shortName, options);
 }
 

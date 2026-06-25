@@ -29,15 +29,28 @@ import {
 import { minecraftSetup } from '../minecraft/setup.js';
 import { buildMinecraftSystemPrompt } from '../system-prompt.js';
 import { minecraftResearchTools } from '../minecraft/research-tools.js';
+import { ensureMinecraftIndexInBackground } from '../index/rebuild-minecraft.js';
 import type {
   BuildModDetails,
   GameAdapter,
+  GameIndexAdapter,
   MetadataWriteResult,
   RunTestCycleDetails,
   ScaffoldModDetails,
   ScaffoldOptions,
   TestCycleContext,
 } from './types.js';
+
+/** Minecraft index: lazy one-time decompile, kicked at startup and per session. */
+const index: GameIndexAdapter = {
+  ensureAtStartup: async () => {
+    ensureMinecraftIndexInBackground();
+  },
+  ensureForSession: () => {
+    ensureMinecraftIndexInBackground();
+  },
+  symbolDbReady: () => true,
+};
 
 /**
  * Minecraft identity lives in gradle.properties; map it onto the shared
@@ -313,6 +326,7 @@ async function test(
 export const MinecraftAdapter: GameAdapter = {
   def: getGame('minecraft'),
   setup: minecraftSetup,
+  index,
   readModMetadata,
   writeModMetadata,
   createPlaceholder,

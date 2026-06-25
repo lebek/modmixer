@@ -54,7 +54,7 @@ import { monitorGetErrorTool } from './tools/monitor-get-error.js';
 import { monitorPollTool } from './tools/monitor-poll.js';
 import { renderSvgToPngTool } from './tools/render-svg-to-png.js';
 import { renderPreviewTool } from './tools/render-preview.js';
-import { getGame } from './games/registry.js';
+import { getGame, resolveGameId } from './games/registry.js';
 import { getAdapter } from './adapters/index.js';
 import { warmSearchCache } from './index/warm-cache.js';
 import { createGuardedBashTool } from './tools/bash.js';
@@ -95,7 +95,6 @@ import {
 import { buildSystemPrompt } from './system-prompt.js';
 import { readModPrefs } from './mod-prefs.js';
 import type { GameId } from './games/types.js';
-import { ensureMinecraftIndexInBackground } from './index/rebuild-minecraft.js';
 import type { Extension } from '@mariozechner/pi-coding-agent';
 import {
   addAttachmentPaths,
@@ -1083,10 +1082,10 @@ export class AgentHost {
     // visible without rebuilding the session. Seeded from the persisted
     // list so attachments survive reconstruction and app restart.
     const attachmentRoots = new Set<string>(convo.attachmentPaths ?? []);
-    // A Minecraft conversation kicks off its source-index build now so it's
-    // ready (or warm) by the time the agent searches; the build dedups and is
-    // a no-op once fresh. RimWorld uses the startup/settings trigger instead.
-    if (convo.game === 'minecraft') ensureMinecraftIndexInBackground();
+    // Lazy-index games (Minecraft) kick their source-index build now so it's
+    // ready (or warm) by the time the agent searches; the build dedups and is a
+    // no-op once fresh. Eager games (RimWorld) no-op — they build at startup.
+    getAdapter(resolveGameId(convo.game)).index.ensureForSession();
     const customTools = buildCustomTools(
       this.cwd,
       convo.id,
