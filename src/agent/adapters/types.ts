@@ -19,6 +19,7 @@ import type { GameDefinition, GameSetupStatus } from '../games/types.js';
 import type { LintFinding } from '../build-lint.js';
 import type { BuildErrorHint } from '../build-error-hints.js';
 import type { ShipAndLaunchDetails } from '../ship.js';
+import type { AboutMetadata } from '../workspace.js';
 
 /**
  * Inputs the scaffold_mod tool hands to a game's scaffolder. The tool resolves
@@ -131,11 +132,45 @@ export interface GameSetupAdapter {
   rebuild(opts?: { force?: boolean }): Promise<GameSetupStatus>;
 }
 
+export interface MetadataWriteResult {
+  /** Canonical field names that actually changed (name/packageId/author/description). */
+  changed: string[];
+  /** Game-specific success line for the tool to surface to the user. */
+  message: string;
+}
+
 export interface GameAdapter {
   /** The renderer-safe descriptor (identity, display, capabilities). */
   readonly def: GameDefinition;
   /** Toolchain + index setup status/actions for Settings → Games. */
   readonly setup: GameSetupAdapter;
+  /**
+   * Read the mod's display identity into the shared AboutMetadata shape the UI
+   * renders. RimWorld reads About.xml; Minecraft maps gradle.properties onto it.
+   * Returns null when nothing is readable (caller falls back to a folder name).
+   */
+  readModMetadata(
+    modDir: string,
+    folder: string,
+  ): Promise<AboutMetadata | null>;
+  /**
+   * Patch the mod's identity fields. Returns the changed field names plus a
+   * game-specific success message. Throws if the mod dir is invalid.
+   */
+  writeModMetadata(
+    modDir: string,
+    folder: string,
+    patch: Partial<AboutMetadata>,
+  ): Promise<MetadataWriteResult>;
+  /**
+   * Lay down the placeholder identity for a freshly-minted "Untitled Mod" shell
+   * (the renderer's "+ new mod" flow). RimWorld writes About.xml + the standard
+   * subdirs; Minecraft lays down a buildable NeoForge project from the MDK.
+   */
+  createPlaceholder(
+    modDir: string,
+    opts: { author: string },
+  ): Promise<void>;
   /**
    * Lay down (or re-stamp) the mod's project in `modDir`. The folder is already
    * resolved by the tool; the adapter owns the project shape.

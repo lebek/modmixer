@@ -8,11 +8,16 @@ import path from 'node:path';
 import fs from 'node:fs';
 import type { AgentToolResult } from '@mariozechner/pi-agent-core';
 import { getGame } from '../games/registry.js';
-import { getWorkspacePaths } from '../workspace.js';
+import {
+  getWorkspacePaths,
+  emptyAbout,
+  type AboutMetadata,
+} from '../workspace.js';
 import { buildMod as buildMinecraftMod } from '../minecraft/gradle.js';
 import { launchModeHint } from '../launch-mode.js';
 import {
   createMinecraftMod,
+  isMinecraftTemplateAvailable,
   readMinecraftMeta,
   writeMinecraftMeta,
 } from '../minecraft/scaffold.js';
@@ -25,11 +30,78 @@ import { minecraftSetup } from '../minecraft/setup.js';
 import type {
   BuildModDetails,
   GameAdapter,
+  MetadataWriteResult,
   RunTestCycleDetails,
   ScaffoldModDetails,
   ScaffoldOptions,
   TestCycleContext,
 } from './types.js';
+
+/**
+ * Minecraft identity lives in gradle.properties; map it onto the shared
+ * AboutMetadata shape the UI renders (folder name as a fallback). Never null —
+ * an un-scaffolded folder still shows a sensible placeholder name.
+ */
+function readModMetadata(
+  modDir: string,
+  folder: string,
+): Promise<AboutMetadata | null> {
+  const meta = readMinecraftMeta(modDir);
+  return Promise.resolve(
+    meta
+      ? {
+          ...emptyAbout(meta.name || 'Untitled Mod'),
+          packageId: meta.modId,
+          author: meta.author,
+          description: meta.description,
+        }
+      : emptyAbout(folder),
+  );
+}
+
+/** Patch gradle.properties (renaming the id rebrands the whole project). */
+async function writeModMetadata(
+  modDir: string,
+  folder: string,
+  patch: Partial<AboutMetadata>,
+): Promise<MetadataWriteResult> {
+  const changed = await writeMinecraftMeta(modDir, {
+    name: patch.name,
+    author: patch.author,
+    description: patch.description,
+    modId: patch.packageId,
+  });
+  if (changed.length === 0) {
+    throw new Error('set_mod_metadata called with no fields to update.');
+  }
+  return {
+    changed,
+    message: `Updated gradle.properties for ${folder} (${changed.join(', ')}). The mod's name/id now reflect this${
+      changed.includes('modId')
+        ? ' — the @Mod id, package, and resource namespaces were renamed to match'
+        : ''
+    }.`,
+  };
+}
+
+/**
+ * A Minecraft mod IS a Gradle/NeoForge project — lay down a buildable one from
+ * the vendored MDK so the agent edits a working project from message zero. If
+ * the template isn't vendored yet we leave an empty folder; the build/test tools
+ * surface a clear "run fetch:neoforge-mdk" error.
+ */
+async function createPlaceholder(
+  modDir: string,
+  opts: { author: string },
+): Promise<void> {
+  if (!isMinecraftTemplateAvailable()) return;
+  await createMinecraftMod(modDir, {
+    modId: 'untitledmod',
+    modName: 'Untitled Mod',
+    author: opts.author,
+    description: '',
+  });
+}
 
 /**
  * A Minecraft mod IS a NeoForge/Gradle project. In the normal flow the renderer
@@ -239,6 +311,9 @@ async function test(
 export const MinecraftAdapter: GameAdapter = {
   def: getGame('minecraft'),
   setup: minecraftSetup,
+  readModMetadata,
+  writeModMetadata,
+  createPlaceholder,
   scaffold,
   build,
   test,

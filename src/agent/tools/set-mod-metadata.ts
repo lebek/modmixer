@@ -1,10 +1,10 @@
 import { Type } from 'typebox';
 import path from 'node:path';
 import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
-import { getWorkspacePaths, writeAbout } from '../workspace.js';
+import { getWorkspacePaths, type AboutMetadata } from '../workspace.js';
+import { getAdapter } from '../adapters/index.js';
 import { emitModChanged } from '../mod-events.js';
 import { readModPrefs } from '../mod-prefs.js';
-import { writeMinecraftMeta } from '../minecraft/scaffold.js';
 
 const Params = Type.Object({
   folder: Type.String({
@@ -54,59 +54,29 @@ export const setModMetadataTool: AgentTool<typeof Params, SetModMetadataDetails>
   ): Promise<AgentToolResult<SetModMetadataDetails>> {
     const { folder, ...rest } = params;
 
-    // Minecraft mods have no About.xml — identity lives in gradle.properties.
-    // Map the canonical fields onto it (and rebrand the project when the id
-    // changes so @Mod keeps matching the manifest).
-    const prefs = await readModPrefs(folder);
-    if (prefs.game === 'minecraft') {
-      const { workspaceDir } = getWorkspacePaths();
-      const modDir = path.join(workspaceDir, folder);
-      const changed = await writeMinecraftMeta(modDir, {
-        name: rest.name,
-        author: rest.author,
-        description: rest.description,
-        modId: rest.packageId,
-      });
-      if (changed.length === 0) {
-        throw new Error('set_mod_metadata called with no fields to update.');
-      }
-      emitModChanged(folder);
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `Updated gradle.properties for ${folder} (${changed.join(', ')}). The mod's name/id now reflect this${changed.includes('modId') ? ' — the @Mod id, package, and resource namespaces were renamed to match' : ''}.`,
-          },
-        ],
-        details: { folder, fields: changed },
-      };
-    }
-
-    const patch: Record<string, string> = {};
+    // Build the canonical identity patch; the game's adapter maps it onto its
+    // own format (RimWorld About.xml / Minecraft gradle.properties) and reports
+    // back what changed plus a game-specific success line.
+    const patch: Partial<AboutMetadata> = {};
     for (const [k, v] of Object.entries(rest)) {
-      if (typeof v === 'string') patch[k] = v;
+      if (typeof v === 'string') (patch as Record<string, string>)[k] = v;
     }
     if (Object.keys(patch).length === 0) {
       throw new Error('set_mod_metadata called with no fields to update.');
     }
-    const updated = await writeAbout(folder, patch);
-    if (!updated) {
-      throw new Error(
-        `Mod folder not found: ${folder}. Run scaffold_mod first.`,
-      );
-    }
+
+    const prefs = await readModPrefs(folder);
+    const { workspaceDir } = getWorkspacePaths();
+    const modDir = path.join(workspaceDir, folder);
+    const { changed, message } = await getAdapter(prefs.game).writeModMetadata(
+      modDir,
+      folder,
+      patch,
+    );
     emitModChanged(folder);
-    const summary = Object.entries(patch)
-      .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
-      .join(', ');
     return {
-      content: [
-        {
-          type: 'text',
-          text: `Updated About.xml for ${folder} (${summary}). The Settings panel reflects this now.`,
-        },
-      ],
-      details: { folder, fields: Object.keys(patch) },
+      content: [{ type: 'text', text: message }],
+      details: { folder, fields: changed },
     };
   },
 };

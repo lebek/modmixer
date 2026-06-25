@@ -8,11 +8,7 @@ import { readSchematic, type SchematicData } from './schematic.js';
 import { readModPrefs, writeModPrefs, type ModPrefs } from './mod-prefs.js';
 import type { GameId } from './games/types.js';
 import { DEFAULT_GAME_ID } from './games/registry.js';
-import {
-  createMinecraftMod,
-  isMinecraftTemplateAvailable,
-  readMinecraftMeta,
-} from './minecraft/scaffold.js';
+import { getAdapter } from './adapters/index.js';
 import { scanAssets } from './assets/scanner.js';
 import { parseAboutXml, type ModDependency } from './registry/about-xml.js';
 import { loadSettings } from './settings.js';
@@ -119,9 +115,7 @@ async function buildWorkspaceMod(
   rimworldModsDir: string,
 ): Promise<WorkspaceMod> {
   const workspacePath = path.join(workspaceDir, folder);
-  const aboutPath = path.join(workspacePath, 'About', 'About.xml');
   const [
-    aboutXml,
     hasCSharp,
     hasDlls,
     active,
@@ -131,7 +125,6 @@ async function buildWorkspaceMod(
     folderStat,
     updatedAt,
   ] = await Promise.all([
-    fsp.readFile(aboutPath, 'utf8').catch(() => null),
     containsCsproj(path.join(workspacePath, 'Source')),
     containsDll(path.join(workspacePath, 'Assemblies')),
     isSymlinkedInto(folder, workspacePath, rimworldModsDir),
@@ -141,23 +134,12 @@ async function buildWorkspaceMod(
     fsp.stat(workspacePath).catch(() => null),
     latestMtimeMs(workspacePath),
   ]);
-  // Minecraft mods have no About.xml — their identity lives in gradle.properties.
-  // Map it into the same AboutMetadata shape so the UI (which reads mod.about)
-  // shows the real name instead of the folder id.
-  let about: AboutMetadata;
-  if (prefs.game === 'minecraft') {
-    const meta = readMinecraftMeta(workspacePath);
-    about = meta
-      ? {
-          ...emptyAbout(meta.name || 'Untitled Mod'),
-          packageId: meta.modId,
-          author: meta.author,
-          description: meta.description,
-        }
-      : emptyAbout(folder);
-  } else {
-    about = aboutXml ? parseAbout(aboutXml) : emptyAbout(folder);
-  }
+  // Identity comes from the game's adapter — RimWorld reads About.xml, Minecraft
+  // maps gradle.properties onto the same AboutMetadata shape — so the UI shows
+  // the real name instead of the folder id, with no game branch here.
+  const about =
+    (await getAdapter(prefs.game).readModMetadata(workspacePath, folder)) ??
+    emptyAbout(folder);
   const createdAt = folderStat?.birthtimeMs ?? folderStat?.ctimeMs ?? 0;
   return {
     folder,
@@ -206,17 +188,10 @@ export async function writeAbout(
   const { workspaceDir } = getWorkspacePaths();
   const modDir = path.join(workspaceDir, folder);
   if (!fs.existsSync(modDir)) return null;
-  // About.xml is RimWorld-only. A Minecraft mod's identity/deps live in
-  // gradle.properties + the generated neoforge.mods.toml; refuse rather than
-  // fabricate a stray manifest inside a NeoForge project. (The Deps/About UI
-  // that reaches this IPC is also gated off for non-RimWorld games — this is
-  // the defense-in-depth backstop for any programmatic caller.)
-  const prefs = await readModPrefs(folder);
-  if (prefs.game !== 'rimworld') {
-    throw new Error(
-      `writeAbout is RimWorld-only; mod "${folder}" targets ${prefs.game}. Set identity via set_mod_metadata (gradle.properties), not About.xml.`,
-    );
-  }
+  // About.xml is RimWorld's identity format; this is the RimWorld writer,
+  // reached only via the RimWorld adapter and the RimWorld-only Deps/About IPC
+  // routes. Minecraft identity is written through its own adapter
+  // (gradle.properties), so no game check is needed here.
   const aboutDir = path.join(modDir, 'About');
   await fsp.mkdir(aboutDir, { recursive: true });
   const aboutPath = path.join(aboutDir, 'About.xml');
@@ -561,32 +536,9 @@ export async function createUntitledMod(
   const modPath = path.join(workspaceDir, folder);
   await fsp.mkdir(modPath, { recursive: true });
   const author = loadSettings().defaultAuthor || 'Modmixer User';
-  if (game === 'rimworld') {
-    const subdirs = ['About', 'Defs', 'Patches', 'Source', 'Textures'];
-    await Promise.all(
-      subdirs.map((d) => fsp.mkdir(path.join(modPath, d), { recursive: true })),
-    );
-    const aboutXml = renderFreshAboutXml({
-      ...emptyAbout('Untitled Mod'),
-      author,
-    });
-    await fsp.writeFile(
-      path.join(modPath, 'About', 'About.xml'),
-      aboutXml,
-      'utf8',
-    );
-  } else if (game === 'minecraft' && isMinecraftTemplateAvailable()) {
-    // A Minecraft mod IS a Gradle/NeoForge project — lay down a buildable one
-    // from the vendored MDK so the agent edits a working project from message
-    // zero. If the template isn't vendored yet we leave an empty folder; the
-    // build/test tools surface a clear "run fetch:neoforge-mdk" error.
-    await createMinecraftMod(modPath, {
-      modId: 'untitledmod',
-      modName: 'Untitled Mod',
-      author,
-      description: '',
-    });
-  }
+  // The game's adapter owns its placeholder shape (RimWorld: About.xml + subdirs;
+  // Minecraft: a buildable NeoForge project from the vendored MDK).
+  await getAdapter(game).createPlaceholder(modPath, { author });
   // Record the target game immediately so the agent session bound to this mod
   // targets the right toolchain from message zero. Minecraft mods get their
   // Gradle/NeoForge project scaffolded by the agent's game-specific tool; the
@@ -640,7 +592,7 @@ async function containsCsproj(dir: string): Promise<boolean> {
   }
 }
 
-function emptyAbout(name: string): AboutMetadata {
+export function emptyAbout(name: string): AboutMetadata {
   return {
     name,
     packageId: '',
