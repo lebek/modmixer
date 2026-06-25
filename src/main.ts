@@ -57,7 +57,6 @@ import {
   cancelActiveRebuild,
   ensureIndexAtStartup,
   onIndexProgress,
-  pipeProgressToWindow,
 } from './agent/index/main-bridge.js';
 import {
   emitSetupProgress,
@@ -423,9 +422,6 @@ app.on('ready', () => {
   // so previously-stored OAuth creds become visible to the model picker.
   host.primeAfterReady();
   createWindow();
-  // Pipe index progress events to the renderer. Subscribed once for the
-  // process lifetime — the listener filters by mainWindow internally.
-  pipeProgressToWindow(getWindow);
   // Unified game-tagged setup progress: mirror RimWorld's index progress onto
   // the game-setup channel, and pipe that channel (both games) to the renderer.
   // The onboarding step + pre-chat gate consume this for granular progress.
@@ -449,8 +445,9 @@ app.on('ready', () => {
     })();
     return;
   }
-  // Kick off the index rebuild if the cache is stale/missing. Fire-and-
-  // forget — the renderer modal will surface progress as it streams in.
+  // Kick off the index rebuild if the cache is stale/missing. Fire-and-forget
+  // — the Settings → Games card + pre-chat gate surface progress as it streams
+  // in over the game-setup channel.
   void ensureIndexAtStartup();
   // Push local lore, pull curated community lore. No-op if the toggle is
   // off; errors are logged and swallowed so a flaky network never blocks

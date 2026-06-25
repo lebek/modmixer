@@ -147,7 +147,7 @@ async function checkRequirements(): Promise<SetupRequirements> {
       ok: dotnet !== null,
       detail: dotnet
         ? null
-        : 'Set up automatically the first time you build a C# mod — no manual install needed.',
+        : 'Installed automatically during setup — no manual install needed.',
       hint: dotnet
         ? `${dotnet.provisioned ? 'Provisioned by ModMixer' : 'Found on system'} · ${dotnet.version}`
         : null,
@@ -173,9 +173,15 @@ export const rimworldSetup: GameSetupAdapter = {
   },
   checkRequirements,
   async rebuild(opts) {
-    // startRebuild fires in the background (progress streams to the index
-    // modal) and no-ops if already building; we return the now-building status.
-    await startRebuild({ force: opts?.force ?? true });
+    // The manual Rebuild button (force) rebuilds even when fresh; the auto-build
+    // path passes force:false and is already gated to absent/stale, so it never
+    // skips a needed build. startRebuild fires in the background (progress streams
+    // over the game-setup channel) and no-ops if a build is already running.
+    const snap = getIndexSnapshot();
+    if (!opts?.force && !snap.rebuilding && snap.status.type === 'fresh') {
+      return buildStatus();
+    }
+    await startRebuild();
     return buildStatus();
   },
 };

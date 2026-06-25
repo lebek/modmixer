@@ -2,11 +2,6 @@ import fsp from 'node:fs/promises';
 import { shell } from 'electron';
 import { getMonitorServer } from '../../agent/monitor/server.js';
 import { userLoreDir } from '../../agent/lore.js';
-import {
-  cancelActiveRebuild,
-  getIndexSnapshot,
-  startRebuild,
-} from '../../agent/index/main-bridge.js';
 import { getAdapter } from '../../agent/adapters/index.js';
 import { getLastSetupProgress } from '../../agent/index/setup-progress.js';
 import { resolveGameId } from '../../agent/games/registry.js';
@@ -14,24 +9,13 @@ import type { GameId } from '../../agent/games/types.js';
 import type { RouteContext } from './context.js';
 
 /**
- * RimWorld source/def index, in-game monitor bridge, shell open helpers,
- * and the lore-folder reveal escape hatch. None of these share state with
- * the registry/agent stack, so they live together as the "system" routes.
+ * Per-game setup (Settings → Games), in-game monitor bridge, shell open
+ * helpers, and the lore-folder reveal escape hatch. None of these share state
+ * with the registry/agent stack, so they live together as the "system" routes.
  */
 export function registerSystemRoutes(ctx: RouteContext): void {
   const { ipc } = ctx;
   const monitor = getMonitorServer();
-
-  ipc.handle('modmixer:index:get-snapshot', () => getIndexSnapshot());
-
-  ipc.handle('modmixer:index:rebuild', async (_evt, options: { force?: boolean } = {}) =>
-    startRebuild(options),
-  );
-
-  ipc.handle('modmixer:index:cancel', () => {
-    cancelActiveRebuild();
-    return getIndexSnapshot();
-  });
 
   // Per-game setup (Settings → Games). Uniform across games — each game's
   // adapter knows how to read its own toolchain/index state and rebuild.

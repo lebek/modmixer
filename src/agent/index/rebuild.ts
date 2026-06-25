@@ -27,10 +27,6 @@ export type IndexStatus =
   | { type: 'building'; phase: IndexProgressEvent };
 
 export interface RebuildOptions {
-  /** Force a full rebuild even if the cache matches. */
-  force?: boolean;
-  /** Whether to also index the user's enabled mod defs. */
-  includeMods?: boolean;
   /** Cancel a long-running rebuild. */
   signal?: AbortSignal;
 }
@@ -119,16 +115,14 @@ export async function rebuildIndex(
     });
 
     // Phase 0: provision the C# build toolchain (.NET SDK) up front, so the
-    // first mod build never pauses to download it. Detect-first, so a host
-    // with .NET already installed is instant. Best-effort and NON-fatal — the
-    // index itself doesn't need .NET (XML mods + the decompile work without
-    // it), so a download failure here must not block the index; a later C#
-    // build will surface a clear "finish setup" message instead.
-    onProgress({
-      type: 'phase',
-      phase: 'toolchain',
-      message: 'Preparing the .NET build toolchain…',
-    });
+    // first mod build never pauses to download it (build_mod deliberately
+    // refuses to download mid-build and points the user back here instead).
+    // Detect-first and SILENT when .NET is already present: ensureDotnetSdk only
+    // emits 'toolchain' progress while it actually downloads, so a routine
+    // rebuild leads with the real index work rather than a misleading "preparing
+    // toolchain" step. Best-effort and NON-fatal — the index itself doesn't need
+    // .NET (XML mods + the decompile work without it), so a download failure here
+    // must not block the index; a later C# build surfaces a "finish setup" message.
     try {
       await ensureDotnetSdk((p) =>
         onProgress({ type: 'phase', phase: 'toolchain', message: p.message }),
@@ -155,9 +149,6 @@ export async function rebuildIndex(
         dataDir,
         dlcs: fp.dlcs,
         defsIndexRoot: paths.defsRoot,
-        // includeMods is intentionally not wired through to scanning yet —
-        // the caller will pass mod fingerprints in a future patch. For now
-        // the toggle just persists in settings without changing the index.
       },
       onProgress,
     );

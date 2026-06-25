@@ -294,15 +294,6 @@ const api = {
     });
   },
 
-  // RimWorld source/def index
-  getIndexSnapshot: () => invoke('modmixer:index:get-snapshot'),
-  rebuildIndex: (options: { force?: boolean } = {}) =>
-    invoke('modmixer:index:rebuild', options),
-  cancelIndexRebuild: () => invoke('modmixer:index:cancel'),
-  onIndexProgress: (
-    handler: (event: import('./agent/index/progress').IndexProgressEvent) => void,
-  ) => on('modmixer:index:progress', handler),
-
   // Workshop
   publishToWorkshop: (
     folder: string,

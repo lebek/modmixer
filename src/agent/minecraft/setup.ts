@@ -50,7 +50,7 @@ function buildStatus(): GameSetupStatus {
         detail: DETAIL,
         facts: [],
         canRebuild: false,
-        rebuildLabel: 'Setting up…',
+        rebuildLabel: 'Building…',
       };
     case 'absent':
       return {
@@ -59,16 +59,16 @@ function buildStatus(): GameSetupStatus {
         detail: DETAIL,
         facts: facts(),
         canRebuild: true,
-        rebuildLabel: 'Set up Minecraft',
+        rebuildLabel: 'Build index',
       };
     case 'stale':
       return {
         state: 'stale',
-        headline: 'Update available — the pinned toolchain changed. Rebuild to refresh.',
+        headline: `Update available — rebuild to refresh the index for Minecraft ${MINECRAFT_VERSION} / NeoForge ${NEOFORGE_VERSION}.`,
         detail: DETAIL,
         facts: facts(),
         canRebuild: true,
-        rebuildLabel: 'Rebuild index',
+        rebuildLabel: 'Rebuild',
       };
     default:
       return {
@@ -77,7 +77,7 @@ function buildStatus(): GameSetupStatus {
         detail: DETAIL,
         facts: facts(),
         canRebuild: true,
-        rebuildLabel: 'Rebuild index',
+        rebuildLabel: 'Rebuild',
       };
   }
 }
@@ -108,12 +108,14 @@ export const minecraftSetup: GameSetupAdapter = {
       },
     ]);
   },
-  async rebuild() {
-    // Force a rebuild even when fresh (matches RimWorld's manual Rebuild), but
-    // never start a second concurrent build. Progress is tagged onto the
-    // unified game-setup channel so the onboarding step + pre-chat gate render
+  async rebuild(opts) {
+    // The manual Rebuild button (force) rebuilds even when fresh; the auto-build
+    // path passes force:false and only fires on absent/stale, so it never skips a
+    // needed build. Never start a second concurrent build. Progress is tagged onto
+    // the unified game-setup channel so the onboarding step + pre-chat gate render
     // granular per-phase progress (the Settings card also polls getStatus()).
-    if (getMinecraftIndexStatus() !== 'building') {
+    const status = getMinecraftIndexStatus();
+    if (status !== 'building' && (opts?.force || status !== 'fresh')) {
       void rebuildMinecraftIndex((e) => emitSetupProgress('minecraft', e)).catch(
         (err) => {
           console.error('[minecraft setup] rebuild failed:', err);

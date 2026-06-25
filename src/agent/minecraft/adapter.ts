@@ -46,9 +46,11 @@ import type {
 } from '../adapters/types.js';
 
 /**
- * Minecraft index: a one-time decompile kicked eagerly at startup (and again per
- * session as a safety net), mirroring RimWorld — the build runs upfront so the
- * symbol DB is ready before the first chat, not lazily on first use.
+ * Minecraft index: a one-time decompile kicked eagerly at startup so the symbol
+ * DB is ready before the first chat — the eager-at-startup intent matches
+ * RimWorld. Unlike RimWorld (whose startup build is awaited), the MC build runs
+ * in the background, so we ALSO re-kick it per session as a safety net; the
+ * `building` guard in ensureMinecraftIndexInBackground dedups the overlap.
  */
 const index: GameIndexAdapter = {
   ensureAtStartup: async () => {

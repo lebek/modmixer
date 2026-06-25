@@ -1,4 +1,3 @@
-import type { BrowserWindow } from 'electron';
 import {
   cancelRebuild,
   getIndexStatus,
@@ -58,11 +57,13 @@ export function getIndexSnapshot(): IndexSnapshot {
  * rebuildIndex itself; we surface that as a no-op rather than an error so
  * the UI doesn't have to special-case it.
  */
-export async function startRebuild(options: { force?: boolean } = {}): Promise<IndexSnapshot> {
+export async function startRebuild(): Promise<IndexSnapshot> {
   if (isRebuilding()) return getIndexSnapshot();
-  // Don't await — fire and forget so the IPC returns immediately. Progress
-  // events stream over `onIndexProgress`.
-  void rebuildIndex(emit, options)
+  // Don't await — fire and forget so the caller returns immediately. Progress
+  // events stream over `onIndexProgress`. Always a full rebuild; the caller
+  // decides whether one is wanted (the manual Rebuild button always; the
+  // auto-build path only when the index is absent/stale).
+  void rebuildIndex(emit)
     .then(() => warmSearchCache('rebuild'))
     .catch(() => {
       // rebuildIndex already emitted an error event for us.
@@ -121,20 +122,4 @@ export async function ensureRimworldIndexAtStartup(): Promise<void> {
     return;
   }
   await startRebuild();
-}
-
-/**
- * Broadcast an IPC channel name + sender that the main process should pipe
- * progress events into. Lets main.ts wire the listener once without exposing
- * the listener registry to the rest of the app.
- */
-export function pipeProgressToWindow(
-  getWindow: () => BrowserWindow | null,
-  channel = 'modmixer:index:progress',
-): () => void {
-  return onIndexProgress((event) => {
-    const win = getWindow();
-    if (!win || win.isDestroyed()) return;
-    win.webContents.send(channel, event);
-  });
 }

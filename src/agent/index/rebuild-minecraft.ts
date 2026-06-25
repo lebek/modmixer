@@ -118,15 +118,11 @@ export async function rebuildMinecraftIndex(
       phases: ['toolchain', 'decompile', 'symbols', 'defs'],
     });
 
-    // Provision JDK 21 up front (detect-first; downloads Temurin only if absent),
-    // streaming its download/extract progress so the user sees what's happening
-    // rather than a long unexplained pause. Required for the decompile, so this
-    // one IS fatal if it can't be satisfied.
-    onProgress({
-      type: 'phase',
-      phase: 'toolchain',
-      message: 'Preparing the Java 21 toolchain…',
-    });
+    // Ensure JDK 21 (detect-first; downloads Temurin only if absent). SILENT when
+    // already present — ensureJdk21 streams 'toolchain' progress only on a real
+    // download, so a routine rebuild skips straight to the decompile instead of
+    // flashing a misleading "preparing toolchain" step. The decompile genuinely
+    // needs it, so a failed provision IS fatal here (unlike RimWorld's .NET).
     await ensureJdk21((p) =>
       onProgress({ type: 'phase', phase: 'toolchain', message: p.message }),
     );
