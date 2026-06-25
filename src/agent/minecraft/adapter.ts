@@ -6,6 +6,7 @@
  */
 import path from 'node:path';
 import fs from 'node:fs';
+import { Type } from 'typebox';
 import type { AgentToolResult } from '@mariozechner/pi-agent-core';
 import { getGame } from '../games/registry.js';
 import {
@@ -56,7 +57,14 @@ const scaffoldDescription =
   "Set up the mod's NeoForge (Gradle) project. A Minecraft mod IS a Gradle project; identity lives in gradle.properties. When the active conversation is bound to a mod (including the \"+ new mod\" placeholder) the project is normally ALREADY laid down — in that case you only need set_mod_metadata to name it, and scaffold_mod just re-stamps the identity. Use scaffold_mod to (re)create the project when it's missing. packageId is the mod id (a short lowercase word like \"coolblocks\"), NOT reverse-DNS; rimworldVersions/withCSharp are ignored. The mod is NOT yet active in-game — run_test_cycle handles launch.";
 
 const testCycleDescription =
-  "Macro: the only way to test the mod in-game. Builds the mod if needed and launches the modded client (./gradlew runClient) with the diagnostics bridge (aggregated, deduped errors streamed back over localhost), then arms background monitoring. The first run decompiles Minecraft and can take several minutes — that's expected, not a hang. If a client is already running it's stopped and relaunched. After this returns, tell the user EXACTLY what to try in-game (they're about to alt-tab) — errors arrive automatically as '[automated …]' messages via the error-triage protocol. Just pass `folder`; the paletteEntries/autoOpenPalette/quicktest/isolated/companionMods options are RimWorld-only and ignored here.";
+  "Macro: the only way to test the mod in-game. Builds the mod if needed and launches the modded client (./gradlew runClient) with the diagnostics bridge (aggregated, deduped errors streamed back over localhost), then arms background monitoring. The first run decompiles Minecraft and can take several minutes — that's expected, not a hang. If a client is already running it's stopped and relaunched. After this returns, tell the user EXACTLY what to try in-game (they're about to alt-tab) — errors arrive automatically as '[automated …]' messages via the error-triage protocol.";
+
+/** Minecraft's run_test_cycle takes only the folder — no RimWorld debug knobs. */
+const minecraftTestCycleParams = Type.Object({
+  folder: Type.String({
+    description: 'Workspace mod folder name to build and launch.',
+  }),
+});
 
 /** A Minecraft placeholder is a gradle.properties mod id still set to "untitledmod". */
 function isPlaceholderMod(modDir: string): boolean {
@@ -319,7 +327,7 @@ async function test(
           }`,
         },
       ],
-      details: { quit, prefs: null, launch: null, watching: false },
+      details: { quit, watching: false },
     };
   }
 
@@ -330,7 +338,7 @@ async function test(
   );
   return {
     content: [{ type: 'text', text: lines.join(' ') }],
-    details: { quit, prefs: null, launch: null, watching: true },
+    details: { quit, watching: true },
   };
 }
 
@@ -339,6 +347,7 @@ export const MinecraftAdapter: GameAdapter = {
   setup: minecraftSetup,
   index,
   toolText: { scaffold: scaffoldDescription, testCycle: testCycleDescription },
+  testCycleParams: minecraftTestCycleParams,
   isPlaceholderMod,
   readModMetadata,
   writeModMetadata,

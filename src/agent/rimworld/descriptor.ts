@@ -21,8 +21,6 @@ export const rimworldDescriptor: GameDefinition = {
     assetPanel: true,
     depsPanel: true,
     liveSession: true,
-    testLoop: true,
-    sourceIndex: true,
     communityLore: true,
     folderImport: true,
     testBridgeInstall: true,

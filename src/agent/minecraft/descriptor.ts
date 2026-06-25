@@ -27,8 +27,6 @@ export const minecraftDescriptor: GameDefinition = {
     depsPanel: false,
     // No in-game hot-edit session for the beta (RimWorld's is Verse-specific).
     liveSession: false,
-    testLoop: true,
-    sourceIndex: true,
     communityLore: false,
     folderImport: false,
     testBridgeInstall: false,

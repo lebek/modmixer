@@ -9,7 +9,7 @@ import fsp from 'node:fs/promises';
 import { getGame } from '../games/registry.js';
 import { scaffoldRimworldMod } from './scaffold.js';
 import { buildRimworldMod } from './build.js';
-import { runRimworldTestCycle } from './test.js';
+import { runRimworldTestCycle, rimworldTestCycleParams } from './test.js';
 import { rimworldSetup } from './setup.js';
 import { buildRimworldSystemPrompt } from '../system-prompt.js';
 import { rimworldResearchTools } from './research-tools.js';
@@ -97,6 +97,7 @@ export const RimWorldAdapter: GameAdapter = {
   setup: rimworldSetup,
   index,
   toolText: { scaffold: scaffoldDescription, testCycle: testCycleDescription },
+  testCycleParams: rimworldTestCycleParams,
   isPlaceholderMod,
   readModMetadata: (_modDir, folder) => readModAbout(folder),
   writeModMetadata,

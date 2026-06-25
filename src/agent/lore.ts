@@ -59,10 +59,6 @@ export type LoreTier = 'repo' | 'user';
 // validated at runtime via isLoreTopicForGame. Loosened to string accordingly.
 export type LoreTopic = string;
 
-export function isLoreTopic(t: string): t is LoreTopic {
-  return getGame('rimworld').lore.topics.includes(t);
-}
-
 /** The topic catalogue for a game (from its descriptor). */
 export function loreTopics(game: GameId): readonly string[] {
   return getGame(game).lore.topics;

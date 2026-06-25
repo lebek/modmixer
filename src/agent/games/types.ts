@@ -41,10 +41,6 @@ export interface GameCapabilities {
   depsPanel: boolean;
   /** In-game live hot-edit session (RimWorld Verse bridge); off for MC beta. */
   liveSession: boolean;
-  /** The build → launch → aggregated-error test loop (both games). */
-  testLoop: boolean;
-  /** Decompiled/source code index the agent searches (both games). */
-  sourceIndex: boolean;
   /**
    * Crowd-sourced community lore sync (push user lore, pull curated entries).
    * RimWorld-only for now; other games read only their shipped bundle, so the

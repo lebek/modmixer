@@ -16,10 +16,10 @@
  * forces to be complete — no more "forgot to gate" call sites.
  */
 import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
+import type { TObject } from 'typebox';
 import type { GameDefinition, GameSetupStatus } from '../games/types.js';
 import type { LintFinding } from '../build-lint.js';
 import type { BuildErrorHint } from '../build-error-hints.js';
-import type { ShipAndLaunchDetails } from '../rimworld/ship.js';
 import type { AboutMetadata } from '../workspace.js';
 import type { ConversationScope } from '../conversations.js';
 
@@ -72,15 +72,6 @@ export interface BuildModDetails {
 export interface RunTestCycleDetails {
   /** Whether a running game instance was force-quit and whether it exited. */
   quit: { wasRunning: boolean; killed: boolean; exited: boolean } | null;
-  /** Prefs.xml mutation result (RimWorld only); null when not applicable. */
-  prefs: {
-    skipped: boolean;
-    skipReason: string | null;
-    pinnedNew: string[];
-    pinnedAlready: string[];
-  } | null;
-  /** Sync + launch result; null when we bailed before launching. */
-  launch: ShipAndLaunchDetails | null;
   /** True when background bridge monitoring was armed. */
   watching: boolean;
 }
@@ -93,14 +84,16 @@ export interface RunTestCycleDetails {
  */
 export interface TestCycleContext {
   conversationId: string;
-  /** Workspace mod folder name. */
+  /** Workspace mod folder name (lifted out of params; every game tests a folder). */
   folder: string;
-  // RimWorld-only debug-session knobs; ignored by games that don't use them.
-  paletteEntries?: string[];
-  autoOpenPalette?: boolean;
-  quicktest?: boolean;
-  isolated?: boolean;
-  companionMods?: string[];
+  /**
+   * The validated run_test_cycle tool params for this game, whose shape is the
+   * adapter's own `testCycleParams` schema. The wrapper lifts the neutral
+   * `folder` out above; everything else (RimWorld's palette/quicktest/isolated/
+   * companionMods) is read by the owning adapter and stays opaque here, so the
+   * shared context never grows a field per game.
+   */
+  params: Record<string, unknown>;
   /** Arm the background bridge monitor bound to this conversation. */
   startMonitoring: (args: {
     conversationId: string;
@@ -177,6 +170,14 @@ export interface GameAdapter {
   readonly index: GameIndexAdapter;
   /** Model-facing descriptions for the shared scaffold/test tools. */
   readonly toolText: GameToolText;
+  /**
+   * TypeBox schema for this game's run_test_cycle parameters. Game-specific:
+   * RimWorld exposes folder + palette/quicktest/isolated/companionMods; Minecraft
+   * exposes only `folder`. The shared tool wrapper uses this as the tool's
+   * `parameters`, so a game's model never sees another game's knobs. Must include
+   * a `folder` string field (the wrapper lifts it into TestCycleContext.folder).
+   */
+  readonly testCycleParams: TObject;
   /**
    * Whether `modDir` is still the freshly-minted "Untitled Mod" placeholder (so
    * a bare scaffold_mod redirects in-place rather than orphaning it). RimWorld:
