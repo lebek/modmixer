@@ -1,19 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { GameId, GameSetupSnapshot } from '@/agent/games/types';
+import { getGame } from '@/agent/games/registry';
 import type { IndexPhase, IndexProgressEvent } from '@/agent/index/progress';
 
-/** Game-aware phase title for the progress UI (both games share phase ids). */
+/** Per-game phase title for the progress UI (both games share phase ids). */
 export function phaseTitle(game: GameId, phase: IndexPhase): string {
-  switch (phase) {
-    case 'defs':
-      return game === 'minecraft' ? 'Indexing Minecraft data' : 'Indexing defs';
-    case 'decompile':
-      return game === 'minecraft'
-        ? 'Decompiling Minecraft sources'
-        : 'Decompiling RimWorld assemblies';
-    case 'symbols':
-      return game === 'minecraft' ? 'Indexing Java symbols' : 'Indexing C# symbols';
-  }
+  return getGame(game).indexPhaseLabels[phase];
 }
 
 export interface GameSetupView {

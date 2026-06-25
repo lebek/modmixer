@@ -17,9 +17,9 @@ export function ModHeader({
   hasAi: boolean;
 }) {
   const game = mod.prefs.game;
-  const isRimWorld = game === 'rimworld';
-  // The "close rimworld" affordance only applies to RimWorld; for other games
-  // we just show the test/launch button (the test flow itself is game-aware).
+  const isRimWorld = getGame(game).capabilities.runningGameControl;
+  // The "close running game" affordance only applies to games with a quittable
+  // long-lived process; others just show the test/launch button.
   const running = useRimWorldRunning(isRimWorld);
   const [closing, setClosing] = useState(false);
 

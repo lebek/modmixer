@@ -64,6 +64,18 @@ export interface GameCapabilities {
    * there is nothing to clean up.
    */
   testBridgeInstall: boolean;
+  /**
+   * The mod header shows a "running game" indicator + quit control (RimWorld runs
+   * as a long-lived process ModMixer can detect/quit). Minecraft's runClient is a
+   * Gradle subprocess with no such affordance.
+   */
+  runningGameControl: boolean;
+  /**
+   * The schematic panel scans the mod's authored XML defs for a Definitions
+   * section. RimWorld stores defs as Defs/*.xml; Minecraft keeps data as JSON
+   * under src/main/resources, so the section is hidden.
+   */
+  defScan: boolean;
 }
 
 /**
@@ -95,6 +107,14 @@ export interface GameDefinition {
   buildTool: BuildTool;
   /** Topic taxonomy for this game's transferable-lesson lore. */
   lore: LoreTaxonomy;
+  /** Per-game titles for the index build phases shown in the setup/progress UI. */
+  indexPhaseLabels: { defs: string; decompile: string; symbols: string };
+  /**
+   * Onboarding setup step ids inserted between game-picker and the AI step.
+   * RimWorld needs install detection + .NET tools; Minecraft auto-provisions its
+   * toolchain, so it goes straight to the index step.
+   */
+  setupSteps: readonly string[];
   /**
    * Sub-path segment for this game's on-disk storage (code index, lore, caches)
    * under their shared base dirs. RimWorld is `''` — it owns the legacy

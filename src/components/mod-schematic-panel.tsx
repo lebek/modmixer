@@ -4,7 +4,7 @@ import type { SchematicData } from '../agent/schematic';
 import type { DefEntry } from '../agent/defs-scan';
 import { Markdown } from './markdown';
 import { cn } from '@/lib/cn';
-import { resolveGameId } from '../agent/games/registry';
+import { getGame, resolveGameId } from '../agent/games/registry';
 
 export function ModSchematicPanel({ mod }: { mod: WorkspaceMod }) {
   const [schematic, setSchematic] = useState<SchematicData | null>(
@@ -12,10 +12,10 @@ export function ModSchematicPanel({ mod }: { mod: WorkspaceMod }) {
   );
   const [defs, setDefs] = useState<DefEntry[] | null>(null);
   const [scanning, setScanning] = useState(false);
-  // The Definitions section scans for RimWorld XML defs (Defs/*.xml). Other
-  // games (Minecraft/NeoForge) keep their data as JSON under
-  // src/main/resources/data/<modid>/, so skip the scan and hide the section.
-  const isRimWorld = resolveGameId(mod.prefs.game) === 'rimworld';
+  // The Definitions section scans for authored XML defs (RimWorld Defs/*.xml).
+  // Games that keep data as JSON (Minecraft under src/main/resources) have no
+  // such scan, so skip it and hide the section.
+  const hasDefScan = getGame(resolveGameId(mod.prefs.game)).capabilities.defScan;
 
   useEffect(() => {
     setSchematic(mod.schematic);
@@ -24,7 +24,7 @@ export function ModSchematicPanel({ mod }: { mod: WorkspaceMod }) {
   useEffect(() => {
     let cancelled = false;
     const refresh = async () => {
-      if (!isRimWorld) {
+      if (!hasDefScan) {
         setDefs([]);
         return;
       }
@@ -48,7 +48,7 @@ export function ModSchematicPanel({ mod }: { mod: WorkspaceMod }) {
       cancelled = true;
       offMod();
     };
-  }, [mod.folder, isRimWorld]);
+  }, [mod.folder, hasDefScan]);
 
   const grouped = groupByType(defs ?? []);
   const hasShort = !!schematic?.shortDescription;
@@ -89,7 +89,7 @@ export function ModSchematicPanel({ mod }: { mod: WorkspaceMod }) {
           {/* RimWorld XML defs (Defs/*.xml). NeoForge mods store data as JSON
               under src/main/resources/data/<modid>/, so there's nothing to
               scan — hide the section for non-RimWorld games. */}
-          {isRimWorld && (
+          {hasDefScan && (
           <section>
             <div className="mb-2 flex items-baseline justify-between">
               <SectionHeading>Definitions</SectionHeading>

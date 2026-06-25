@@ -734,7 +734,7 @@ export function App() {
       </header>
 
       {view === 'library' ? (
-        activeGame === 'rimworld' ? (
+        getGame(resolveGameId(activeGame)).capabilities.steamWorkshop ? (
           <LibraryView
             envelope={registryEnvelope}
             session={session}

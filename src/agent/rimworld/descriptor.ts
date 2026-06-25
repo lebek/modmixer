@@ -26,9 +26,17 @@ export const rimworldDescriptor: GameDefinition = {
     communityLore: true,
     folderImport: true,
     testBridgeInstall: true,
+    runningGameControl: true,
+    defScan: true,
   },
   buildTool: 'dotnet',
   lore: { topics: rimworldLoreTopics, topicHints: rimworldLoreTopicHints },
+  indexPhaseLabels: {
+    defs: 'Indexing defs',
+    decompile: 'Decompiling RimWorld assemblies',
+    symbols: 'Indexing C# symbols',
+  },
+  setupSteps: ['rimworld', 'tools', 'index'],
   // Legacy un-namespaced storage root: existing index/ and lore/ dirs predate
   // multi-game support, so RimWorld keeps the bare base path.
   storageSegment: '',

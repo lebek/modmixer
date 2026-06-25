@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { Consent, Settings } from '@/agent/settings';
 import type { EnvSnapshot } from '@/agent/env-detect';
 import type { GameId } from '@/agent/games/types';
+import { getGame } from '@/agent/games/registry';
 import { ConsentStep } from './steps/consent';
 import { GamePickerStep } from './steps/game-picker';
 import { RimWorldStep } from './steps/rimworld';
@@ -31,8 +32,7 @@ type StepId =
  * goes straight to the index step.
  */
 function buildSteps(game: GameId): StepId[] {
-  const gameSteps: StepId[] =
-    game === 'minecraft' ? ['index'] : ['rimworld', 'tools', 'index'];
+  const gameSteps = getGame(game).setupSteps as StepId[];
   return ['consent', 'game-picker', ...gameSteps, 'ai', 'community-lore', 'author'];
 }
 

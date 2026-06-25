@@ -41,7 +41,7 @@ export function ModsView({
   };
   // Importing an existing folder is RimWorld-only for now (it synthesises an
   // About.xml; NeoForge project import is a fast-follow).
-  const canImport = game === 'rimworld';
+  const canImport = getGame(game).capabilities.folderImport;
   return (
     <div className="flex-1 overflow-auto px-8 py-8">
       <div className="mx-auto max-w-5xl">

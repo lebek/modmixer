@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { AboutMetadata, WorkspaceMod } from '../agent/workspace';
 import type { PublishProgressEvent } from '../agent/workshop';
+import { getGame } from '../agent/games/registry';
 import { derivePackageId } from '@/lib/identifiers';
 import { useAsyncAction } from '@/lib/use-async-action';
 import { ErrorBanner, Field, PublishProgress, Section } from './mod-publish/ui';
@@ -19,10 +20,10 @@ export function ModPublishPanel(props: {
   onGeneratePreview: () => void;
   onDeleted?: () => void;
 }) {
-  // Minecraft mods publish to Modrinth, not Steam Workshop, and their identity
-  // lives in gradle.properties rather than About.xml — a separate panel. Branch
-  // here (before any hooks) so each panel keeps a stable hook order.
-  if (props.mod.prefs.game === 'minecraft') {
+  // Non-Workshop games (Minecraft → Modrinth) keep their identity in a different
+  // manifest and get a separate panel. Branch here (before any hooks) so each
+  // panel keeps a stable hook order.
+  if (!getGame(props.mod.prefs.game).capabilities.steamWorkshop) {
     return <MinecraftPublishPanel mod={props.mod} onDeleted={props.onDeleted} />;
   }
   return <RimWorldPublishPanel {...props} />;

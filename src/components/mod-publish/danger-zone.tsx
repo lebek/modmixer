@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useAsyncAction } from '@/lib/use-async-action';
 import type { GameId } from '../../agent/games/types';
+import { getGame } from '../../agent/games/registry';
 
 /**
  * Confirmation-gated mod deletion. The user must type the mod's display
@@ -39,7 +40,7 @@ export function DangerZone({
           Danger zone
         </h2>
         <p className="mt-0.5 text-xs text-muted">
-          {game === 'minecraft' ? (
+          {!getGame(game).capabilities.steamWorkshop ? (
             <>
               Deleting removes the mod folder (the NeoForge/Gradle project)
               from disk and any agent chats for this mod. This cannot be undone.
