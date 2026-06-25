@@ -2167,10 +2167,11 @@ export class AgentHost {
     const monitoredGame = this.monitoringGame;
     this.stopMonitoring();
     // Bridge teardown (Mods/ junction removal + ModsConfig <activeMods> strip)
-    // is RimWorld-specific. A Minecraft test loads its bridge via gradlew
-    // runClient (no Mods/ install, no ModsConfig), so running the teardown
-    // would needlessly mutate the user's real RimWorld config.
-    if (monitoredGame === 'rimworld') {
+    // only applies to games whose test loop installs a bridge into the real game
+    // config. A Minecraft test loads its bridge via gradlew runClient (no Mods/
+    // install, no ModsConfig), so running the teardown would needlessly mutate
+    // the user's real config.
+    if (getGame(monitoredGame).capabilities.testBridgeInstall) {
       void this.teardownBridgeInstall(wasNonIsolated);
     }
   }

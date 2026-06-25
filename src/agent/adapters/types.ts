@@ -155,6 +155,17 @@ export interface MetadataWriteResult {
   message: string;
 }
 
+/**
+ * Per-game descriptions for the shared tools whose mechanism is game-neutral but
+ * whose model-facing copy must name the game's own project shape and workflow.
+ */
+export interface GameToolText {
+  /** scaffold_mod description (RimWorld About.xml + subfolders vs NeoForge project). */
+  scaffold: string;
+  /** run_test_cycle description (RimWorld Prefs/ship/launch vs gradlew runClient). */
+  testCycle: string;
+}
+
 export interface GameAdapter {
   /** The renderer-safe descriptor (identity, display, capabilities). */
   readonly def: GameDefinition;
@@ -162,6 +173,15 @@ export interface GameAdapter {
   readonly setup: GameSetupAdapter;
   /** Code-index lifecycle (startup build, per-session kick, query readiness). */
   readonly index: GameIndexAdapter;
+  /** Model-facing descriptions for the shared scaffold/test tools. */
+  readonly toolText: GameToolText;
+  /**
+   * Whether `modDir` is still the freshly-minted "Untitled Mod" placeholder (so
+   * a bare scaffold_mod redirects in-place rather than orphaning it). RimWorld:
+   * About.xml with an empty packageId; Minecraft: gradle.properties id
+   * "untitledmod".
+   */
+  isPlaceholderMod(modDir: string): boolean;
   /**
    * Read the mod's display identity into the shared AboutMetadata shape the UI
    * renders. RimWorld reads About.xml; Minecraft maps gradle.properties onto it.

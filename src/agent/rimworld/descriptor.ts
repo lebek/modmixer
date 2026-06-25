@@ -24,6 +24,8 @@ export const rimworldDescriptor: GameDefinition = {
     testLoop: true,
     sourceIndex: true,
     communityLore: true,
+    folderImport: true,
+    testBridgeInstall: true,
   },
   buildTool: 'dotnet',
   lore: { topics: rimworldLoreTopics, topicHints: rimworldLoreTopicHints },

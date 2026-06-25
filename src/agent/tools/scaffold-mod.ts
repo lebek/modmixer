@@ -1,15 +1,9 @@
 import { Type } from 'typebox';
 import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
 import path from 'node:path';
-import fsSync from 'node:fs';
-import {
-  getWorkspacePaths,
-  mintWorkspaceFolderId,
-  parseAbout,
-} from '../workspace.js';
+import { getWorkspacePaths, mintWorkspaceFolderId } from '../workspace.js';
 import { track } from '../telemetry.js';
 import { writeModPrefs } from '../mod-prefs.js';
-import { readMinecraftMeta } from '../minecraft/scaffold.js';
 import { getAdapter } from '../adapters/index.js';
 import type { ScaffoldModDetails } from '../adapters/types.js';
 import type { ConversationScope } from '../conversations.js';
@@ -51,12 +45,6 @@ const Params = Type.Object({
   ),
 });
 
-const RIMWORLD_DESCRIPTION =
-  "Set up a RimWorld mod's About.xml, README, and standard subfolders (About/, Defs/, Patches/, Source/, Textures/). Pass withCSharp=true to also generate a buildable .csproj + Mod.cs. The mod folder itself is an opaque internal id — when the active conversation is already bound to a mod (including the placeholder from \"+ new mod\"), scaffold_mod operates on that folder. Otherwise it mints a fresh folder id; do NOT try to control the folder name via `name`. The mod is NOT yet active in the game — run_test_cycle handles sync + enable + launch when you're ready to test.";
-
-const MINECRAFT_DESCRIPTION =
-  "Set up the mod's NeoForge (Gradle) project. A Minecraft mod IS a Gradle project; identity lives in gradle.properties. When the active conversation is bound to a mod (including the \"+ new mod\" placeholder) the project is normally ALREADY laid down — in that case you only need set_mod_metadata to name it, and scaffold_mod just re-stamps the identity. Use scaffold_mod to (re)create the project when it's missing. packageId is the mod id (a short lowercase word like \"coolblocks\"), NOT reverse-DNS; rimworldVersions/withCSharp are ignored. The mod is NOT yet active in-game — run_test_cycle handles launch.";
-
 /**
  * Build scaffold_mod with the active conversation's scope and game. Folder
  * resolution + the placeholder/orphan guard are conversation/session concerns
@@ -75,8 +63,7 @@ export function createScaffoldModTool(
   return {
     name: 'scaffold_mod',
     label: 'Scaffold mod',
-    description:
-      game === 'minecraft' ? MINECRAFT_DESCRIPTION : RIMWORLD_DESCRIPTION,
+    description: getAdapter(game).toolText.scaffold,
     parameters: Params,
     async execute(_id, params): Promise<AgentToolResult<ScaffoldModDetails>> {
       const { workspaceDir } = getWorkspacePaths();
@@ -94,7 +81,7 @@ export function createScaffoldModTool(
       // error. Modify-in-place via update_schematic / set_mod_metadata / write
       // is what's wanted here.
       if (!params.folder && !placeholderFolder && scope?.type === 'mod') {
-        const existing = readScopeIdentity(scope.modFolder, workspaceDir, game);
+        const existing = await readScopeIdentity(scope.modFolder, workspaceDir, game);
         const label = existing?.name ?? scope.modFolder;
         const pkg = existing?.packageId
           ? `, packageId="${existing.packageId}"`
@@ -141,40 +128,16 @@ function activeUntitledPlaceholderFolder(
 ): string | null {
   if (!scope || scope.type !== 'mod') return null;
   const modDir = path.join(workspaceDir, scope.modFolder);
-  if (game === 'minecraft') {
-    const meta = readMinecraftMeta(modDir);
-    return meta && meta.modId === 'untitledmod' ? scope.modFolder : null;
-  }
-  try {
-    const xml = fsSync.readFileSync(
-      path.join(modDir, 'About', 'About.xml'),
-      'utf8',
-    );
-    if (parseAbout(xml).packageId.trim() === '') return scope.modFolder;
-  } catch {
-    // No About.xml or unreadable — treat as not-a-placeholder; the caller falls
-    // through to the mint-a-fresh-folder behavior.
-  }
-  return null;
+  return getAdapter(game).isPlaceholderMod(modDir) ? scope.modFolder : null;
 }
 
 /** Best-effort read of an existing mod's identity for orphan-guard messages. */
-function readScopeIdentity(
+async function readScopeIdentity(
   modFolder: string,
   workspaceDir: string,
   game: GameId,
-): { name: string; packageId: string } | null {
+): Promise<{ name: string; packageId: string } | null> {
   const modDir = path.join(workspaceDir, modFolder);
-  if (game === 'minecraft') {
-    const meta = readMinecraftMeta(modDir);
-    return meta ? { name: meta.name, packageId: meta.modId } : null;
-  }
-  try {
-    const parsed = parseAbout(
-      fsSync.readFileSync(path.join(modDir, 'About', 'About.xml'), 'utf8'),
-    );
-    return { name: parsed.name, packageId: parsed.packageId };
-  } catch {
-    return null;
-  }
+  const meta = await getAdapter(game).readModMetadata(modDir, modFolder);
+  return meta ? { name: meta.name, packageId: meta.packageId } : null;
 }

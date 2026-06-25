@@ -31,7 +31,7 @@ import {
 import { listConversationsForMod } from '../../agent/conversations.js';
 import { deleteAllSaves } from '../../agent/snapshots.js';
 import { loadSettings } from '../../agent/settings.js';
-import { resolveGameId } from '../../agent/games/registry.js';
+import { getGame, resolveGameId } from '../../agent/games/registry.js';
 import type { GameId } from '../../agent/games/types.js';
 import type { RouteContext } from './context.js';
 
@@ -116,11 +116,12 @@ export function registerModRoutes(ctx: RouteContext): void {
     result: ImportModResult;
     mods: WorkspaceMod[];
   } | null> => {
-    // Folder import synthesizes a RimWorld About.xml, so it's RimWorld-only for
-    // now. The UI hides the button for other games (mods-view's canImport);
-    // this is the matching server-side backstop so the channel can't quietly
-    // produce a RimWorld mod while the user is on, say, the Minecraft tab.
-    if (loadSettings().selectedGameId !== 'rimworld') {
+    // Folder import synthesizes a RimWorld About.xml, so it's gated on the
+    // folderImport capability. The UI hides the button for games without it
+    // (mods-view's canImport); this is the matching server-side backstop so the
+    // channel can't quietly produce a RimWorld mod while the user is on, say,
+    // the Minecraft tab.
+    if (!getGame(resolveGameId(loadSettings().selectedGameId)).capabilities.folderImport) {
       throw new Error(
         'Importing an existing mod folder is only supported for RimWorld right now.',
       );

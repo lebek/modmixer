@@ -30,6 +30,8 @@ export const minecraftDescriptor: GameDefinition = {
     testLoop: true,
     sourceIndex: true,
     communityLore: false,
+    folderImport: false,
+    testBridgeInstall: false,
   },
   buildTool: 'gradle',
   lore: { topics: minecraftLoreTopics, topicHints: minecraftLoreTopicHints },

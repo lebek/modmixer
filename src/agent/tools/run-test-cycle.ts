@@ -66,10 +66,7 @@ export function createRunTestCycleTool(
   return {
     name: 'run_test_cycle',
     label: 'Run test cycle (build + launch + watch)',
-    description:
-      game === 'minecraft'
-        ? "Macro: the only way to test the mod in-game. Builds the mod if needed and launches the modded client (./gradlew runClient) with the diagnostics bridge (aggregated, deduped errors streamed back over localhost), then arms background monitoring. The first run decompiles Minecraft and can take several minutes — that's expected, not a hang. If a client is already running it's stopped and relaunched. After this returns, tell the user EXACTLY what to try in-game (they're about to alt-tab) — errors arrive automatically as '[automated …]' messages via the error-triage protocol. Just pass `folder`; the paletteEntries/autoOpenPalette/quicktest/isolated/companionMods options are RimWorld-only and ignored here."
-        : "Macro: the only way to test a mod in-game. Handles the entire flow in one call — flips dev-mode + pins palette entries in Prefs.xml, syncs the mod into RimWorld's Mods/, installs the Modmixer Bridge mod (Harmony-patched diagnostics over localhost TCP), writes an active-mod list (Core + DLCs + target + transitive deps + any companionMods + bridge) to a separate savedata folder by default so the user's real mod list is untouched, launches RimWorld with `-quicktest`, and arms background bridge monitoring. If RimWorld is already running it's force-quit and relaunched automatically — never ask about unsaved progress (Modmixer users are mod-testing; saves don't matter). After this returns, tell the user EXACTLY what to do in-game (they're about to alt-tab) — errors will arrive automatically as '[automated …]' messages via the standard error-triage protocol.",
+    description: getAdapter(game).toolText.testCycle,
     parameters: Params,
     async execute(_id, params): Promise<AgentToolResult<RunTestCycleDetails>> {
       const prefs = await readModPrefs(params.folder);

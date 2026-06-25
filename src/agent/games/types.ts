@@ -51,6 +51,19 @@ export interface GameCapabilities {
    * runtime `repo` tier never swaps to an empty community cache.
    */
   communityLore: boolean;
+  /**
+   * Import an existing on-disk mod folder into the workspace. RimWorld-only —
+   * the importer synthesizes a RimWorld About.xml; other games have no
+   * equivalent loose-folder layout to ingest.
+   */
+  folderImport: boolean;
+  /**
+   * The test loop installs a Modmixer bridge mod into the game's real config
+   * (RimWorld: a Mods/ junction + ModsConfig entry) that must be torn down when
+   * the test session ends. Minecraft loads its bridge via gradlew runClient, so
+   * there is nothing to clean up.
+   */
+  testBridgeInstall: boolean;
 }
 
 /**
