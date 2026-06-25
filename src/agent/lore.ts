@@ -54,161 +54,22 @@ export type LoreTier = 'repo' | 'user';
  * `misc` is intentionally last — the agent should treat it as the
  * placement of last resort, not the default.
  */
-export const LORE_TOPICS = [
-  // Engine systems
-  'defs',
-  'patches',
-  'harmony',
-  'scribe-saving',
-  'performance',
-  'localization',
-  // Presentation
-  'ui',
-  'sounds',
-  'textures',
-  'animation',
-  // Game subsystems
-  'pawns',
-  'things',
-  'recipes',
-  'jobs-ai',
-  'combat',
-  'world-incidents',
-  'weather',
-  'biomes',
-  'factions',
-  'ideology',
-  'biotech',
-  'anomaly',
-  // Author workflow
-  'build',
-  'test-loop',
-  'debugging',
-  'compat',
-  'assets',
-  'distribution',
-  // Catch-all
-  'misc',
-] as const;
-// Loosened to string: topics are now per-game (RimWorld vs Minecraft have
-// different taxonomies) and validated at runtime via isLoreTopicForGame.
+// Topics are per-game (RimWorld vs Minecraft have different taxonomies), so the
+// catalogue lives on each game's descriptor (see <game>/lore-taxonomy.ts) and is
+// validated at runtime via isLoreTopicForGame. Loosened to string accordingly.
 export type LoreTopic = string;
 
 export function isLoreTopic(t: string): t is LoreTopic {
-  return (LORE_TOPICS as readonly string[]).includes(t);
+  return getGame('rimworld').lore.topics.includes(t);
 }
 
-/**
- * One-line hint per topic, shown to the agent in tool descriptions so it
- * can pick the right slot without guessing. Keep these tight — they are
- * the only signal the agent gets at routing time. If you find yourself
- * wanting to write a paragraph here, the topic probably needs splitting.
- */
-export const LORE_TOPIC_HINTS: Record<LoreTopic, string> = {
-  // Engine systems
-  defs: 'Def system mechanics, parentName/abstract resolution, def lookup timing, DefDatabase quirks.',
-  patches: 'PatchOperations (Add/Replace/Insert), XPath shape, named vs wildcard targets, Patch ordering.',
-  harmony: 'Harmony patches, prefix/postfix/transpiler patterns, when to use Harmony vs alternatives.',
-  'scribe-saving': 'Save/load via Scribe_*, IExposable, ExposeData, Look* helpers, savegame compatibility.',
-  performance: 'Tick budgets, ThingComp/MapComponent overhead, GC pressure, profiling, hot paths.',
-  localization: 'Languages/, Keyed/ vs DefInjected/, translation injection, runtime string lookup.',
-  // Presentation
-  ui: 'Widgets, Listing_Standard, Window subclasses, ITab, Gizmo, Inspector tab, MainTab.',
-  sounds: 'SoundDef shape, SubSoundDef, sustainers, OneShot, FMOD/Unity audio quirks, .ogg encoding.',
-  textures: 'PNG conventions, texPath resolution, GraphicData, atlasing, shaders.',
-  animation: 'Sprite swaps, PawnRenderer, AnimationDef, smooth interpolation, body/apparel layering.',
-  // Game subsystems
-  pawns: 'Pawn generation, kinds, traits, skills, hediffs, needs, body parts, stats, age/biology.',
-  things: 'ThingDef shape, Building/Pawn/Plant subclasses, ThingComp, stuff/material system, spawning.',
-  recipes: 'RecipeDef, ingredients, work amount, workSkill, surgical recipes, bills, RecipeUser.',
-  'jobs-ai': 'JobDef, JobDriver, ThinkTree/ThinkNode, WorkGiver, mental states, pawn AI extensions.',
-  combat: 'Verbs, Verb_Shoot/Melee, ProjectileDef, damage calc, armor, cover, ranged accuracy.',
-  'world-incidents': 'IncidentDef, IncidentWorker, GameCondition, storyteller comps, raid generation.',
-  weather: 'WeatherDef, WeatherOverlay, sky color, wind, rain/snow, MusicManager interactions.',
-  biomes: 'BiomeDef, world tiles, terrain generation, plant/animal density, weather chains.',
-  factions: 'FactionDef, PawnGroupMaker, relations, settlements, faction-specific raids.',
-  ideology: 'PreceptDef, MemeDef, IdeoDef, rituals, role abilities (DLC: Ideology).',
-  biotech: 'GeneDef, xenotypes, mechanitor/mech, growth stages, ChildAgeRequirements (DLC: Biotech).',
-  anomaly: 'EntityDef, study, void/dark mechanics, monolith, suppression (DLC: Anomaly).',
-  // Author workflow
-  build: 'csproj, target framework, references, NuGet packages, Assembly-CSharp/UnityEngine DLLs.',
-  'test-loop': 'Iteration cadence: dev console, hot-reload tricks, ModSettings sliders, MapComponent tuning.',
-  debugging: 'Reading Player.log, triaging errors by mod, decompile_dll usage, log severity classification.',
-  compat: 'HugsLib, mod ordering, soft dependencies, optional Harmony patches, version detection.',
-  assets: 'Filesystem layout (Sounds/, Textures/), naming, .ogg/.png encoding requirements, placeholder strategy.',
-  distribution: 'About.xml, packageId conventions, supportedVersions, Workshop publishing, PublishedFileId.',
-  // Catch-all
-  misc: "Anything that doesn't fit elsewhere — use sparingly. If lessons cluster here, propose a new topic.",
-};
-
-/**
- * Minecraft (NeoForge) lore topics — a separate taxonomy from RimWorld's. Same
- * mechanics (one markdown file per topic, `## hook` entries), but the slots
- * reflect NeoForge concepts so the agent never sees RimWorld topics for a
- * Minecraft mod.
- */
-export const MINECRAFT_LORE_TOPICS = [
-  // Core
-  'registries',
-  'events',
-  'datagen',
-  'capabilities',
-  'networking',
-  // Content
-  'blocks',
-  'items',
-  'entities',
-  'recipes',
-  'loot-tables',
-  'tags',
-  'worldgen',
-  // Presentation
-  'rendering',
-  'models',
-  'lang',
-  // Advanced
-  'mixins',
-  'commands',
-  // Author workflow
-  'build',
-  'test-loop',
-  'assets',
-  'distribution',
-  'misc',
-] as const;
-
-export const MINECRAFT_LORE_TOPIC_HINTS: Record<string, string> = {
-  registries: 'DeferredRegister, Registries keys, RegisterEvent, registration timing on the mod bus.',
-  events: 'Mod bus (FMLCommonSetupEvent, register events) vs game bus (NeoForge.EVENT_BUS), @SubscribeEvent, event priorities.',
-  datagen: 'Data generators, GatherDataEvent, providers for recipes/loot/tags/models, runData task.',
-  capabilities: 'Capabilities/attachments (IItemHandler, IEnergyStorage), RegisterCapabilitiesEvent, data attachments.',
-  networking: 'Custom payloads, PayloadRegistrar, client/server packet handling, sync.',
-  blocks: 'Block + BlockBehaviour.Properties, BlockState, block entities, BlockItem pairing.',
-  items: 'Item + Item.Properties, Tiers/SimpleTier, components (DataComponents), creative tabs.',
-  entities: 'EntityType, attributes, renderers, goals/AI, spawn eggs, datafix.',
-  recipes: 'JSON recipe shapes (crafting_shaped/shapeless/smelting), RecipeType, custom serializers.',
-  'loot-tables': 'Loot table JSON, pools, entries, conditions/functions, block drops.',
-  tags: 'Tag JSON (item/block/biome…), TagKey, referencing tags in code/recipes.',
-  worldgen: 'Features, placement modifiers, biome modifiers, structures via JSON + datapack.',
-  rendering: 'Client renderers, RenderType, model layers, GUI screens, ScreenEvent.',
-  models: 'Item/block model JSON, blockstate JSON, parents (item/handheld, block/cube_all), textures.',
-  lang: 'Translation keys (item./block./itemGroup.), en_us.json, Component.translatable.',
-  mixins: 'Mixin setup, refmap, injection points; prefer events/APIs first.',
-  commands: 'Brigadier commands, RegisterCommandsEvent, argument types.',
-  build: 'gradle.properties, build.gradle (ModDevGradle), gradlew tasks, dependencies, Parchment.',
-  'test-loop': 'runClient, the diagnostics bridge, reading aggregated errors, datagen runData.',
-  assets: 'src/main/resources layout (assets/<id>, data/<id>), textures (png), placeholder strategy.',
-  distribution: 'neoforge.mods.toml, mod id/version, Modrinth publishing, loaders/game_versions.',
-  misc: "Anything that doesn't fit elsewhere — use sparingly.",
-};
-
-/** The topic catalogue for a game. */
+/** The topic catalogue for a game (from its descriptor). */
 export function loreTopics(game: GameId): readonly string[] {
-  return game === 'minecraft' ? MINECRAFT_LORE_TOPICS : LORE_TOPICS;
+  return getGame(game).lore.topics;
 }
 
 function loreTopicHints(game: GameId): Record<string, string> {
-  return game === 'minecraft' ? MINECRAFT_LORE_TOPIC_HINTS : LORE_TOPIC_HINTS;
+  return getGame(game).lore.topicHints;
 }
 
 export function isLoreTopicForGame(t: string, game: GameId): boolean {
@@ -305,10 +166,11 @@ export function userLoreDir(game: GameId = 'rimworld'): string {
  * server-curated lore is expected to subsume the shipped bootstrap.
  */
 export function baseLoreDir(game: GameId = 'rimworld'): string {
-  // Community-lore sync is RimWorld-only for now, so non-RimWorld games always
-  // read their shipped bundle — otherwise the (empty) community cache would
-  // shadow the bundled starter lore when useCommunityLore is on (the default).
-  if (game !== 'rimworld') return shippedLoreDir(game);
+  // Community-lore sync is gated by the per-game `communityLore` capability;
+  // games without it always read their shipped bundle — otherwise the (empty)
+  // community cache would shadow the bundled starter lore when useCommunityLore
+  // is on (the default).
+  if (!getGame(game).capabilities.communityLore) return shippedLoreDir(game);
   return loadSettings().useCommunityLore
     ? communityLoreDir(game)
     : shippedLoreDir(game);

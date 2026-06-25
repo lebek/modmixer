@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import { detectRimWorldPaths, detectGameVersionMajorMinorSync } from './paths.js';
 import { getWorkspacePaths, parseAbout } from './workspace.js';
 import { loadSettings } from './settings.js';
-import { buildIndexSync, LORE_TOPICS, loreTopics } from './lore.js';
+import { buildIndexSync, loreTopics } from './lore.js';
 import { buildCookbookCatalogueSync } from './cookbook.js';
 import { readSchematicSync } from './schematic.js';
 import type { ConversationScope } from './conversations.js';

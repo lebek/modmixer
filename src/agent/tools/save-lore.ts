@@ -7,6 +7,7 @@ import {
   topicCatalogueText,
   type LoreTopic,
 } from '../lore.js';
+import type { LoreToolText } from './read-lore.js';
 import type { GameId } from '../games/types.js';
 
 export interface SaveLoreDetails {
@@ -17,15 +18,14 @@ export interface SaveLoreDetails {
 }
 
 export function createSaveLoreTool(
-  game: GameId = 'rimworld',
+  game: GameId,
+  text: LoreToolText,
 ): AgentTool<ReturnType<typeof buildParams>, SaveLoreDetails> {
-  const isMc = game === 'minecraft';
   const Params = buildParams(game);
   return {
     name: 'save_lore',
-    label: isMc ? 'Save Minecraft modding lore' : 'Save modding lore',
-    description:
-      `Persist a transferable ${isMc ? 'Minecraft (NeoForge)' : 'engine-level'} modding lesson into the ${isMc ? 'Minecraft' : 'user-global'} lore so future sessions can consult it. Save sparingly — only when the lesson is broadly applicable across mods AND would NOT be obvious to an agent reading the code cold AND would have saved you significant time. Strong signals: the obvious approach failed, an error message was distinctive, the user corrected your assumption, the fix turned out to be in a different file/system than you first searched. Re-use an existing hook to update a lesson rather than appending a near-duplicate. Do NOT save mod-specific quirks here.`,
+    label: text.label,
+    description: text.description,
     parameters: Params,
     async execute(_id, params): Promise<AgentToolResult<SaveLoreDetails>> {
       if (!isLoreTopicForGame(params.topic, game)) {

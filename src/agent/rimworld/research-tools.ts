@@ -160,6 +160,18 @@ const readSymbolSpec: ReadSymbolSpec = {
   lang: symbolLang,
 };
 
+const readLoreText = {
+  label: 'Read modding lore',
+  description:
+    'Read transferable RimWorld-modding lessons for a given topic, merged across the lore tiers (repo → user). Each entry is a markdown section starting with an `## ` hook line. When entries from different tiers cover the same hook, prefer the more specific tier (user > repo) — they are returned in that order so later entries override earlier ones. Call this BEFORE attempting work in an unfamiliar area (e.g. before authoring a new SoundDef, before patching weather, before adding Harmony) — most of these lessons document non-obvious gotchas that took a long time to discover.',
+};
+
+const saveLoreText = {
+  label: 'Save modding lore',
+  description:
+    'Persist a transferable engine-level modding lesson into the user-global lore so future sessions can consult it. Save sparingly — only when the lesson is broadly applicable across mods AND would NOT be obvious to an agent reading the code cold AND would have saved you significant time. Strong signals: the obvious approach failed, an error message was distinctive, the user corrected your assumption, the fix turned out to be in a different file/system than you first searched. Re-use an existing hook to update a lesson rather than appending a near-duplicate. Do NOT save mod-specific quirks here.',
+};
+
 export function rimworldResearchTools(): AgentTool<any>[] {
   return [
     listInstalledModsTool,
@@ -167,7 +179,7 @@ export function rimworldResearchTools(): AgentTool<any>[] {
     createSearchDefsTool('rimworld', searchDefsSpec),
     createReadCsharpSymbolTool('rimworld', readSymbolSpec),
     createSearchSourceTool('rimworld', searchSourceSpec),
-    createReadLoreTool('rimworld'),
-    createSaveLoreTool('rimworld'),
+    createReadLoreTool('rimworld', readLoreText),
+    createSaveLoreTool('rimworld', saveLoreText),
   ];
 }

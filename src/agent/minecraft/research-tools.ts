@@ -168,6 +168,18 @@ const readSymbolSpec: ReadSymbolSpec = {
   lang: symbolLang,
 };
 
+const readLoreText = {
+  label: 'Read Minecraft modding lore',
+  description:
+    'Read transferable Minecraft (NeoForge) modding lessons for a given topic, merged across the lore tiers (repo → user). Each entry is a markdown section starting with an `## ` hook line; user entries override repo on the same hook. Call this BEFORE work in an unfamiliar area (registering blocks/items, events, datagen, mixins, networking) — the lessons capture non-obvious NeoForge gotchas.',
+};
+
+const saveLoreText = {
+  label: 'Save Minecraft modding lore',
+  description:
+    'Persist a transferable Minecraft (NeoForge) modding lesson into the Minecraft lore so future sessions can consult it. Save sparingly — only when the lesson is broadly applicable across mods AND would NOT be obvious to an agent reading the code cold AND would have saved you significant time. Strong signals: the obvious approach failed, an error message was distinctive, the user corrected your assumption, the fix turned out to be in a different file/system than you first searched. Re-use an existing hook to update a lesson rather than appending a near-duplicate. Do NOT save mod-specific quirks here.',
+};
+
 export function minecraftResearchTools(): AgentTool<any>[] {
   return [
     mcListInstalledModsTool,
@@ -175,7 +187,7 @@ export function minecraftResearchTools(): AgentTool<any>[] {
     createSearchDefsTool('minecraft', searchDefsSpec),
     createReadCsharpSymbolTool('minecraft', readSymbolSpec),
     createSearchSourceTool('minecraft', searchSourceSpec),
-    createReadLoreTool('minecraft'),
-    createSaveLoreTool('minecraft'),
+    createReadLoreTool('minecraft', readLoreText),
+    createSaveLoreTool('minecraft', saveLoreText),
   ];
 }

@@ -14,17 +14,21 @@ export interface ReadLoreDetails {
   entryCount: number;
 }
 
+/** Per-game label + description for a lore tool (built in <game>/research-tools.ts). */
+export interface LoreToolText {
+  label: string;
+  description: string;
+}
+
 export function createReadLoreTool(
-  game: GameId = 'rimworld',
+  game: GameId,
+  text: LoreToolText,
 ): AgentTool<ReturnType<typeof buildParams>, ReadLoreDetails> {
-  const isMc = game === 'minecraft';
   const Params = buildParams(game);
   return {
     name: 'read_lore',
-    label: isMc ? 'Read Minecraft modding lore' : 'Read modding lore',
-    description: isMc
-      ? 'Read transferable Minecraft (NeoForge) modding lessons for a given topic, merged across the lore tiers (repo → user). Each entry is a markdown section starting with an `## ` hook line; user entries override repo on the same hook. Call this BEFORE work in an unfamiliar area (registering blocks/items, events, datagen, mixins, networking) — the lessons capture non-obvious NeoForge gotchas.'
-      : 'Read transferable RimWorld-modding lessons for a given topic, merged across the lore tiers (repo → user). Each entry is a markdown section starting with an `## ` hook line. When entries from different tiers cover the same hook, prefer the more specific tier (user > repo) — they are returned in that order so later entries override earlier ones. Call this BEFORE attempting work in an unfamiliar area (e.g. before authoring a new SoundDef, before patching weather, before adding Harmony) — most of these lessons document non-obvious gotchas that took a long time to discover.',
+    label: text.label,
+    description: text.description,
     parameters: Params,
     async execute(_id, params): Promise<AgentToolResult<ReadLoreDetails>> {
       if (!isLoreTopicForGame(params.topic, game)) {

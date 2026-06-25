@@ -5,6 +5,10 @@
  * it directly via games/registry.ts. The purity test guards that invariant.
  */
 import type { GameDefinition } from '../games/types.js';
+import {
+  minecraftLoreTopics,
+  minecraftLoreTopicHints,
+} from './lore-taxonomy.js';
 
 export const minecraftDescriptor: GameDefinition = {
   id: 'minecraft',
@@ -25,8 +29,10 @@ export const minecraftDescriptor: GameDefinition = {
     liveSession: false,
     testLoop: true,
     sourceIndex: true,
+    communityLore: false,
   },
   buildTool: 'gradle',
+  lore: { topics: minecraftLoreTopics, topicHints: minecraftLoreTopicHints },
   // Nest index/lore/caches under .../minecraft/ so they never collide with
   // RimWorld's un-namespaced root.
   storageSegment: 'minecraft',

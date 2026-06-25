@@ -45,6 +45,24 @@ export interface GameCapabilities {
   testLoop: boolean;
   /** Decompiled/source code index the agent searches (both games). */
   sourceIndex: boolean;
+  /**
+   * Crowd-sourced community lore sync (push user lore, pull curated entries).
+   * RimWorld-only for now; other games read only their shipped bundle, so the
+   * runtime `repo` tier never swaps to an empty community cache.
+   */
+  communityLore: boolean;
+}
+
+/**
+ * A game's lore taxonomy — the topic slots and one-line routing hints the agent
+ * sees when reading/saving transferable modding lessons. Pure data, co-located
+ * with the game's descriptor in `<game>/lore-taxonomy.ts`.
+ */
+export interface LoreTaxonomy {
+  /** Topic catalogue for this game's lore (ordered; `misc` last). */
+  topics: readonly string[];
+  /** One-line hint per topic, shown in read_lore/save_lore docs + the prompt. */
+  topicHints: Record<string, string>;
 }
 
 /**
@@ -62,6 +80,8 @@ export interface GameDefinition {
   badgeClassName: string;
   capabilities: GameCapabilities;
   buildTool: BuildTool;
+  /** Topic taxonomy for this game's transferable-lesson lore. */
+  lore: LoreTaxonomy;
   /**
    * Sub-path segment for this game's on-disk storage (code index, lore, caches)
    * under their shared base dirs. RimWorld is `''` — it owns the legacy
