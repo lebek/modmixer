@@ -14,7 +14,7 @@
  * adding a game means implementing this interface, which the type checker then
  * forces to be complete — no more "forgot to gate" call sites.
  */
-import type { AgentToolResult } from '@mariozechner/pi-agent-core';
+import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
 import type { GameDefinition, GameSetupStatus } from '../games/types.js';
 import type { LintFinding } from '../build-lint.js';
 import type { BuildErrorHint } from '../build-error-hints.js';
@@ -182,6 +182,13 @@ export interface GameAdapter {
     scope: ConversationScope,
     opts?: { live?: boolean },
   ): string;
+  /**
+   * The game's read-only research tool set (installed-mod inspection + the
+   * source/def index lookups). Built fresh per session; the shared index/search
+   * mechanism lives in tools/*, but each game owns its corpus-specific tool
+   * presentation in `<game>/research-tools.ts`.
+   */
+  researchTools(): AgentTool<any>[];
   /**
    * Lay down (or re-stamp) the mod's project in `modDir`. The folder is already
    * resolved by the tool; the adapter owns the project shape.

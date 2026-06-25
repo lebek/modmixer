@@ -11,6 +11,7 @@ import { buildRimworldMod } from '../rimworld/build.js';
 import { runRimworldTestCycle } from '../rimworld/test.js';
 import { rimworldSetup } from '../rimworld/setup.js';
 import { buildRimworldSystemPrompt } from '../system-prompt.js';
+import { rimworldResearchTools } from '../rimworld/research-tools.js';
 import {
   readModAbout,
   writeAbout,
@@ -65,6 +66,7 @@ export const RimWorldAdapter: GameAdapter = {
   writeModMetadata,
   createPlaceholder,
   buildSystemPrompt: buildRimworldSystemPrompt,
+  researchTools: rimworldResearchTools,
   scaffold: scaffoldRimworldMod,
   build: buildRimworldMod,
   test: runRimworldTestCycle,

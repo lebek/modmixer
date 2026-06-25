@@ -28,6 +28,7 @@ import {
 } from '../minecraft/launch.js';
 import { minecraftSetup } from '../minecraft/setup.js';
 import { buildMinecraftSystemPrompt } from '../system-prompt.js';
+import { minecraftResearchTools } from '../minecraft/research-tools.js';
 import type {
   BuildModDetails,
   GameAdapter,
@@ -316,6 +317,7 @@ export const MinecraftAdapter: GameAdapter = {
   writeModMetadata,
   createPlaceholder,
   buildSystemPrompt: (scope) => buildMinecraftSystemPrompt(scope),
+  researchTools: minecraftResearchTools,
   scaffold,
   build,
   test,

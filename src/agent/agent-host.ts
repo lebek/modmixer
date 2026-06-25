@@ -52,19 +52,11 @@ import { updateSchematicTool } from './tools/update-schematic.js';
 import { buildModTool } from './tools/build-mod.js';
 import { monitorGetErrorTool } from './tools/monitor-get-error.js';
 import { monitorPollTool } from './tools/monitor-poll.js';
-import { listInstalledModsTool } from './tools/list-installed-mods.js';
-import { decompileDllTool } from './tools/decompile-dll.js';
-import { mcListInstalledModsTool } from './tools/list-installed-mods-mc.js';
-import { inspectModTool } from './tools/inspect-mod.js';
 import { renderSvgToPngTool } from './tools/render-svg-to-png.js';
 import { renderPreviewTool } from './tools/render-preview.js';
 import { getGame } from './games/registry.js';
-import { createSearchDefsTool } from './tools/search-defs.js';
-import { createReadCsharpSymbolTool } from './tools/read-csharp-symbol.js';
-import { createSearchSourceTool } from './tools/search-source.js';
+import { getAdapter } from './adapters/index.js';
 import { warmSearchCache } from './index/warm-cache.js';
-import { createReadLoreTool } from './tools/read-lore.js';
-import { createSaveLoreTool } from './tools/save-lore.js';
 import { createGuardedBashTool } from './tools/bash.js';
 import {
   createGuardedEditTool,
@@ -171,33 +163,10 @@ export function buildCustomTools(
     createGuardedFindTool(cwd, getAttachmentRoots),
     createGuardedLsTool(cwd, getAttachmentRoots),
   ];
-  // Read-only research tools. The source-index lookups are game-aware. Each
-  // game gets its own installed-mod inspection pair: RimWorld reads loose mod
-  // folders + decompiles DLLs (list_installed_mods + decompile_dll); Minecraft
-  // surveys jar manifests + decompiles a mod jar on demand
-  // (list_installed_mods + inspect_mod). The .NET decompile / XML def search
-  // remain RimWorld-only.
-  const researchTools: AgentTool<any>[] =
-    game === 'minecraft'
-      ? [
-          mcListInstalledModsTool,
-          inspectModTool,
-          createSearchDefsTool(game),
-          createReadCsharpSymbolTool(game),
-          createSearchSourceTool(game),
-          createReadLoreTool(game),
-          createSaveLoreTool(game),
-        ]
-      : [
-          listInstalledModsTool,
-          decompileDllTool,
-          // RimWorld source/def index — read-only lookups against $MM/index/*.
-          createSearchDefsTool(game),
-          createReadCsharpSymbolTool(game),
-          createSearchSourceTool(game),
-          createReadLoreTool(game),
-          createSaveLoreTool(game),
-        ];
+  // Read-only research tools — installed-mod inspection + the source/def index
+  // lookups. The set and its corpus-specific presentation are owned per-game in
+  // `<game>/research-tools.ts` and assembled by the adapter; no game branch here.
+  const researchTools: AgentTool<any>[] = getAdapter(game).researchTools();
 
   if (opts?.live) {
     // Live sessions: the user is in-game and cannot answer app dialogs, so

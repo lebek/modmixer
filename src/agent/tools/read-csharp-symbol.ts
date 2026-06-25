@@ -1,59 +1,49 @@
 import { Type } from 'typebox';
+import type { TObject } from 'typebox';
 import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
 import path from 'node:path';
 import fsp from 'node:fs/promises';
 import { openIndexDb } from '../index/db.js';
-import { getIndexStatus } from '../index/rebuild.js';
-import { ensureMinecraftIndexInBackground } from '../index/rebuild-minecraft.js';
 import { getIndexPaths } from '../index/paths.js';
 import { resolveSymbol, type SymbolMatch } from '../index/resolve-symbol.js';
 import type { GameId } from '../games/types.js';
 
-/** Game-aware "index not ready" message; lazily triggers the MC build. */
-function symbolIndexNotReady(game: GameId): string | null {
-  if (game === 'minecraft') {
-    const status = ensureMinecraftIndexInBackground();
-    if (status === 'fresh') return null;
-    if (status === 'building')
-      return 'The Minecraft code index is still building (one-time decompile, a few minutes). Try again shortly.';
-    return "The Minecraft code index isn't built yet — I just started it in the background. Try again shortly.";
-  }
-  const status = getIndexStatus();
-  if (status.type === 'absent' || status.type === 'no-rimworld') {
-    return 'RimWorld source index is not built yet. Open Settings → RimWorld index → Rebuild.';
-  }
-  return null;
+/**
+ * Per-game language presentation for read_symbol. Lets the shared lookup
+ * mechanism render C# vs Java wording (no-match hints, the import/using line,
+ * the C#-only extension-method tag) without knowing which game it is.
+ */
+export interface SymbolLang {
+  /** Hint when a bare short name resolves to nothing. */
+  noNamedSymbol(name: string, kind?: string): string;
+  /** Hint when a dotted/FQN lookup matches nothing. */
+  noMatchingSymbol(name: string, kind?: string): string;
+  /** The disambiguation "import:"/"using:" line for a candidate. */
+  importLine(m: SymbolMatch): string;
+  /** Surface the [extension method] tag (a C#-only concept). */
+  showExtensionMethods: boolean;
 }
 
-// Built per-game so the examples + kind filter match the indexed language:
-// RimWorld C# (FQN like RimWorld.LetterMaker, struct/delegate/property kinds) vs
-// Minecraft Java (FQN like net.neoforged…, class/interface/record kinds). Same
-// shape, so `typeof Params` stays a stable type anchor.
-function readSymbolParams(game: GameId) {
-  const isMc = game === 'minecraft';
-  return Type.Object({
-    name: Type.String({
-      description: isMc
-        ? 'Symbol to look up. Accepts (a) a bare short name like "DeferredRegister" or "BlockBehaviour" — returns the body when one symbol matches, every candidate body inlined when only a few share the name, or a disambiguation list with package + signature when many do; (b) a partial FQN like "registries.DeferredRegister"; (c) a full FQN like "net.neoforged.neoforge.registries.DeferredRegister" — returns just that one body.'
-        : 'Symbol to look up. Accepts (a) a bare short name like "DrawAt" or "WorkTypeDef" — returns the body when one symbol matches, every candidate body inlined when only a few share the name, or a disambiguation list with namespace + signature when many do; (b) a partial FQN like "LetterMaker.MakeLetter" — returns the body if unique, all overloads if not; (c) a full FQN like "RimWorld.LetterMaker.MakeLetter" — returns just that one body.',
-    }),
-    kind: Type.Optional(
-      Type.String({
-        description: isMc
-          ? 'Optional kind filter: "class" | "interface" | "enum" | "record" | "method" | "constructor" | "field".'
-          : 'Optional kind filter: "class" | "struct" | "interface" | "enum" | "record" | "delegate" | "method" | "constructor" | "property" | "indexer" | "field" | "event".',
-      }),
-    ),
-    maxBytes: Type.Optional(
-      Type.Number({
-        description:
-          'Per-symbol body cap in bytes. Default 4096; raise this when you need more context (max 32768).',
-      }),
-    ),
-  });
+/**
+ * Per-game presentation for read_symbol. The symbol-table lookup is shared; the
+ * game's adapter supplies the corpus-specific label, docs, schema, readiness
+ * check, and language wording. Lives in `<game>/research-tools.ts`.
+ */
+export interface ReadSymbolSpec {
+  label: string;
+  description: string;
+  params: TObject;
+  notReady(): string | null;
+  lang: SymbolLang;
 }
 
-const Params = readSymbolParams('rimworld');
+// Type anchor only — the per-game schema (with language-specific docs) is
+// supplied via spec.params; identical shape keeps `typeof Params` stable.
+const Params = Type.Object({
+  name: Type.String(),
+  kind: Type.Optional(Type.String()),
+  maxBytes: Type.Optional(Type.Number()),
+});
 
 interface SymbolHit {
   fqn: string;
@@ -79,18 +69,17 @@ const INLINE_FQN_LIMIT = 3;
 const INLINE_BYTE_BUDGET = 6144;
 
 export function createReadCsharpSymbolTool(
-  game: GameId = 'rimworld',
+  game: GameId,
+  spec: ReadSymbolSpec,
 ): AgentTool<typeof Params, { hits: SymbolHit[]; matches?: SymbolMatch[] }> {
-  const isMc = game === 'minecraft';
+  const lang = spec.lang;
   return {
   name: 'read_symbol',
-  label: isMc ? 'Read Java symbol' : 'Read C# symbol',
-  description: isMc
-    ? "Look up a Java type or member in the decompiled Minecraft + NeoForge source (mojmap + Parchment names). Pass a bare short name (\"DeferredRegister\", \"RegisterEvent\", \"BlockBehaviour\") → returns the body when one symbol matches, or candidate bodies inlined when a few share the name; pass a partial/full FQN (\"net.neoforged.neoforge.registries.DeferredRegister\") → returns that body. For textual occurrences (call sites, usages) use search_source."
-    : "Look up a C# type or member in the decompiled RimWorld source. Handles both 'what is this and where does it live' and 'show me the body' in one call:\n\n• Pass a bare short name (\"DrawAt\", \"WorkTypeDef\") → returns the body when one symbol matches, or every candidate body inlined when only a few symbols share the name (no follow-up call needed). When many symbols share the name, returns the symbol-table entries instead — namespace, kind, FQN, signature — so you can pick one.\n• Pass a partial FQN (\"LetterMaker.MakeLetter\") or full FQN (\"RimWorld.LetterMaker.MakeLetter\") → returns the symbol body. All overloads are returned together when ambiguous.\n\nFor textual occurrences (call sites, string literals), use search_source. For XML def lookup, use search_defs.",
-  parameters: readSymbolParams(game),
+  label: spec.label,
+  description: spec.description,
+  parameters: spec.params as typeof Params,
   async execute(_id, params): Promise<AgentToolResult<{ hits: SymbolHit[]; matches?: SymbolMatch[] }>> {
-    const notReady = symbolIndexNotReady(game);
+    const notReady = spec.notReady();
     if (notReady) {
       return {
         content: [{ type: 'text', text: notReady }],
@@ -115,9 +104,7 @@ export function createReadCsharpSymbolTool(
           content: [
             {
               type: 'text',
-              text: isMc
-                ? `No Java symbol named "${params.name}"${params.kind ? ` (kind=${params.kind})` : ''} in the indexed Minecraft + NeoForge source. Try search_source for substring matches, or search_defs if "${params.name}" might be a data/asset JSON id.`
-                : `No C# symbol named "${params.name}"${params.kind ? ` (kind=${params.kind})` : ''} in the indexed source. Try search_source for substring matches in C# / XML, or search_defs if "${params.name}" might be an XML def.`,
+              text: lang.noNamedSymbol(params.name, params.kind),
             },
           ],
           details: { hits: [], matches: [] },
@@ -141,7 +128,7 @@ export function createReadCsharpSymbolTool(
           }
         }
         return {
-          content: [{ type: 'text', text: formatMatches(matches, isMc) }],
+          content: [{ type: 'text', text: formatMatches(matches, lang) }],
           details: { hits: [], matches },
         };
       }
@@ -209,7 +196,7 @@ export function createReadCsharpSymbolTool(
               type: 'text',
               text:
                 `No symbol exactly matched "${params.name}". Closest matches by short name "${tail}":\n\n` +
-                formatMatches(matches, isMc),
+                formatMatches(matches, lang),
             },
           ],
           details: { hits: [], matches },
@@ -219,9 +206,7 @@ export function createReadCsharpSymbolTool(
         content: [
           {
             type: 'text',
-            text: isMc
-              ? `No Java symbol found matching "${params.name}"${params.kind ? ` (kind=${params.kind})` : ''}. Try search_source for substring matches, or search_defs if it might be a data/asset JSON id.`
-              : `No C# symbol found matching "${params.name}"${params.kind ? ` (kind=${params.kind})` : ''}. Try search_source for substring matches, or search_defs if it might be an XML def.`,
+            text: lang.noMatchingSymbol(params.name, params.kind),
           },
         ],
         details: { hits: [] },
@@ -335,7 +320,7 @@ async function inlineMatchBodies(
   return { text, hits };
 }
 
-function formatMatches(matches: SymbolMatch[], isMc = false): string {
+function formatMatches(matches: SymbolMatch[], lang: SymbolLang): string {
   const lines: string[] = [
     `Found ${matches.length} ${matches.length === 1 ? 'match' : 'matches'}. Re-call with the FQN to read the body:`,
     '',
@@ -343,11 +328,12 @@ function formatMatches(matches: SymbolMatch[], isMc = false): string {
   for (const m of matches) {
     // Java imports the fully-qualified type; C# brings in the namespace.
     // Extension methods are a C#-only concept, so skip that tag for Java.
-    const ext = !isMc && m.isExtensionMethod ? ' [extension method]' : '';
+    const ext =
+      lang.showExtensionMethods && m.isExtensionMethod
+        ? ' [extension method]'
+        : '';
     lines.push(`* ${m.kind} ${m.fqn}${ext}`);
-    lines.push(
-      isMc ? `    import: ${m.fqn};` : `    using:  ${m.namespace ?? '<global>'};`,
-    );
+    lines.push(lang.importLine(m));
     if (m.signature) lines.push(`    sig:    ${m.signature}`);
     lines.push(`    where:  ${m.filePath}:${m.startLine}-${m.endLine}`);
     lines.push('');
