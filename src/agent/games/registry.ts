@@ -1,4 +1,6 @@
 import type { GameDefinition, GameId } from './types.js';
+import { rimworldDescriptor } from '../rimworld/descriptor.js';
+import { minecraftDescriptor } from '../minecraft/descriptor.js';
 
 /**
  * The game everything defaults to. Mods, conversations, and settings written
@@ -7,51 +9,15 @@ import type { GameDefinition, GameId } from './types.js';
  */
 export const DEFAULT_GAME_ID: GameId = 'rimworld';
 
-const RIMWORLD: GameDefinition = {
-  id: 'rimworld',
-  displayName: 'RimWorld',
-  shortLabel: 'RimWorld',
-  badgeClassName: 'bg-amber-500/15 text-amber-300 border border-amber-500/30',
-  capabilities: {
-    steamWorkshop: true,
-    publish: 'steam-workshop',
-    assetPanel: true,
-    depsPanel: true,
-    liveSession: true,
-    testLoop: true,
-    sourceIndex: true,
-  },
-  buildTool: 'dotnet',
-  beta: false,
-};
-
-const MINECRAFT: GameDefinition = {
-  id: 'minecraft',
-  displayName: 'Minecraft',
-  shortLabel: 'Minecraft (NeoForge)',
-  badgeClassName:
-    'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30',
-  capabilities: {
-    steamWorkshop: false,
-    publish: 'modrinth',
-    // Disabled for the beta — the RimWorld asset scanner + sprite preview are
-    // Textures/Sounds-specific; Minecraft mods supply Modrinth gallery images.
-    assetPanel: false,
-    // RimWorld About.xml dependency editor; Minecraft deps live in the
-    // generated neoforge.mods.toml (no panel).
-    depsPanel: false,
-    // No in-game hot-edit session for the beta (RimWorld's is Verse-specific).
-    liveSession: false,
-    testLoop: true,
-    sourceIndex: true,
-  },
-  buildTool: 'gradle',
-  beta: true,
-};
-
+/**
+ * Central registry of game descriptors. Each game's descriptor lives in its own
+ * folder (`<game>/descriptor.ts`, renderer-safe); this record is the closed map
+ * the rest of the renderer-safe code dispatches over. Adding a game means a new
+ * descriptor module + one line here (and its main-only adapter in adapters/).
+ */
 const GAMES: Record<GameId, GameDefinition> = {
-  rimworld: RIMWORLD,
-  minecraft: MINECRAFT,
+  rimworld: rimworldDescriptor,
+  minecraft: minecraftDescriptor,
 };
 
 export function isGameId(value: unknown): value is GameId {
@@ -73,7 +39,7 @@ export function getGame(id: GameId): GameDefinition {
 
 /** Every defined game, including beta ones (use for lookup, not for pickers). */
 export function listGames(): GameDefinition[] {
-  return [RIMWORLD, MINECRAFT];
+  return [rimworldDescriptor, minecraftDescriptor];
 }
 
 /**
