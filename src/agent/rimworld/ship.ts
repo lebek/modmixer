@@ -1,5 +1,5 @@
 import { isRimWorldRunning, launchRimWorld } from './game.js';
-import { syncModToGame } from './workspace.js';
+import { syncModToGame } from '../workspace.js';
 import {
   autosort,
   computeTestSet,
@@ -7,13 +7,13 @@ import {
   getRegistry,
   readModsConfig,
   type RegistryMod,
-} from './registry/index.js';
+} from '../registry/index.js';
 import { buildTestSavedata } from './test-savedata.js';
 import {
   BRIDGE_PACKAGE_ID,
   ensureBridgeInstalled,
   type BridgeInstallResult,
-} from './bridge-install.js';
+} from '../bridge-install.js';
 
 /**
  * Append the bridge packageId to an active-mod list when the bridge is

@@ -23,10 +23,10 @@ import {
   mintWorkspaceFolderId,
 } from '../workspace.js';
 import { detectGameVersionMajorMinorSync, detectRimWorldPaths } from '../paths.js';
-import { isRimWorldRunning, quitRimWorld } from '../game.js';
-import { shipAndLaunch } from '../ship.js';
-import { ensureTestSavedataPrefs } from '../test-savedata.js';
-import { prepareDebugSession } from '../prefs.js';
+import { isRimWorldRunning, quitRimWorld } from '../rimworld/game.js';
+import { shipAndLaunch } from '../rimworld/ship.js';
+import { ensureTestSavedataPrefs } from '../rimworld/test-savedata.js';
+import { prepareDebugSession } from '../rimworld/prefs.js';
 import { getRegistry } from '../registry/index.js';
 import {
   ensureLiveInstalled,

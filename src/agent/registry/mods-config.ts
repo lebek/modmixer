@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
-import { isRimWorldRunning } from '../game.js';
+import { isRimWorldRunning } from '../rimworld/game.js';
 import { detectRimWorldPaths } from '../paths.js';
 
 export interface ModsConfigContents {

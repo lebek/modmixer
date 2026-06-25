@@ -24,7 +24,7 @@ import {
   linkWorkshopItem,
   publishToWorkshop,
   unlinkWorkshopItem,
-} from '../../agent/workshop.js';
+} from '../../agent/rimworld/workshop.js';
 import type { RouteContext } from './context.js';
 
 /** Asset CRUD + Workshop publish/link/unlink. */

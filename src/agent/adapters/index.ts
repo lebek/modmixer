@@ -6,8 +6,8 @@
  */
 import type { GameId } from '../games/types.js';
 import type { GameAdapter } from './types.js';
-import { RimWorldAdapter } from './rimworld.js';
-import { MinecraftAdapter } from './minecraft.js';
+import { RimWorldAdapter } from '../rimworld/adapter.js';
+import { MinecraftAdapter } from '../minecraft/adapter.js';
 
 const ADAPTERS: Record<GameId, GameAdapter> = {
   rimworld: RimWorldAdapter,

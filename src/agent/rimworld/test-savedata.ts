@@ -11,8 +11,8 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { app } from 'electron';
-import { detectRimWorldPaths } from './paths.js';
-import { renderModsConfigXml } from './registry/mods-config.js';
+import { detectRimWorldPaths } from '../paths.js';
+import { renderModsConfigXml } from '../registry/mods-config.js';
 
 export function getTestSavedataDir(): string {
   return path.join(app.getPath('userData'), 'test-savedata');

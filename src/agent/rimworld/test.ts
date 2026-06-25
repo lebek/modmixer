@@ -6,10 +6,10 @@
  * `ctx` so this module never imports agent-host.ts (avoids an import cycle).
  */
 import type { AgentToolResult } from '@mariozechner/pi-agent-core';
-import { isRimWorldRunning, quitRimWorld } from '../game.js';
-import { prepareDebugSession } from '../prefs.js';
-import { shipAndLaunch } from '../ship.js';
-import { ensureTestSavedataPrefs } from '../test-savedata.js';
+import { isRimWorldRunning, quitRimWorld } from './game.js';
+import { prepareDebugSession } from './prefs.js';
+import { shipAndLaunch } from './ship.js';
+import { ensureTestSavedataPrefs } from './test-savedata.js';
 import type { RunTestCycleDetails, TestCycleContext } from '../adapters/types.js';
 
 export async function runRimworldTestCycle(

@@ -4,11 +4,11 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import { EventEmitter } from 'node:events';
 import { app, utilityProcess, type UtilityProcess } from 'electron';
-import { getWorkspacePaths, readModAbout } from './workspace.js';
-import { writeModPrefs } from './mod-prefs.js';
-import { STEAM_PREVIEW_LIMIT_BYTES } from './assets/preview-normalize.js';
-import { commitTurn } from './snapshots.js';
-import { track } from './telemetry.js';
+import { getWorkspacePaths, readModAbout } from '../workspace.js';
+import { writeModPrefs } from '../mod-prefs.js';
+import { STEAM_PREVIEW_LIMIT_BYTES } from '../assets/preview-normalize.js';
+import { commitTurn } from '../snapshots.js';
+import { track } from '../telemetry.js';
 
 // RimWorld's Steam app ID. Workshop items live under this consumer/creator app.
 const RIMWORLD_APP_ID = 294100;

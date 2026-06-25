@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { AboutMetadata, WorkspaceMod } from '../agent/workspace';
-import type { PublishProgressEvent } from '../agent/workshop';
+import type { PublishProgressEvent } from '../agent/rimworld/workshop';
 import { getGame } from '../agent/games/registry';
 import { derivePackageId } from '@/lib/identifiers';
 import { useAsyncAction } from '@/lib/use-async-action';

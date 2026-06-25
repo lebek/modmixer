@@ -322,7 +322,7 @@ const api = {
   linkWorkshopItem: (folder: string, workshopId: string) =>
     invoke('modmixer:workshop:link', folder, workshopId),
   onWorkshopProgress: (
-    handler: (event: import('./agent/workshop').PublishProgressEvent) => void,
+    handler: (event: import('./agent/rimworld/workshop').PublishProgressEvent) => void,
   ) => on('modmixer:workshop:progress', handler),
 
   // Modrinth (Minecraft publishing)

@@ -48,7 +48,7 @@ import { onAssetsChanged, stopAllWatches } from './agent/assets/watcher.js';
 import {
   onPublishProgress,
   type PublishProgressEvent,
-} from './agent/workshop.js';
+} from './agent/rimworld/workshop.js';
 import {
   CONFIRM_CHANNEL_RESOLVE,
   initConfirmationGate,

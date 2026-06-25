@@ -22,7 +22,7 @@ import {
   isRimWorldRunning,
   launchRimWorld,
   quitRimWorld,
-} from '../../agent/game.js';
+} from '../../agent/rimworld/game.js';
 import { stopWatching } from '../../agent/assets/watcher.js';
 import {
   getRegistry,

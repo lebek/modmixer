@@ -13,22 +13,22 @@ import {
   emptyAbout,
   type AboutMetadata,
 } from '../workspace.js';
-import { buildMod as buildMinecraftMod } from '../minecraft/gradle.js';
+import { buildMod as buildMinecraftMod } from './gradle.js';
 import { launchModeHint } from '../launch-mode.js';
 import {
   createMinecraftMod,
   isMinecraftTemplateAvailable,
   readMinecraftMeta,
   writeMinecraftMeta,
-} from '../minecraft/scaffold.js';
+} from './scaffold.js';
 import {
   isMinecraftClientRunning,
   quitMinecraftClient,
   launchMinecraftClient,
-} from '../minecraft/launch.js';
-import { minecraftSetup } from '../minecraft/setup.js';
+} from './launch.js';
+import { minecraftSetup } from './setup.js';
 import { buildMinecraftSystemPrompt } from '../system-prompt.js';
-import { minecraftResearchTools } from '../minecraft/research-tools.js';
+import { minecraftResearchTools } from './research-tools.js';
 import { ensureMinecraftIndexInBackground } from '../index/rebuild-minecraft.js';
 import type {
   BuildModDetails,
@@ -39,7 +39,7 @@ import type {
   ScaffoldModDetails,
   ScaffoldOptions,
   TestCycleContext,
-} from './types.js';
+} from '../adapters/types.js';
 
 /** Minecraft index: lazy one-time decompile, kicked at startup and per session. */
 const index: GameIndexAdapter = {

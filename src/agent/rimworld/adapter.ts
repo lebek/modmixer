@@ -7,12 +7,12 @@ import path from 'node:path';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import { getGame } from '../games/registry.js';
-import { scaffoldRimworldMod } from '../rimworld/scaffold.js';
-import { buildRimworldMod } from '../rimworld/build.js';
-import { runRimworldTestCycle } from '../rimworld/test.js';
-import { rimworldSetup } from '../rimworld/setup.js';
+import { scaffoldRimworldMod } from './scaffold.js';
+import { buildRimworldMod } from './build.js';
+import { runRimworldTestCycle } from './test.js';
+import { rimworldSetup } from './setup.js';
 import { buildRimworldSystemPrompt } from '../system-prompt.js';
-import { rimworldResearchTools } from '../rimworld/research-tools.js';
+import { rimworldResearchTools } from './research-tools.js';
 import { ensureRimworldIndexAtStartup } from '../index/main-bridge.js';
 import { getIndexStatus } from '../index/rebuild.js';
 import {
@@ -27,12 +27,14 @@ import type {
   GameAdapter,
   GameIndexAdapter,
   MetadataWriteResult,
-} from './types.js';
+} from '../adapters/types.js';
 
 /** RimWorld index: eager startup build; symbol DB needs a pre-query status check. */
 const index: GameIndexAdapter = {
   ensureAtStartup: ensureRimworldIndexAtStartup,
-  ensureForSession: () => {},
+  ensureForSession: () => {
+    /* RimWorld's index builds eagerly at startup; nothing to do per session. */
+  },
   symbolDbReady: () => {
     const status = getIndexStatus();
     return status.type !== 'absent' && status.type !== 'no-rimworld';

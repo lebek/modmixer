@@ -30,7 +30,7 @@ import type {
 } from '../agent/games/types';
 import type { SchematicData } from '../agent/schematic';
 import type { DefEntry } from '../agent/defs-scan';
-import type { EnableResult, DisableResult } from '../agent/game';
+import type { EnableResult, DisableResult } from '../agent/rimworld/game';
 import type { AssetKind, AssetScan, AssetSlotRef } from '../agent/assets/types';
 import type {
   AttachmentInput,
@@ -46,7 +46,7 @@ import type { LiveLaunchResult } from '../agent/live/session';
 import type {
   PublishProgressEvent,
   PublishResult,
-} from '../agent/workshop';
+} from '../agent/rimworld/workshop';
 import type {
   ModrinthPublishMeta,
   ModrinthVersionMeta,

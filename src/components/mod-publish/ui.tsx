@@ -1,4 +1,4 @@
-import type { PublishProgressEvent, PublishStatus } from '@/agent/workshop';
+import type { PublishProgressEvent, PublishStatus } from '@/agent/rimworld/workshop';
 
 export function Section({
   title,

@@ -3,9 +3,9 @@ import fsp from 'node:fs/promises';
 import fs from 'node:fs';
 import { spawn, exec } from 'node:child_process';
 import { platform } from 'node:os';
-import { detectRimWorldPaths } from './paths.js';
-import { getWorkspacePaths } from './workspace.js';
-import { getRegistry } from './registry/index.js';
+import { detectRimWorldPaths } from '../paths.js';
+import { getWorkspacePaths } from '../workspace.js';
+import { getRegistry } from '../registry/index.js';
 
 /** RimWorld's Steam application id. */
 const RIMWORLD_APP_ID = '294100';

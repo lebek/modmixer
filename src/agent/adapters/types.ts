@@ -6,9 +6,10 @@
  * adapter is what actually runs `gradlew` and talks to Modrinth.
  *
  * Why the split: `src/agent/games/` is imported directly by ~10 renderer
- * components, so it must never pull in `electron`/`node:*`. Adapters call hard
- * main-only modules (`minecraft/*`, `ship.ts`, `workshop.ts`, …), so they live
- * here and are imported only by the main process (agent tools, IPC routes).
+ * components, so it must never pull in `electron`/`node:*`. The per-game adapter
+ * impls live in their own folder (`<game>/adapter.ts`) and call hard main-only
+ * modules (`<game>/*`, `rimworld/ship.ts`, `rimworld/workshop.ts`, …); this file
+ * holds only the shared interface, and `adapters/index.ts` the dispatch table.
  *
  * Design rule (matches games/registry.ts): everything dispatches on `GameId`;
  * adding a game means implementing this interface, which the type checker then
@@ -18,7 +19,7 @@ import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
 import type { GameDefinition, GameSetupStatus } from '../games/types.js';
 import type { LintFinding } from '../build-lint.js';
 import type { BuildErrorHint } from '../build-error-hints.js';
-import type { ShipAndLaunchDetails } from '../ship.js';
+import type { ShipAndLaunchDetails } from '../rimworld/ship.js';
 import type { AboutMetadata } from '../workspace.js';
 import type { ConversationScope } from '../conversations.js';
 
@@ -114,9 +115,10 @@ export interface TestCycleContext {
 }
 
 /**
- * Per-game behavior. One implementation per `GameId` in `adapters/{rimworld,
- * minecraft}.ts`, dispatched by `getAdapter()`. Grows one method per concern as
- * we migrate the scattered `if (game === 'minecraft')` branches into here.
+ * Per-game behavior. One implementation per `GameId` in `<game>/adapter.ts`,
+ * dispatched by `getAdapter()`. Each method owns a concern that used to be a
+ * scattered `if (game === 'minecraft')` branch; the no-game-branches guardrail
+ * test keeps new ones from leaking back out.
  */
 /**
  * A game's local setup (toolchain provisioning + code-index build) for the
