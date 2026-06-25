@@ -96,10 +96,10 @@ function buildStatus(): GameSetupStatus {
 /**
  * Map the aggregate env snapshot onto the uniform requirement rows. Install +
  * writable Mods folder are `required` (the index can't build without them);
- * config files + toolchain are `recommended` — they self-heal (ModsConfig /
- * Player.log appear on first launch) or only bite at C# build time (.NET /
- * ilspycmd, the latter vendored in prod). Both tiers gate the pre-chat overlay;
- * onboarding lets the recommended ones be deferred.
+ * config files + toolchain are `recommended` — they self-heal (ModsConfig
+ * appears on first launch) or only bite at C# build time (.NET / ilspycmd, the
+ * latter vendored in prod). Both tiers gate the pre-chat overlay; onboarding
+ * lets the recommended ones be deferred.
  */
 async function checkRequirements(): Promise<SetupRequirements> {
   const env = await detectEnv();
@@ -136,17 +136,6 @@ async function checkRequirements(): Promise<SetupRequirements> {
       detail: env.modsConfig.ok ? null : env.modsConfig.detail,
       hint: env.modsConfig.path,
       action: env.modsConfig.ok
-        ? null
-        : { kind: 'launch-game', label: 'Launch RimWorld' },
-    },
-    {
-      id: 'player-log',
-      label: 'Player.log',
-      severity: 'recommended',
-      ok: env.playerLog.ok,
-      detail: env.playerLog.ok ? null : env.playerLog.detail,
-      hint: env.playerLog.path,
-      action: env.playerLog.ok
         ? null
         : { kind: 'launch-game', label: 'Launch RimWorld' },
     },

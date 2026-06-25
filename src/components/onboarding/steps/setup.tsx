@@ -10,9 +10,9 @@ import { OnboardingStep } from '../onboarding-shell';
  * the pre-chat gate uses, so onboarding and the new-mod path stay identical.
  *
  * Continue unlocks once the *required* checks pass and the index is fresh.
- * Recommended checks (ModsConfig.xml, Player.log, .NET) can be deferred here —
- * they self-heal or only bite later; the new-mod gate insists on them before
- * the user actually builds a mod.
+ * Recommended checks (ModsConfig.xml, .NET) can be deferred here — they
+ * self-heal or only bite later; the new-mod gate insists on them before the
+ * user actually builds a mod.
  */
 export function SetupStep({
   stepIndex,

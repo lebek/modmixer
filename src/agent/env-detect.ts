@@ -39,7 +39,6 @@ export interface EnvSnapshot {
     dlcs: string[];
   };
   modsConfig: EnvCheck;
-  playerLog: EnvCheck;
   modsDirWritable: EnvCheck;
   dotnet: EnvCheck;
   ilspycmd: EnvCheck;
@@ -161,14 +160,6 @@ export async function detectEnv(): Promise<EnvSnapshot> {
           'ModsConfig.xml not found. RimWorld creates it the first time you launch the game — click Launch RimWorld below, then come back and re-check.',
       };
 
-  const playerLog: EnvCheck = rim.playerLog
-    ? { ok: true, detail: null, path: rim.playerLog }
-    : {
-        ok: false,
-        detail:
-          'Player.log not found. RimWorld writes it on every launch — Modmixer needs it to surface in-game errors. Launch RimWorld once, then re-check.',
-      };
-
   const modsDirWritable = await probeModsDirWritable(rim.modsDir);
 
   const dotnetPath = resolveDotnet();
@@ -204,7 +195,6 @@ export async function detectEnv(): Promise<EnvSnapshot> {
   return {
     rimworld,
     modsConfig,
-    playerLog,
     modsDirWritable,
     dotnet,
     ilspycmd,
