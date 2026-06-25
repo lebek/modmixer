@@ -242,6 +242,10 @@ const config: ForgeConfig = {
       // source index) by scripts/fetch-tree-sitter-java.mjs at build time.
       'resources/ilspycmd',
       'resources/tree-sitter',
+      // Vineflower decompiler jar — inspect_mod runs it (via the provisioned
+      // JDK 21) to decompile an installed NeoForge mod's classes. Platform-
+      // independent runnable jar; fetched by scripts/fetch-vineflower.mjs.
+      'resources/vineflower',
       // --- Minecraft (NeoForge) toolchain assets ---
       // MC mods are scaffolded by copying this MDK template (fetched, not
       // committed — scripts/fetch-neoforge-mdk.mjs). scaffold.ts resolves it at

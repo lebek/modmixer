@@ -1,0 +1,2 @@
+# The decompiler jar is fetched by scripts/fetch-vineflower.mjs — don't commit it.
+*.jar

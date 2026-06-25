@@ -3,7 +3,7 @@ import path from 'node:path';
 import { homedir } from 'node:os';
 import { detectRimWorldPaths } from '../paths.js';
 import { getWorkspacePaths } from '../workspace.js';
-import { getIndexPaths } from '../index/paths.js';
+import { getIndexPaths, modCacheRoot } from '../index/paths.js';
 import { cookbookDir } from '../cookbook.js';
 import type { PathPolicyRoots } from './path-policy.js';
 
@@ -42,6 +42,9 @@ export function getPathPolicyRoots(): PathPolicyRoots {
       path.join(app.getPath('userData'), 'toolchain'),
       gradleUserHome,
       path.join(homedir(), '.neoformruntime'),
+      // inspect_mod extracts + decompiles installed mod jars here; the agent
+      // reads that decompiled source with the guarded read/grep/find tools.
+      modCacheRoot(),
     ],
   };
   return cached;

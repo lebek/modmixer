@@ -75,6 +75,9 @@ const NON_RUNTIME_DEPS = {
 // list files whose absence silently breaks a shipped feature.
 const REQUIRED_FILES = {
   'resources/tree-sitter': ['tree-sitter-c-sharp.wasm', 'tree-sitter-java.wasm'],
+  // inspect_mod is dead in a packaged build without the decompiler jar, yet the
+  // committed dir (a .gitignore placeholder) would still look present.
+  'resources/vineflower': ['vineflower.jar'],
 };
 
 /**

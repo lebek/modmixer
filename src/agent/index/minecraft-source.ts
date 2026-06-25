@@ -141,3 +141,30 @@ export async function extractJar(
   await fsp.rm(dest, { recursive: true, force: true });
   await extractJarInto(jar, dest, includePrefixes);
 }
+
+/**
+ * Read one text entry from a jar/zip to a string without extracting the whole
+ * archive — used to scan a mod jar's `META-INF/neoforge.mods.toml` cheaply.
+ * `unzip -p` (macOS/Linux) / `tar -xOf` (Windows bsdtar) stream the member to
+ * stdout. `entry` must use forward slashes. Returns null when the entry is
+ * absent (unzip exit 11) or the tool fails — callers read that as "not present".
+ */
+export async function readJarEntry(
+  jar: string,
+  entry: string,
+): Promise<string | null> {
+  try {
+    const args =
+      process.platform === 'win32'
+        ? ['-xOf', jar, entry]
+        : ['-p', jar, entry];
+    const cmd = process.platform === 'win32' ? 'tar' : 'unzip';
+    const { stdout } = await execFileP(cmd, args, {
+      maxBuffer: 32 * 1024 * 1024,
+    });
+    const text = stdout.toString();
+    return text.length > 0 ? text : null;
+  } catch {
+    return null;
+  }
+}

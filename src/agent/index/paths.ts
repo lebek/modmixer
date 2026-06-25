@@ -43,6 +43,17 @@ export function getIndexPaths(gameId: GameId = 'rimworld'): IndexPaths {
 }
 
 /**
+ * Root for inspect_mod's extracted/decompiled installed-mod cache
+ * (`<userData>/mod-cache/<gameId>/<modId>/`). Lives under userData so the user
+ * can delete it freely, and so a single path-policy root (this dir) lets the
+ * agent's guarded read/grep/find reach decompiled mod source without exposing
+ * the launcher mods/ folders themselves.
+ */
+export function modCacheRoot(): string {
+  return path.join(app.getPath('userData'), 'mod-cache');
+}
+
+/**
  * Resolve a packaged resource directory. In dev (running from source) the
  * resource lives under the repo's `resources/` dir; in packaged builds it's
  * copied into Electron's `resourcesPath`. Callers pass the relative subpath
@@ -73,6 +84,16 @@ export function resolveVendoredIlspycmd(): string | null {
   const candidate = resolvePackagedResource(
     path.join('ilspycmd', `${platform}-${arch}`, exe),
   );
+  return fs.existsSync(candidate) ? candidate : null;
+}
+
+/**
+ * Locate the vendored Vineflower decompiler jar (platform-independent runnable
+ * jar). Null if not fetched (release skipped the fetch, or dev without
+ * `npm run fetch:vineflower`). Used by inspect_mod to decompile a mod jar.
+ */
+export function resolveVendoredVineflower(): string | null {
+  const candidate = resolvePackagedResource(path.join('vineflower', 'vineflower.jar'));
   return fs.existsSync(candidate) ? candidate : null;
 }
 

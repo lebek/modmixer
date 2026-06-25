@@ -17,11 +17,12 @@
     "publish:live-mod": "node scripts/publish-live-mod.mjs",
     "fetch:tree-sitter": "node scripts/fetch-tree-sitter-csharp.mjs",
     "fetch:tree-sitter-java": "node scripts/fetch-tree-sitter-java.mjs",
+    "fetch:vineflower": "node scripts/fetch-vineflower.mjs",
     "fetch:neoforge-mdk": "node scripts/fetch-neoforge-mdk.mjs",
     "build:bridge": "node scripts/build-bridge.mjs",
     "build:game-icons": "node scripts/build-game-icons.mjs",
     "lint:externals": "node scripts/check-extra-resources.mjs",
-    "postinstall": "patch-package && node scripts/patch-electron-name.mjs && node scripts/fetch-tree-sitter-csharp.mjs"
+    "postinstall": "patch-package && node scripts/patch-electron-name.mjs && node scripts/fetch-tree-sitter-csharp.mjs && node scripts/fetch-vineflower.mjs"
   },
   "keywords": [],
   "author": {
@@ -81,6 +82,7 @@
     "react-dom": "^19.2.5",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
+    "smol-toml": "^1.7.0",
     "steamworks.js": "^0.4.0",
     "tailwind-merge": "^3.5.0",
     "update-electron-app": "^3.1.2",
