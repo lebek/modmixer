@@ -16,7 +16,7 @@ import {
   formatHints,
   type BuildErrorHint,
 } from '../build-error-hints.js';
-import { DOTNET_NOT_FOUND_MESSAGE, resolveDotnet } from '../dotnet.js';
+import { findExistingDotnet, dotnetEnv } from '../dotnet-provision.js';
 import { launchModeHint } from '../launch-mode.js';
 import type { BuildModDetails } from '../adapters/types.js';
 
@@ -30,11 +30,24 @@ export async function buildRimworldMod(
       `Source folder not found: ${sourceDir}. Use scaffold_mod with withCSharp=true or write a .csproj first.`,
     );
   }
-  const dotnet = resolveDotnet();
+  // Use the SDK that setup already provisioned — never download mid-build (a
+  // build silently hanging on a toolchain download is confusing). If it isn't
+  // there yet, point the user at setup, which provisions it with visible
+  // progress.
+  const dotnet = await findExistingDotnet();
   if (!dotnet) {
-    throw new Error(DOTNET_NOT_FOUND_MESSAGE);
+    throw new Error(
+      'The .NET SDK is not set up yet. Open Settings → Games and run RimWorld setup ' +
+        '(or click Rebuild) to provision it, then build again.',
+    );
   }
-  const result = await runCommand(dotnet, ['build', '--nologo'], sourceDir, signal);
+  const result = await runCommand(
+    dotnet.exe,
+    ['build', '--nologo'],
+    sourceDir,
+    signal,
+    dotnetEnv(dotnet),
+  );
   // Run lints even on a failed build — most lint findings (tickerType, wrong
   // TFM) are diagnoseable from source alone, and surfacing them alongside
   // compile errors gives the agent a head start.
@@ -81,9 +94,10 @@ function runCommand(
   args: string[],
   cwd: string,
   signal?: AbortSignal,
+  env?: NodeJS.ProcessEnv,
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
-    const proc = spawn(cmd, args, { cwd });
+    const proc = spawn(cmd, args, { cwd, env });
     let stdout = '';
     let stderr = '';
     proc.stdout?.on('data', (d: Buffer) => {

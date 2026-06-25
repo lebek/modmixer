@@ -17,7 +17,11 @@
  */
 import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
 import type { TObject } from 'typebox';
-import type { GameDefinition, GameSetupStatus } from '../games/types.js';
+import type {
+  GameDefinition,
+  GameSetupStatus,
+  SetupRequirements,
+} from '../games/types.js';
 import type { LintFinding } from '../build-lint.js';
 import type { BuildErrorHint } from '../build-error-hints.js';
 import type { AboutMetadata } from '../workspace.js';
@@ -121,6 +125,14 @@ export interface TestCycleContext {
 export interface GameSetupAdapter {
   /** Current setup status (cheap — reads meta/fingerprints, never builds). */
   getStatus(): Promise<GameSetupStatus>;
+  /**
+   * Probe this game's prerequisites (install detection, toolchain, writable
+   * paths, …). Distinct from getStatus() because it's the *expensive* half
+   * (fs/exec probes) — callers fetch it on mount + after a fix, not on every
+   * build-progress tick. Games without prerequisites return an empty, satisfied
+   * set. Shared by onboarding's Setup step and the pre-chat gate.
+   */
+  checkRequirements(): Promise<SetupRequirements>;
   /**
    * Kick off a (re)build of the index in the background and return the
    * now-building status. `force` rebuilds even when already fresh.

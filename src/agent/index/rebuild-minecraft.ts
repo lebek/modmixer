@@ -113,14 +113,23 @@ export async function rebuildMinecraftIndex(
   const signal = options.signal ?? ctrl.signal;
   const start = Date.now();
   try {
-    onProgress({ type: 'starting', phases: ['decompile', 'symbols', 'defs'] });
+    onProgress({
+      type: 'starting',
+      phases: ['toolchain', 'decompile', 'symbols', 'defs'],
+    });
 
+    // Provision JDK 21 up front (detect-first; downloads Temurin only if absent),
+    // streaming its download/extract progress so the user sees what's happening
+    // rather than a long unexplained pause. Required for the decompile, so this
+    // one IS fatal if it can't be satisfied.
     onProgress({
       type: 'phase',
-      phase: 'decompile',
+      phase: 'toolchain',
       message: 'Preparing the Java 21 toolchain…',
     });
-    await ensureJdk21();
+    await ensureJdk21((p) =>
+      onProgress({ type: 'phase', phase: 'toolchain', message: p.message }),
+    );
 
     onProgress({
       type: 'phase',

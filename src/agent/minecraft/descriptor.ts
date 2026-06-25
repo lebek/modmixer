@@ -36,11 +36,12 @@ export const minecraftDescriptor: GameDefinition = {
   buildTool: 'gradle',
   lore: { topics: minecraftLoreTopics, topicHints: minecraftLoreTopicHints },
   indexPhaseLabels: {
+    toolchain: 'Preparing the Java 21 toolchain',
     defs: 'Indexing Minecraft data',
     decompile: 'Decompiling Minecraft sources',
     symbols: 'Indexing Java symbols',
   },
-  setupSteps: ['index'],
+  setupSteps: ['setup'],
   // Nest index/lore/caches under .../minecraft/ so they never collide with
   // RimWorld's un-namespaced root.
   storageSegment: 'minecraft',

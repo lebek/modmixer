@@ -65,7 +65,3 @@ export function resolveDotnet(): string | null {
   }
   return null;
 }
-
-export const DOTNET_NOT_FOUND_MESSAGE =
-  'dotnet not found. Install the .NET SDK from https://dotnet.microsoft.com/download (any 6.0+ release works) and restart Modmixer. ' +
-  'On Windows the installer adds dotnet to PATH, but Electron only picks up a new PATH after you fully relaunch — closing the app and reopening from the Start menu is enough.';

@@ -35,9 +35,6 @@ export function registerSystemRoutes(ctx: RouteContext): void {
 
   // Per-game setup (Settings → Games). Uniform across games — each game's
   // adapter knows how to read its own toolchain/index state and rebuild.
-  ipc.handle('modmixer:game-setup:status', (_evt, game: GameId) =>
-    getAdapter(resolveGameId(game)).setup.getStatus(),
-  );
   ipc.handle(
     'modmixer:game-setup:rebuild',
     (_evt, game: GameId, opts?: { force?: boolean }) =>
@@ -53,6 +50,13 @@ export function registerSystemRoutes(ctx: RouteContext): void {
       lastProgress: getLastSetupProgress(g),
     };
   });
+
+  // Prerequisite checks (install/toolchain/paths). Separate from the snapshot
+  // because it's the expensive probe — the renderer fetches it on mount + after
+  // a fix, not on every build-progress tick.
+  ipc.handle('modmixer:game-setup:requirements', (_evt, game: GameId) =>
+    getAdapter(resolveGameId(game)).setup.checkRequirements(),
+  );
 
   ipc.handle('modmixer:monitor:get-state', () => monitor.getState());
   ipc.handle('modmixer:monitor:get-snapshot', () => monitor.getLastSnapshot());

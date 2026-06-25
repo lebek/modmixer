@@ -104,11 +104,17 @@ export interface GameDefinition {
   /** Topic taxonomy for this game's transferable-lesson lore. */
   lore: LoreTaxonomy;
   /** Per-game titles for the index build phases shown in the setup/progress UI. */
-  indexPhaseLabels: { defs: string; decompile: string; symbols: string };
+  indexPhaseLabels: {
+    toolchain: string;
+    defs: string;
+    decompile: string;
+    symbols: string;
+  };
   /**
    * Onboarding setup step ids inserted between game-picker and the AI step.
-   * RimWorld needs install detection + .NET tools; Minecraft auto-provisions its
-   * toolchain, so it goes straight to the index step.
+   * Both games run the single game-neutral `'setup'` step (prerequisite checks +
+   * source-index build); the field stays an array so a future game can insert
+   * extra bespoke steps without reworking the flow.
    */
   setupSteps: readonly string[];
   /**
@@ -125,6 +131,94 @@ export interface GameDefinition {
    * getSelectableGames() is always selectable (setup happens lazily).
    */
   beta: boolean;
+}
+
+/**
+ * Severity of a setup prerequisite. `required` failures also stop the index
+ * build from starting (it physically can't build — e.g. no install); both tiers
+ * block the pre-chat gate. The distinction lets onboarding allow deferring the
+ * recommended ones while the new-mod gate insists on every check being green.
+ */
+export type SetupRequirementSeverity = 'required' | 'recommended';
+
+/**
+ * A renderer-safe remediation a requirement row offers. The adapter is
+ * main-only and can't hand the renderer a callback, so it names a structured
+ * action the shared body maps onto an existing IPC (browse/launch/open-url) and
+ * always re-checks afterward.
+ */
+export interface SetupAction {
+  kind: 'browse-install' | 'launch-game' | 'open-url';
+  /** Button label, e.g. "Browse…", "Launch RimWorld", "Install". */
+  label: string;
+  /** Target for kind === 'open-url'. */
+  url?: string;
+}
+
+/**
+ * How a prerequisite gets satisfied.
+ * - `manual` (default): the user must act (install RimWorld, launch to create
+ *   ModsConfig, install a dev-only tool). The row shows a fix action and gates
+ *   per its severity.
+ * - `auto`: ModMixer provisions it itself, just-in-time, the first time it's
+ *   needed (JDK 21 at the first index build, the .NET SDK at the first C# build).
+ *   The row is informational — found-on-system vs will-be-installed — and NEVER
+ *   blocks the user or the build, because the build is what provisions it.
+ */
+export type SetupProvisioning = 'manual' | 'auto';
+
+/** One prerequisite check shown as a row in the shared setup body. */
+export interface SetupRequirement {
+  /** Stable id (e.g. 'install', 'mods-config', 'dotnet'). */
+  id: string;
+  label: string;
+  severity: SetupRequirementSeverity;
+  /** Default 'manual' when omitted. */
+  provisioning?: SetupProvisioning;
+  ok: boolean;
+  /** Explanation when not ok (or a resolved path when ok). */
+  detail: string | null;
+  /** Short caption under the label, e.g. the resolved path. */
+  hint?: string | null;
+  /** Optional fix the renderer surfaces as a button (manual rows only). */
+  action?: SetupAction | null;
+}
+
+/**
+ * A game's prerequisite checks, produced by its adapter (main-only — it probes
+ * the install/toolchain) and rendered generically. Games whose only needs are
+ * auto-provisioned (Minecraft's JDK) still surface those as informational rows;
+ * `satisfied`/`allOk` ignore them because the build handles them.
+ */
+export interface SetupRequirements {
+  items: SetupRequirement[];
+  /**
+   * Every blocking `required` item is ok — the index build may proceed. Auto
+   * items never block (the build provisions them).
+   */
+  satisfied: boolean;
+  /**
+   * Every blocking item is ok — the gate can stay silent. Auto items never
+   * block; their completion is implied by the index reaching `fresh`.
+   */
+  allOk: boolean;
+}
+
+/**
+ * Roll a list of requirement rows up into a SetupRequirements verdict. Auto rows
+ * are never blockers (the build provisions them just-in-time), so only `manual`
+ * rows count toward `satisfied`/`allOk`. Pure — shared by every game's adapter.
+ */
+export function summarizeRequirements(
+  items: SetupRequirement[],
+): SetupRequirements {
+  const blocks = (r: SetupRequirement) =>
+    (r.provisioning ?? 'manual') !== 'auto' && !r.ok;
+  return {
+    items,
+    satisfied: !items.some((r) => r.severity === 'required' && blocks(r)),
+    allOk: !items.some(blocks),
+  };
 }
 
 /** Live state of a game's local setup (toolchain + code index). */

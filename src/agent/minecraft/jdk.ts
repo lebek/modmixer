@@ -247,6 +247,25 @@ export async function provisionTemurin21(
   return { home, version, provisioned: true };
 }
 
+/**
+ * A usable JDK 21 WITHOUT provisioning one — a system install or a previously
+ * downloaded copy under userData. For the setup requirement row's cheap probe
+ * (the row shows found-on-system vs provisioned vs will-install); never downloads.
+ */
+export async function findExistingJdk21(): Promise<JdkInfo | null> {
+  const system = await findSystemJdk21();
+  if (system) return system;
+  const unpacked = path.join(provisionRoot(), 'unpacked');
+  if (fs.existsSync(unpacked)) {
+    const home = await findExtractedHome(unpacked);
+    if (home) {
+      const version = await probeJdk(home);
+      if (version) return { home, version, provisioned: true };
+    }
+  }
+  return null;
+}
+
 let cached: JdkInfo | null = null;
 
 /**

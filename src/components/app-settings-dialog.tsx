@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ThinkingLevel } from '@mariozechner/pi-agent-core';
 import { sanitizeAuthorHandle } from '@/lib/identifiers';
 import type {
@@ -17,12 +17,10 @@ import { applyTheme } from '@/lib/theme';
 import { ModelPicker } from './model-picker';
 import { ThinkingPicker } from './thinking-picker';
 import { GameIcon } from './game-icon';
+import { useGameSetup } from './use-game-setup';
+import { GameSetupBody } from './game-setup-body';
 import { getSelectableGames } from '@/agent/games/registry';
-import type {
-  GameDefinition,
-  GameSetupState,
-  GameSetupStatus,
-} from '@/agent/games/types';
+import type { GameDefinition, GameSetupState } from '@/agent/games/types';
 
 export type SettingsSection =
   | 'general'
@@ -523,37 +521,16 @@ function GamesSection() {
 }
 
 /**
- * One per-game setup card, rendered entirely from the game's adapter-produced
- * GameSetupStatus (status + facts + rebuild). Adding a game needs no change
- * here — it appears via getSelectableGames() with its own state/facts/copy.
+ * One per-game setup card. The third consumer of the shared setup path: it
+ * renders the same <GameSetupBody> the onboarding step and the pre-chat gate
+ * use — prerequisite checks (with their fix actions) + index status/progress —
+ * differing only in that it never auto-builds (Settings lists every game, so a
+ * heavy build must be user-triggered) and offers a manual rebuild ("redo")
+ * button. Adding a game needs no change here.
  */
 function GameSetupCard({ game }: { game: GameDefinition }) {
-  const [status, setStatus] = useState<GameSetupStatus | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    void window.modmixer.getGameSetupStatus(game.id).then((s) => {
-      if (!cancelled) setStatus(s);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [game.id]);
-
-  // Poll while building so the card advances without reopening the dialog.
-  useEffect(() => {
-    if (status?.state !== 'building') return;
-    const id = window.setInterval(() => {
-      void window.modmixer.getGameSetupStatus(game.id).then(setStatus);
-    }, 2500);
-    return () => window.clearInterval(id);
-  }, [status?.state, game.id]);
-
-  const rebuild = useCallback(() => {
-    void window.modmixer
-      .rebuildGameSetup(game.id, { force: true })
-      .then(setStatus);
-  }, [game.id]);
+  const view = useGameSetup(game.id, true);
+  const status = view.snapshot?.status ?? null;
 
   return (
     <div className="rounded-md border border-line bg-surface/30 px-4 py-3">
@@ -574,33 +551,15 @@ function GameSetupCard({ game }: { game: GameDefinition }) {
         <p className="mt-1 text-xs text-muted">{status.detail}</p>
       )}
 
-      {status && (
-        <>
-          <p className="mt-2 text-sm text-ink">{status.headline}</p>
-          {status.blockedReason && (
-            <p className="mt-1 text-xs text-warning">{status.blockedReason}</p>
-          )}
-          {status.facts.length > 0 && (
-            <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-sm text-ink">
-              {status.facts.map((f) => (
-                <Fragment key={f.label}>
-                  <dt className="text-muted">{f.label}</dt>
-                  <dd className="font-mono text-xs">{f.value}</dd>
-                </Fragment>
-              ))}
-            </dl>
-          )}
-          <div className="mt-2 flex justify-end">
-            <button
-              onClick={rebuild}
-              disabled={!status.canRebuild}
-              className="rounded-md border border-line bg-paper px-3 py-1 text-[10px] uppercase tracking-[0.18em] text-muted transition-colors hover:border-ink/40 hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {status.rebuildLabel}
-            </button>
-          </div>
-        </>
-      )}
+      <div className="mt-3">
+        <GameSetupBody
+          game={game.id}
+          view={view}
+          autoBuild={{ absent: false, stale: false }}
+          requirementsFilter="all"
+          showRebuild
+        />
+      </div>
     </div>
   );
 }

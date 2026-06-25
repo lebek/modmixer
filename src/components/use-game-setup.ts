@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { GameId, GameSetupSnapshot } from '@/agent/games/types';
+import type {
+  GameId,
+  GameSetupSnapshot,
+  SetupRequirements,
+} from '@/agent/games/types';
 import { getGame } from '@/agent/games/registry';
 import type { IndexPhase, IndexProgressEvent } from '@/agent/index/progress';
 
@@ -22,17 +26,62 @@ export interface GameSetupView {
   fraction: number | null;
   /** Kick a (re)build of this game's index. No-op if already building. */
   rebuild: (force?: boolean) => void;
+  /** Prerequisite checks (null until first probe completes). */
+  requirements: SetupRequirements | null;
+  /** Every `required` check is ok — the index build may proceed. */
+  requirementsSatisfied: boolean;
+  /** Re-run the prerequisite probe (after the user applies a fix). */
+  recheckRequirements: () => Promise<void>;
+  /**
+   * Nothing left to show: every check (required + recommended) is green and the
+   * index is fresh. The new-mod gate renders nothing in this state.
+   */
+  allClear: boolean;
 }
 
 /**
  * Reads a game's setup snapshot and subscribes to its granular build progress
- * over the unified game-tagged channel. Shared by the onboarding index step
- * and the pre-chat gate so both render the same per-phase progress for either
- * game. Pass `game: null` to stay inert (e.g. nothing is open to gate).
+ * over the unified game-tagged channel. Shared by the onboarding Setup step and
+ * the pre-chat gate so both render the same prerequisite checks + per-phase
+ * progress for either game. Pass `game: null` to stay inert (e.g. nothing is
+ * open to gate).
+ *
+ * `probeRequirements` controls the expensive prerequisite probe (it spawns
+ * toolchain checks and touches the Mods dir). Onboarding leaves it on; the
+ * always-mounted gate passes `modOpen` so a plain library lens-switch doesn't
+ * run it.
  */
-export function useGameSetup(game: GameId | null): GameSetupView {
+export function useGameSetup(
+  game: GameId | null,
+  probeRequirements = true,
+): GameSetupView {
   const [snapshot, setSnapshot] = useState<GameSetupSnapshot | null>(null);
   const [latest, setLatest] = useState<IndexProgressEvent | null>(null);
+  const [requirements, setRequirements] = useState<SetupRequirements | null>(
+    null,
+  );
+
+  // Probe prerequisites on mount + on demand only (not on every progress tick):
+  // it's the expensive fs/exec check and it doesn't change mid-build.
+  useEffect(() => {
+    if (!game || !probeRequirements) {
+      setRequirements(null);
+      return;
+    }
+    let cancelled = false;
+    void window.modmixer.checkGameRequirements(game).then((r) => {
+      if (!cancelled) setRequirements(r);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [game, probeRequirements]);
+
+  const recheckRequirements = useCallback(async () => {
+    if (!game) return;
+    const r = await window.modmixer.checkGameRequirements(game);
+    setRequirements(r);
+  }, [game]);
 
   useEffect(() => {
     if (!game) {
@@ -78,14 +127,24 @@ export function useGameSetup(game: GameId | null): GameSetupView {
       ? latest.fraction
       : null;
 
+  const ready = state === 'fresh';
+  // Until the probe lands, treat requirements as unsatisfied so we never
+  // auto-kick a build or flash "all clear" before we actually know.
+  const requirementsSatisfied = requirements?.satisfied ?? false;
+  const allClear = (requirements?.allOk ?? false) && ready;
+
   return {
     snapshot,
     latest,
-    ready: state === 'fresh',
+    ready,
     building: state === 'building',
     blocked: state === 'blocked',
     phaseLabel,
     fraction,
     rebuild,
+    requirements,
+    requirementsSatisfied,
+    recheckRequirements,
+    allClear,
   };
 }

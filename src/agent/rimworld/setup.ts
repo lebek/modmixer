@@ -6,9 +6,17 @@
  */
 import { getIndexSnapshot, startRebuild } from '../index/main-bridge.js';
 import { formatBytes } from '../index/format.js';
+import { detectEnv } from '../env-detect.js';
+import { findExistingDotnet } from '../dotnet-provision.js';
+import { summarizeRequirements } from '../games/types.js';
 import type { IndexMeta } from '../index/meta.js';
 import type { GameSetupAdapter } from '../adapters/types.js';
-import type { GameSetupFact, GameSetupStatus } from '../games/types.js';
+import type {
+  GameSetupFact,
+  GameSetupStatus,
+  SetupRequirement,
+  SetupRequirements,
+} from '../games/types.js';
 
 const DETAIL =
   "The RimWorld index powers the agent's def lookups and C# source search. " +
@@ -85,10 +93,96 @@ function buildStatus(): GameSetupStatus {
   };
 }
 
+/**
+ * Map the aggregate env snapshot onto the uniform requirement rows. Install +
+ * writable Mods folder are `required` (the index can't build without them);
+ * config files + toolchain are `recommended` — they self-heal (ModsConfig /
+ * Player.log appear on first launch) or only bite at C# build time (.NET /
+ * ilspycmd, the latter vendored in prod). Both tiers gate the pre-chat overlay;
+ * onboarding lets the recommended ones be deferred.
+ */
+async function checkRequirements(): Promise<SetupRequirements> {
+  const env = await detectEnv();
+  const dotnet = await findExistingDotnet();
+  const items: SetupRequirement[] = [
+    {
+      id: 'install',
+      label:
+        env.rimworld.ok && env.rimworld.version
+          ? `RimWorld ${env.rimworld.version}`
+          : 'RimWorld install',
+      severity: 'required',
+      ok: env.rimworld.ok,
+      detail: env.rimworld.ok ? null : env.rimworld.detail,
+      hint: env.rimworld.path,
+      action: {
+        kind: 'browse-install',
+        label: env.rimworld.ok ? 'Change…' : 'Browse…',
+      },
+    },
+    {
+      id: 'mods-writable',
+      label: 'Mods folder writable',
+      severity: 'required',
+      ok: env.modsDirWritable.ok,
+      detail: env.modsDirWritable.ok ? null : env.modsDirWritable.detail,
+      hint: env.modsDirWritable.path,
+    },
+    {
+      id: 'mods-config',
+      label: 'ModsConfig.xml',
+      severity: 'recommended',
+      ok: env.modsConfig.ok,
+      detail: env.modsConfig.ok ? null : env.modsConfig.detail,
+      hint: env.modsConfig.path,
+      action: env.modsConfig.ok
+        ? null
+        : { kind: 'launch-game', label: 'Launch RimWorld' },
+    },
+    {
+      id: 'player-log',
+      label: 'Player.log',
+      severity: 'recommended',
+      ok: env.playerLog.ok,
+      detail: env.playerLog.ok ? null : env.playerLog.detail,
+      hint: env.playerLog.path,
+      action: env.playerLog.ok
+        ? null
+        : { kind: 'launch-game', label: 'Launch RimWorld' },
+    },
+    {
+      id: 'dotnet',
+      label: '.NET SDK',
+      severity: 'recommended',
+      provisioning: 'auto',
+      ok: dotnet !== null,
+      detail: dotnet
+        ? null
+        : 'Set up automatically the first time you build a C# mod — no manual install needed.',
+      hint: dotnet
+        ? `${dotnet.provisioned ? 'Provisioned by ModMixer' : 'Found on system'} · ${dotnet.version}`
+        : null,
+    },
+    {
+      // ilspycmd is load-bearing for the index itself (decompile → C# symbols),
+      // so it's `required`, not advisory. Shipped vendored in production builds;
+      // a dev build without it must install it before the index can build.
+      id: 'ilspycmd',
+      label: 'ilspycmd (decompiler)',
+      severity: 'required',
+      ok: env.ilspycmd.ok,
+      detail: env.ilspycmd.ok ? null : env.ilspycmd.detail,
+      hint: env.ilspycmd.path,
+    },
+  ];
+  return summarizeRequirements(items);
+}
+
 export const rimworldSetup: GameSetupAdapter = {
   async getStatus() {
     return buildStatus();
   },
+  checkRequirements,
   async rebuild(opts) {
     // startRebuild fires in the background (progress streams to the index
     // modal) and no-ops if already building; we return the now-building status.

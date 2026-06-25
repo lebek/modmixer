@@ -1,13 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Consent, Settings } from '@/agent/settings';
-import type { EnvSnapshot } from '@/agent/env-detect';
 import type { GameId } from '@/agent/games/types';
 import { getGame } from '@/agent/games/registry';
 import { ConsentStep } from './steps/consent';
 import { GamePickerStep } from './steps/game-picker';
-import { RimWorldStep } from './steps/rimworld';
-import { ToolsStep } from './steps/tools';
-import { IndexStep } from './steps/index';
+import { SetupStep } from './steps/setup';
 import { AiStep } from './steps/ai';
 import { CommunityLoreStep } from './steps/community-lore';
 import { AuthorStep } from './steps/author';
@@ -17,19 +14,17 @@ import { AuthorStep } from './steps/author';
 type StepId =
   | 'consent'
   | 'game-picker'
-  | 'rimworld'
-  | 'tools'
-  | 'index'
+  | 'setup'
   | 'ai'
   | 'community-lore'
   | 'author';
 
 /**
- * The onboarding flow after the game picker is game-specific. Both games build
- * the source index synchronously here so the game is fully ready before the
- * first mod. RimWorld additionally needs install detection + .NET tools;
- * Minecraft auto-provisions its toolchain as part of the index build, so it
- * goes straight to the index step.
+ * The onboarding flow after the game picker runs one game-neutral Setup step
+ * (prerequisite checks + source-index build), so the game is fully ready before
+ * the first mod. The same step renders for every game — RimWorld surfaces its
+ * install/toolchain checks, Minecraft auto-provisions and goes straight to the
+ * index — via the shared <GameSetupBody> the new-mod gate also uses.
  */
 function buildSteps(game: GameId): StepId[] {
   const gameSteps = getGame(game).setupSteps as StepId[];
@@ -41,7 +36,6 @@ export function OnboardingFlow({ onComplete }: { onComplete: () => void }) {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [consent, setConsent] = useState<Consent | null>(null);
   const [needsConsent, setNeedsConsent] = useState(true);
-  const [env, setEnv] = useState<EnvSnapshot | null>(null);
   // The game being set up — drives which steps appear. Defaults to RimWorld
   // until the user picks on the game-picker step.
   const [pickedGame, setPickedGame] = useState<GameId>('rimworld');
@@ -62,23 +56,11 @@ export function OnboardingFlow({ onComplete }: { onComplete: () => void }) {
       setConsent(c.accepted);
       const accepted = c.accepted !== null && c.accepted.version === c.required;
       setNeedsConsent(!accepted);
-      // Pre-load env so the Continue button on the consent page doesn't
-      // pause; the rimworld step shows its own loading state regardless.
-      void window.modmixer.detectEnv().then((next) => {
-        if (!cancelled) setEnv(next);
-      });
       if (accepted) setStepId('game-picker');
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
-
-  const refreshEnv = useCallback(async () => {
-    setEnv(null);
-    const next = await window.modmixer.detectEnv();
-    setEnv(next);
-    return next;
   }, []);
 
   const goNext = useCallback(() => {
@@ -153,36 +135,14 @@ export function OnboardingFlow({ onComplete }: { onComplete: () => void }) {
           onBack={needsConsent ? goBack : undefined}
         />
       );
-    case 'rimworld':
+    case 'setup':
       return (
-        <RimWorldStep
-          stepIndex={stepIndex}
-          total={total}
-          env={env}
-          onRefresh={refreshEnv}
-          onContinue={goNext}
-          onBack={needsConsent ? goBack : undefined}
-        />
-      );
-    case 'tools':
-      return (
-        <ToolsStep
-          stepIndex={stepIndex}
-          total={total}
-          env={env}
-          onRefresh={refreshEnv}
-          onContinue={goNext}
-          onBack={goBack}
-        />
-      );
-    case 'index':
-      return (
-        <IndexStep
+        <SetupStep
           stepIndex={stepIndex}
           total={total}
           game={pickedGame}
           onContinue={goNext}
-          onBack={goBack}
+          onBack={needsConsent ? goBack : undefined}
         />
       );
     case 'ai':

@@ -27,6 +27,7 @@ import type {
   GameId,
   GameSetupSnapshot,
   GameSetupStatus,
+  SetupRequirements,
 } from '../agent/games/types';
 import type { SchematicData } from '../agent/schematic';
 import type { DefEntry } from '../agent/defs-scan';
@@ -175,12 +176,12 @@ export interface Channels {
   'modmixer:settings:set-multi-chat': (enabled: boolean) => Settings;
   // Per-game setup (toolchain + code index) for Settings → Games. Dispatches to
   // getAdapter(game).setup; one uniform surface for every game.
-  'modmixer:game-setup:status': (game: GameId) => GameSetupStatus;
   'modmixer:game-setup:rebuild': (
     game: GameId,
     opts?: { force?: boolean },
   ) => GameSetupStatus;
   'modmixer:game-setup:snapshot': (game: GameId) => GameSetupSnapshot;
+  'modmixer:game-setup:requirements': (game: GameId) => SetupRequirements;
   'modmixer:settings:set-selected-game': (game: GameId) => Settings;
   'modmixer:settings:set-community-lore': (enabled: boolean) => Settings;
   'modmixer:settings:set-auto-launch': (enabled: boolean) => Settings;

@@ -4,7 +4,10 @@
  * onboarding index step. Phases run in order; "starting" fires once before any
  * phase, "done" once at the end (or "error" if anything threw).
  */
-export type IndexPhase = 'defs' | 'decompile' | 'symbols';
+// 'toolchain' provisions the build toolchain (the .NET SDK for RimWorld, the
+// JDK for Minecraft) up front, so the first mod build never pauses to download
+// it — the download happens here, visibly, during setup.
+export type IndexPhase = 'toolchain' | 'defs' | 'decompile' | 'symbols';
 
 export type IndexProgressEvent =
   | { type: 'starting'; phases: IndexPhase[] }

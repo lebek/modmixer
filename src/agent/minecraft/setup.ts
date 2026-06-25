@@ -10,9 +10,15 @@ import {
 } from '../index/rebuild-minecraft.js';
 import { emitSetupProgress } from '../index/setup-progress.js';
 import { formatBytes } from '../index/format.js';
-import { MINECRAFT_VERSION, NEOFORGE_VERSION } from './versions.js';
+import { MINECRAFT_VERSION, NEOFORGE_VERSION, REQUIRED_JDK_MAJOR } from './versions.js';
+import { findExistingJdk21 } from './jdk.js';
+import { summarizeRequirements } from '../games/types.js';
 import type { GameSetupAdapter } from '../adapters/types.js';
-import type { GameSetupFact, GameSetupStatus } from '../games/types.js';
+import type {
+  GameSetupFact,
+  GameSetupStatus,
+  SetupRequirements,
+} from '../games/types.js';
 
 const DETAIL =
   'Modmixer auto-provisions Java 21 + the Gradle toolchain. Setup builds the ' +
@@ -79,6 +85,28 @@ function buildStatus(): GameSetupStatus {
 export const minecraftSetup: GameSetupAdapter = {
   async getStatus() {
     return buildStatus();
+  },
+  // The one host prerequisite is JDK 21, which ModMixer auto-provisions at the
+  // first index build (Gradle + NeoForge/MC artifacts come from the build).
+  // Surface it as an informational `auto` row — found-on-system vs will-install —
+  // so the toolchain isn't invisible; it never blocks (the build provisions it).
+  async checkRequirements(): Promise<SetupRequirements> {
+    const jdk = await findExistingJdk21();
+    return summarizeRequirements([
+      {
+        id: 'jdk',
+        label: `Java ${REQUIRED_JDK_MAJOR} (JDK)`,
+        severity: 'required',
+        provisioning: 'auto',
+        ok: jdk !== null,
+        detail: jdk
+          ? null
+          : 'Installed automatically during setup — no manual install needed.',
+        hint: jdk
+          ? `${jdk.provisioned ? 'Provisioned by ModMixer' : 'Found on system'} · ${jdk.version}`
+          : null,
+      },
+    ]);
   },
   async rebuild() {
     // Force a rebuild even when fresh (matches RimWorld's manual Rebuild), but

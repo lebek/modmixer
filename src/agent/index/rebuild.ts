@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import { detectRimWorldPaths } from '../paths.js';
 import { closeIndexDb, openIndexDb, resetSchema } from './db.js';
 import { decompileAssemblies } from './decompile.js';
+import { ensureDotnetSdk } from '../dotnet-provision.js';
 import { indexDefs } from './defs-indexer.js';
 import { indexCsharp } from './csharp-indexer.js';
 import {
@@ -114,8 +115,27 @@ export async function rebuildIndex(
 
     onProgress({
       type: 'starting',
-      phases: ['defs', 'decompile', 'symbols'],
+      phases: ['toolchain', 'defs', 'decompile', 'symbols'],
     });
+
+    // Phase 0: provision the C# build toolchain (.NET SDK) up front, so the
+    // first mod build never pauses to download it. Detect-first, so a host
+    // with .NET already installed is instant. Best-effort and NON-fatal — the
+    // index itself doesn't need .NET (XML mods + the decompile work without
+    // it), so a download failure here must not block the index; a later C#
+    // build will surface a clear "finish setup" message instead.
+    onProgress({
+      type: 'phase',
+      phase: 'toolchain',
+      message: 'Preparing the .NET build toolchain…',
+    });
+    try {
+      await ensureDotnetSdk((p) =>
+        onProgress({ type: 'phase', phase: 'toolchain', message: p.message }),
+      );
+    } catch (err) {
+      console.warn('[index] .NET provisioning failed (C# builds will retry):', err);
+    }
 
     const paths = getIndexPaths();
     fs.mkdirSync(paths.root, { recursive: true });

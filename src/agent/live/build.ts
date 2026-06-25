@@ -20,7 +20,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import { spawn } from 'node:child_process';
-import { DOTNET_NOT_FOUND_MESSAGE, resolveDotnet } from '../dotnet.js';
+import { findExistingDotnet, dotnetEnv } from '../dotnet-provision.js';
 import { detectRimWorldPaths } from '../paths.js';
 import { getWorkspacePaths } from '../workspace.js';
 
@@ -39,17 +39,24 @@ function stamp(): string {
   return Date.now().toString(36);
 }
 
-function runDotnet(
+async function runDotnet(
   args: string[],
   cwd: string,
   signal?: AbortSignal,
 ): Promise<{ exitCode: number; output: string }> {
-  const dotnet = resolveDotnet();
+  // Use the SDK setup provisioned — don't download mid-build. The hot-edit loop
+  // surfaces a clear, actionable line if it isn't there yet.
+  const dotnet = await findExistingDotnet();
   if (!dotnet) {
-    return Promise.resolve({ exitCode: -1, output: DOTNET_NOT_FOUND_MESSAGE });
+    return {
+      exitCode: -1,
+      output:
+        'The .NET SDK is not set up yet. Finish RimWorld setup in Settings → Games ' +
+        '(it provisions .NET), then retry.',
+    };
   }
   return new Promise((resolve) => {
-    const proc = spawn(dotnet, args, { cwd });
+    const proc = spawn(dotnet.exe, args, { cwd, env: dotnetEnv(dotnet) });
     let output = '';
     proc.stdout?.on('data', (d: Buffer) => {
       output += d.toString();

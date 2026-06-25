@@ -30,7 +30,10 @@ import {
 import { minecraftSetup } from './setup.js';
 import { buildMinecraftSystemPrompt } from '../system-prompt.js';
 import { minecraftResearchTools } from './research-tools.js';
-import { ensureMinecraftIndexInBackground } from '../index/rebuild-minecraft.js';
+import {
+  ensureMinecraftIndexInBackground,
+  getMinecraftIndexStatus,
+} from '../index/rebuild-minecraft.js';
 import type {
   BuildModDetails,
   GameAdapter,
@@ -42,7 +45,11 @@ import type {
   TestCycleContext,
 } from '../adapters/types.js';
 
-/** Minecraft index: lazy one-time decompile, kicked at startup and per session. */
+/**
+ * Minecraft index: a one-time decompile kicked eagerly at startup (and again per
+ * session as a safety net), mirroring RimWorld — the build runs upfront so the
+ * symbol DB is ready before the first chat, not lazily on first use.
+ */
 const index: GameIndexAdapter = {
   ensureAtStartup: async () => {
     ensureMinecraftIndexInBackground();
@@ -50,7 +57,13 @@ const index: GameIndexAdapter = {
   ensureForSession: () => {
     ensureMinecraftIndexInBackground();
   },
-  symbolDbReady: () => true,
+  // Honest readiness: the symbol table only exists once a build has produced an
+  // index (fresh or stale). It's empty while absent/building, so callers that
+  // query without a status check would hit nothing — don't claim ready then.
+  symbolDbReady: () => {
+    const s = getMinecraftIndexStatus();
+    return s === 'fresh' || s === 'stale';
+  },
 };
 
 const scaffoldDescription =
