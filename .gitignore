@@ -104,6 +104,12 @@ dist/
 # Local-only npm config (e.g. forcing arch=x64 when running dev on Windows-on-ARM)
 .npmrc
 
+# Local MCP server config (machine-specific)
+.mcp.json
+
+# IDE-generated Visual Studio solution for the C# bridge project
+modmixer.sln
+
 # C# build artifacts (vendor/modmixer-bridge)
 bin/
 obj/
