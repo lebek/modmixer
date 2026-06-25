@@ -161,6 +161,16 @@ setRimWorldInstallOverride(loadSettings().rimworldInstallOverride);
 let mainWindow: BrowserWindow | null = null;
 const getWindow = () => mainWindow;
 
+// Renderer broadcasts can race teardown: during shutdown / `rs` restart the
+// BrowserWindow object lingers as a non-null ref while its native peer is gone,
+// so `mainWindow?.webContents.send` (which only null-guards) throws
+// "Object has been destroyed". Route fire-and-forget broadcasts through here.
+const sendToRenderer = (channel: string, ...args: unknown[]) => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(channel, ...args);
+  }
+};
+
 // Auto-update from GitHub releases. No-ops in dev and on unsupported
 // platforms; logs but won't throw if the feed is unreachable. Also exposes
 // a manual "Check for updates" path the renderer can drive from Settings.
@@ -267,23 +277,23 @@ registerLiveRoutes(routeContext);
 // Renderer-side broadcasts for events whose handlers can't easily live in
 // route modules (they need the live mainWindow ref).
 onAssetsChanged((folder) => {
-  mainWindow?.webContents.send('modmixer:assets:changed', { folder });
+  sendToRenderer('modmixer:assets:changed', { folder });
 });
 
 onPublishProgress((event: PublishProgressEvent) => {
-  mainWindow?.webContents.send('modmixer:workshop:progress', event);
+  sendToRenderer('modmixer:workshop:progress', event);
 });
 
 onModChanged((folder) => {
-  mainWindow?.webContents.send('modmixer:mod:changed', { folder });
+  sendToRenderer('modmixer:mod:changed', { folder });
 });
 
 const monitor = getMonitorServer();
 monitor.on('state', (state: MonitorConnectionState) => {
-  mainWindow?.webContents.send('modmixer:monitor:state', state);
+  sendToRenderer('modmixer:monitor:state', state);
 });
 monitor.on('message', (msg: BridgeMessage) => {
-  mainWindow?.webContents.send('modmixer:monitor:message', msg);
+  sendToRenderer('modmixer:monitor:message', msg);
 });
 
 const createWindow = () => {
