@@ -25,15 +25,15 @@ import type {
 } from '@/agent/games/types';
 
 export type SettingsSection =
-  | 'providers'
   | 'general'
-  | 'appearance'
+  | 'providers'
   | 'games'
+  | 'appearance'
   | 'advanced';
 
 export function AppSettingsDialog({
   onClose,
-  initialSection = 'providers',
+  initialSection = 'general',
 }: {
   onClose: () => void;
   initialSection?: SettingsSection;
@@ -138,14 +138,14 @@ export function AppSettingsDialog({
       >
         <nav className="flex w-44 shrink-0 flex-col border-r border-line bg-surface/40 p-3">
           <SectionTab
+            label="General"
+            active={section === 'general'}
+            onClick={() => setSection('general')}
+          />
+          <SectionTab
             label="AI providers"
             active={section === 'providers'}
             onClick={() => setSection('providers')}
-          />
-          <SectionTab
-            label="Appearance"
-            active={section === 'appearance'}
-            onClick={() => setSection('appearance')}
           />
           <SectionTab
             label="Games"
@@ -153,9 +153,9 @@ export function AppSettingsDialog({
             onClick={() => setSection('games')}
           />
           <SectionTab
-            label="General"
-            active={section === 'general'}
-            onClick={() => setSection('general')}
+            label="Appearance"
+            active={section === 'appearance'}
+            onClick={() => setSection('appearance')}
           />
           <SectionTab
             label="Advanced"

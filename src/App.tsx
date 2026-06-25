@@ -86,7 +86,7 @@ export function App() {
     setAvailableModels(list);
   }, []);
 
-  const openSettings = useCallback((section: SettingsSection = 'providers') => {
+  const openSettings = useCallback((section: SettingsSection = 'general') => {
     setSettingsSection(section);
   }, []);
 
