@@ -63,6 +63,14 @@ export interface GameDefinition {
   capabilities: GameCapabilities;
   buildTool: BuildTool;
   /**
+   * Sub-path segment for this game's on-disk storage (code index, lore, caches)
+   * under their shared base dirs. RimWorld is `''` — it owns the legacy
+   * un-namespaced root so existing indexes/lore aren't invalidated; every other
+   * game nests under its own segment (e.g. `'minecraft'`). Append with
+   * `seg ? join(base, seg) : base` so RimWorld stays at the root.
+   */
+  storageSegment: string;
+  /**
    * Marks a game as still in beta — surfaced as a small "Beta" label in the
    * picker / Games settings card. It does NOT gate availability: every game in
    * getSelectableGames() is always selectable (setup happens lazily).

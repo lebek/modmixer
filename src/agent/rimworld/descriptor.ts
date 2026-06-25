@@ -21,5 +21,8 @@ export const rimworldDescriptor: GameDefinition = {
     sourceIndex: true,
   },
   buildTool: 'dotnet',
+  // Legacy un-namespaced storage root: existing index/ and lore/ dirs predate
+  // multi-game support, so RimWorld keeps the bare base path.
+  storageSegment: '',
   beta: false,
 };

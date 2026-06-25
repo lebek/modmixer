@@ -27,5 +27,8 @@ export const minecraftDescriptor: GameDefinition = {
     sourceIndex: true,
   },
   buildTool: 'gradle',
+  // Nest index/lore/caches under .../minecraft/ so they never collide with
+  // RimWorld's un-namespaced root.
+  storageSegment: 'minecraft',
   beta: true,
 };

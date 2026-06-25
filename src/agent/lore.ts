@@ -4,7 +4,16 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import { loadSettings } from './settings.js';
 import type { GameId } from './games/types.js';
-import { listGames } from './games/registry.js';
+import { getGame, listGames } from './games/registry.js';
+
+/**
+ * Per-game on-disk nesting under a shared lore base. RimWorld owns the legacy
+ * un-namespaced root (storageSegment ''); other games nest under their segment.
+ */
+function gameSubdir(base: string, game: GameId): string {
+  const seg = getGame(game).storageSegment;
+  return seg ? path.join(base, seg) : base;
+}
 
 /**
  * Modmixer Lore is a knowledge base for transferable RimWorld-modding
@@ -271,7 +280,7 @@ export function shippedLoreDir(game: GameId = 'rimworld'): string {
   const base = app.isPackaged
     ? path.join(process.resourcesPath, 'lore')
     : path.join(app.getAppPath(), 'lore');
-  return game === 'rimworld' ? base : path.join(base, game);
+  return gameSubdir(base, game);
 }
 
 /**
@@ -281,12 +290,12 @@ export function shippedLoreDir(game: GameId = 'rimworld'): string {
  */
 export function communityLoreDir(game: GameId = 'rimworld'): string {
   const base = path.join(app.getPath('userData'), 'community-lore');
-  return game === 'rimworld' ? base : path.join(base, game);
+  return gameSubdir(base, game);
 }
 
 export function userLoreDir(game: GameId = 'rimworld'): string {
   const base = path.join(app.getPath('userData'), 'lore');
-  return game === 'rimworld' ? base : path.join(base, game);
+  return gameSubdir(base, game);
 }
 
 /**

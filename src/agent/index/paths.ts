@@ -2,6 +2,7 @@ import { app } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import type { GameId } from '../games/types.js';
+import { getGame } from '../games/registry.js';
 
 /**
  * Disk layout for the RimWorld source/def index. Lives under userData so the
@@ -31,7 +32,8 @@ export interface IndexPaths {
  */
 export function getIndexPaths(gameId: GameId = 'rimworld'): IndexPaths {
   const base = path.join(app.getPath('userData'), 'index');
-  const root = gameId === 'rimworld' ? base : path.join(base, gameId);
+  const seg = getGame(gameId).storageSegment;
+  const root = seg ? path.join(base, seg) : base;
   fs.mkdirSync(root, { recursive: true });
   return {
     root,
