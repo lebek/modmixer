@@ -56,8 +56,13 @@ import {
 import {
   cancelActiveRebuild,
   ensureIndexAtStartup,
+  onIndexProgress,
   pipeProgressToWindow,
 } from './agent/index/main-bridge.js';
+import {
+  emitSetupProgress,
+  pipeSetupProgressToWindow,
+} from './agent/index/setup-progress.js';
 import { closeIndexDb } from './agent/index/db.js';
 import { initUpdater } from './agent/updater.js';
 import { syncCommunityLore } from './agent/community-lore-sync.js';
@@ -411,6 +416,11 @@ app.on('ready', () => {
   // Pipe index progress events to the renderer. Subscribed once for the
   // process lifetime — the listener filters by mainWindow internally.
   pipeProgressToWindow(getWindow);
+  // Unified game-tagged setup progress: mirror RimWorld's index progress onto
+  // the game-setup channel, and pipe that channel (both games) to the renderer.
+  // The onboarding step + pre-chat gate consume this for granular progress.
+  onIndexProgress((event) => emitSetupProgress('rimworld', event));
+  pipeSetupProgressToWindow(getWindow);
   if (SMOKE_TEST) {
     // CI smoke test: exercises every packaging-time risk in the shipped
     // installer (better-sqlite3, web-tree-sitter + grammar wasm, bundled

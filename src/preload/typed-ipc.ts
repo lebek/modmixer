@@ -23,7 +23,11 @@ import type {
   WorkspaceMod,
   WorkspacePaths,
 } from '../agent/workspace';
-import type { GameId, GameSetupStatus } from '../agent/games/types';
+import type {
+  GameId,
+  GameSetupSnapshot,
+  GameSetupStatus,
+} from '../agent/games/types';
 import type { SchematicData } from '../agent/schematic';
 import type { DefEntry } from '../agent/defs-scan';
 import type { EnableResult, DisableResult } from '../agent/game';
@@ -176,6 +180,7 @@ export interface Channels {
     game: GameId,
     opts?: { force?: boolean },
   ) => GameSetupStatus;
+  'modmixer:game-setup:snapshot': (game: GameId) => GameSetupSnapshot;
   'modmixer:settings:set-selected-game': (game: GameId) => Settings;
   'modmixer:settings:set-community-lore': (enabled: boolean) => Settings;
   'modmixer:settings:set-auto-launch': (enabled: boolean) => Settings;
@@ -446,6 +451,7 @@ export interface Events {
   'modmixer:oauth:event': OAuthEvent;
   'modmixer:confirm:request': ConfirmationRequest;
   'modmixer:index:progress': IndexProgressEvent;
+  'modmixer:game-setup:progress': { game: GameId; event: IndexProgressEvent };
   'modmixer:updater:state': UpdaterState;
   /** Main asks the renderer to confirm a pending quit (payload-less). */
   'modmixer:quit:requested': void;

@@ -1,7 +1,8 @@
 /**
- * Progress events emitted by the index rebuilder. Forwarded over IPC to the
- * renderer's IndexProgressModal. Phases run in order; "starting" fires once
- * before any phase, "done" once at the end (or "error" if anything threw).
+ * Progress events emitted by the index rebuilder. Forwarded over IPC (tagged
+ * by game on the game-setup channel) to the renderer's GameSetupGate +
+ * onboarding index step. Phases run in order; "starting" fires once before any
+ * phase, "done" once at the end (or "error" if anything threw).
  */
 export type IndexPhase = 'defs' | 'decompile' | 'symbols';
 

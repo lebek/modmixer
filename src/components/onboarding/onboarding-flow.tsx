@@ -24,13 +24,15 @@ type StepId =
   | 'author';
 
 /**
- * The onboarding flow after the game picker is game-specific: RimWorld needs
- * install detection + .NET tools + the source index; Minecraft auto-provisions
- * its toolchain and indexes lazily, so it skips straight to the shared steps.
+ * The onboarding flow after the game picker is game-specific. Both games build
+ * the source index synchronously here so the game is fully ready before the
+ * first mod. RimWorld additionally needs install detection + .NET tools;
+ * Minecraft auto-provisions its toolchain as part of the index build, so it
+ * goes straight to the index step.
  */
 function buildSteps(game: GameId): StepId[] {
   const gameSteps: StepId[] =
-    game === 'minecraft' ? [] : ['rimworld', 'tools', 'index'];
+    game === 'minecraft' ? ['index'] : ['rimworld', 'tools', 'index'];
   return ['consent', 'game-picker', ...gameSteps, 'ai', 'community-lore', 'author'];
 }
 
@@ -178,6 +180,7 @@ export function OnboardingFlow({ onComplete }: { onComplete: () => void }) {
         <IndexStep
           stepIndex={stepIndex}
           total={total}
+          game={pickedGame}
           onContinue={goNext}
           onBack={goBack}
         />

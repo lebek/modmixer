@@ -11,6 +11,7 @@ import {
 import fsp from 'node:fs/promises';
 import { ensureJdk21 } from '../minecraft/jdk.js';
 import { toolchainFingerprint } from '../minecraft/versions.js';
+import { emitSetupProgress } from './setup-progress.js';
 import type { IndexProgressListener } from './progress.js';
 
 /**
@@ -89,7 +90,7 @@ export function cancelMinecraftIndexBuild(): void {
  * triggers (e.g. a Minecraft conversation opening + the first search tool).
  */
 export function ensureMinecraftIndexInBackground(
-  onProgress: IndexProgressListener = () => {},
+  onProgress: IndexProgressListener = (e) => emitSetupProgress('minecraft', e),
 ): MinecraftIndexStatus {
   const status = getMinecraftIndexStatus();
   if (status === 'absent' || status === 'stale') {

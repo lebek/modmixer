@@ -8,6 +8,7 @@ import {
 } from './rebuild.js';
 import { resolveIlspycmd } from './ilspycmd.js';
 import { warmSearchCache } from './warm-cache.js';
+import { ensureMinecraftIndexInBackground } from './rebuild-minecraft.js';
 import type { IndexProgressEvent } from './progress.js';
 import { loadSettings } from '../settings.js';
 import { resolveGameId } from '../games/registry.js';
@@ -85,13 +86,19 @@ export function cancelActiveRebuild(): void {
  * as a build failure.
  */
 export async function ensureIndexAtStartup(): Promise<void> {
-  // The RimWorld C# index is RimWorld-specific (ilspycmd / .NET decompile).
-  // Only build it eagerly when RimWorld is the user's active game: a Minecraft
-  // user (whose code index builds lazily via ensureMinecraftIndexInBackground)
-  // should never eat a RimWorld decompile or see a .NET/ilspycmd prompt at
-  // startup. resolveGameId coerces an unset value to 'rimworld', so existing
-  // RimWorld users are unaffected.
-  if (resolveGameId(loadSettings().selectedGameId) !== 'rimworld') return;
+  // Eagerly (re)build the *active* game's index at launch, but only when it's
+  // stale/absent — i.e. when the game's code/version changed. A fresh index is
+  // a no-op (RimWorld just warms its search cache). Each game's path is
+  // distinct: the RimWorld C# index needs ilspycmd / .NET decompile, while
+  // Minecraft auto-provisions its own toolchain. resolveGameId coerces an unset
+  // value to 'rimworld', so existing RimWorld users are unaffected.
+  const game = resolveGameId(loadSettings().selectedGameId);
+  if (game === 'minecraft') {
+    // Rebuilds only on absent/stale (e.g. a pinned-toolchain bump); progress
+    // feeds the game-setup channel so the gate/modal surfaces it.
+    ensureMinecraftIndexInBackground();
+    return;
+  }
   // No RimWorld install detected — nothing to index, and no reason to warn
   // about a missing decompiler. Bail before the ilspycmd check below.
   const status = getIndexStatus();

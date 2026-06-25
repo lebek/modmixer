@@ -8,6 +8,7 @@ import {
   getMinecraftIndexMeta,
   rebuildMinecraftIndex,
 } from '../index/rebuild-minecraft.js';
+import { emitSetupProgress } from '../index/setup-progress.js';
 import { formatBytes } from '../index/format.js';
 import { MINECRAFT_VERSION, NEOFORGE_VERSION } from './versions.js';
 import type { GameSetupAdapter } from '../adapters/types.js';
@@ -81,15 +82,15 @@ export const minecraftSetup: GameSetupAdapter = {
   },
   async rebuild() {
     // Force a rebuild even when fresh (matches RimWorld's manual Rebuild), but
-    // never start a second concurrent build. Progress isn't piped to a modal —
-    // the card polls getStatus() while building.
+    // never start a second concurrent build. Progress is tagged onto the
+    // unified game-setup channel so the onboarding step + pre-chat gate render
+    // granular per-phase progress (the Settings card also polls getStatus()).
     if (getMinecraftIndexStatus() !== 'building') {
-      // Progress isn't piped anywhere — the Settings card polls getStatus().
-      void rebuildMinecraftIndex(() => {
-        /* no-op progress sink */
-      }).catch((err) => {
-        console.error('[minecraft setup] rebuild failed:', err);
-      });
+      void rebuildMinecraftIndex((e) => emitSetupProgress('minecraft', e)).catch(
+        (err) => {
+          console.error('[minecraft setup] rebuild failed:', err);
+        },
+      );
     }
     return buildStatus();
   },

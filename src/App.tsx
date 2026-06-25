@@ -6,7 +6,7 @@ import type { ActiveSession } from './agent/registry';
 import type { RegistryEnvelope } from './preload';
 import { GridMark } from './components/grid-mark';
 import { AppSettingsDialog, type SettingsSection } from './components/app-settings-dialog';
-import { IndexProgressModal } from './components/index-progress-modal';
+import { GameSetupGate } from './components/game-setup-gate';
 import { TabNav, type AppView, type ModTabDescriptor } from './components/tab-nav';
 import { BuildView } from './components/build-view';
 import { ModsView } from './components/mods-view';
@@ -801,7 +801,15 @@ export function App() {
         />
       )}
 
-      <IndexProgressModal />
+      <GameSetupGate
+        game={
+          view === 'mod' && focusedTab
+            ? resolveGameId(focusedTab.conversation.game)
+            : activeGame
+        }
+        modOpen={view === 'mod' && !!focusedTab}
+        onOpenSettings={() => openSettings('games')}
+      />
 
       {recoveryShown && session && (
         <SessionRecoveryDialog

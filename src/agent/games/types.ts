@@ -106,3 +106,14 @@ export interface GameSetupStatus {
   /** Rebuild button label, e.g. "Rebuild" or "Set up Minecraft". */
   rebuildLabel: string;
 }
+
+/**
+ * A game's setup status plus the most recent build-progress event, so the
+ * renderer (onboarding step + pre-chat gate) can render granular per-phase
+ * progress for any game off one snapshot. Symmetric with the RimWorld-only
+ * IndexSnapshot, but game-tagged and adapter-driven.
+ */
+export interface GameSetupSnapshot {
+  status: GameSetupStatus;
+  lastProgress: import('../index/progress').IndexProgressEvent | null;
+}

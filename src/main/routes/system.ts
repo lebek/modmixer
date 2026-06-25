@@ -8,6 +8,7 @@ import {
   startRebuild,
 } from '../../agent/index/main-bridge.js';
 import { getAdapter } from '../../agent/adapters/index.js';
+import { getLastSetupProgress } from '../../agent/index/setup-progress.js';
 import { resolveGameId } from '../../agent/games/registry.js';
 import type { GameId } from '../../agent/games/types.js';
 import type { RouteContext } from './context.js';
@@ -42,6 +43,16 @@ export function registerSystemRoutes(ctx: RouteContext): void {
     (_evt, game: GameId, opts?: { force?: boolean }) =>
       getAdapter(resolveGameId(game)).setup.rebuild(opts),
   );
+
+  // Status + latest progress event in one shot, for the onboarding step and
+  // the pre-chat gate (which render granular per-phase progress for any game).
+  ipc.handle('modmixer:game-setup:snapshot', async (_evt, game: GameId) => {
+    const g = resolveGameId(game);
+    return {
+      status: await getAdapter(g).setup.getStatus(),
+      lastProgress: getLastSetupProgress(g),
+    };
+  });
 
   ipc.handle('modmixer:monitor:get-state', () => monitor.getState());
   ipc.handle('modmixer:monitor:get-snapshot', () => monitor.getLastSnapshot());
