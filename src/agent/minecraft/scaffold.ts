@@ -166,7 +166,7 @@ export async function createMinecraftMod(
   // exist"), even though it compiles fine.
   await renameModId(modDir, EXAMPLE_ID, EXAMPLE_GROUP, modId, groupId);
 
-  await appendBridgeWiring(path.join(modDir, 'build.gradle'));
+  await ensureModmixerWiring(path.join(modDir, 'build.gradle'));
 
   // The POSIX wrapper must stay executable; a copy can drop the bit.
   if (process.platform !== 'win32') {
@@ -179,22 +179,24 @@ export async function createMinecraftMod(
 }
 
 /**
- * Append the ModMixer diagnostics-bridge wiring to a scaffolded mod's
- * build.gradle. It is inert during a normal `gradlew build` and only activates
- * for the test loop's `runClient -PmodmixerBridgeJar=<jar> -Dmodmixer.port=…`:
- *  - the bridge jar (a real FML mod) is put on the run's runtime classpath so
- *    NeoForge discovers and loads it alongside the user's mod; and
- *  - the `modmixer.*` system properties are forwarded to the game JVM so the
- *    bridge can connect back to ModMixer's monitor.
- * Idempotent — skips if the marker is already present.
+ * The ModMixer test-loop wiring appended to a scaffolded mod's build.gradle. All
+ * of it is inert during a normal `gradlew build` and only activates for the test
+ * loop's `runClient -P…` invocation. Two independent blocks, each guarded by its
+ * own marker so {@link ensureModmixerWiring} can add a newer one to a project
+ * that already has the older — keeping pre-existing workspace mods upgradeable:
+ *
+ *  - BRIDGE: the bridge jar (a real FML mod) goes on the run's runtime classpath
+ *    so NeoForge discovers it alongside the user's mod, and the `modmixer.*`
+ *    system properties are forwarded to the game JVM so it can connect back to
+ *    ModMixer's monitor.
+ *  - COMPANION: any `-PmodmixerExtraMods=<jar1><sep><jar2>` (platform path
+ *    separator) jars are added to the same runtime classpath, for compat testing
+ *    against the user's other installed mods.
  */
 const BRIDGE_WIRING_MARKER = '// --- ModMixer diagnostics bridge';
+const COMPANION_WIRING_MARKER = '// --- ModMixer companion mods';
 
-async function appendBridgeWiring(buildGradlePath: string): Promise<void> {
-  if (!fs.existsSync(buildGradlePath)) return;
-  const existing = await fsp.readFile(buildGradlePath, 'utf8');
-  if (existing.includes(BRIDGE_WIRING_MARKER)) return;
-  const snippet = `
+const BRIDGE_SNIPPET = `
 
 ${BRIDGE_WIRING_MARKER} (added by Modmixer) -----------------
 // Loaded only for the agent test loop:
@@ -217,7 +219,37 @@ neoForge {
     }
 }
 `;
-  await fsp.writeFile(buildGradlePath, existing + snippet, 'utf8');
+
+const COMPANION_SNIPPET = `
+
+${COMPANION_WIRING_MARKER} (added by Modmixer) -----------------
+// Compat testing: load installed mods alongside this one for the test loop.
+//   gradlew runClient -PmodmixerExtraMods=<jar1>\${File.pathSeparator}<jar2>
+if (project.hasProperty('modmixerExtraMods')) {
+    dependencies {
+        project.property('modmixerExtraMods')
+            .split(java.io.File.pathSeparator)
+            .findAll { it?.trim() }
+            .each { p -> localRuntime files(p.trim()) }
+    }
+}
+`;
+
+/**
+ * Ensure the build.gradle has the current ModMixer test-loop wiring. Each block
+ * is appended only when its marker is absent, so this is safe to call repeatedly
+ * and on a mod scaffolded before a block existed (the launch path calls it before
+ * every run to self-heal older projects). No-op when the file is missing.
+ */
+export async function ensureModmixerWiring(
+  buildGradlePath: string,
+): Promise<void> {
+  if (!fs.existsSync(buildGradlePath)) return;
+  const existing = await fsp.readFile(buildGradlePath, 'utf8');
+  let next = existing;
+  if (!next.includes(BRIDGE_WIRING_MARKER)) next += BRIDGE_SNIPPET;
+  if (!next.includes(COMPANION_WIRING_MARKER)) next += COMPANION_SNIPPET;
+  if (next !== existing) await fsp.writeFile(buildGradlePath, next, 'utf8');
 }
 
 // The MDK example mod's identity, which we rename to the scaffolded mod's.

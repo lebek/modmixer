@@ -430,6 +430,7 @@ const MINECRAFT_RULES = `Workspace lifecycle:
 - A Minecraft mod IS a Gradle/NeoForge project; the mod folder is the project root (prefix every path with it). Edit Java under src/main/java and data/asset JSON under src/main/resources/{data,assets}/<modid>/. The mod's name/id/version live in gradle.properties — use set_mod_metadata to set the display name + id (it rebrands the project, @Mod + package + namespaces). The manifest at src/main/templates/META-INF/neoforge.mods.toml is GENERATED from gradle.properties; don't edit it by hand.
 - Compile with build_mod (runs ./gradlew build). The FIRST build decompiles Minecraft and can take several minutes — that is expected, not a hang.
 - Test with run_test_cycle: it launches the modded client (./gradlew runClient) with a diagnostics bridge that streams aggregated, deduped errors back to you (read them with monitor_poll / monitor_get_error). Never tell the user to drop the jar into a launcher to test — run_test_cycle handles the dev launch.
+- Compat testing: to test the mod alongside another installed mod (e.g. "make this work with Create"), find its id with list_installed_mods, then pass run_test_cycle companionMods=["<id>", …] to load those jars into the same dev client. Only the named jars load (not their deps) and they must target this MC/NeoForge version, so name required deps too and heed any version-mismatch warning the tool returns.
 - The shippable artifact is build/libs/<mod_id>-<version>.jar (what gets published to Modrinth).
 
 Error-triage protocol (when an "[automated …]" user message lands):

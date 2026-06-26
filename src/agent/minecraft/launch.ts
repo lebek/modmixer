@@ -3,6 +3,7 @@ import type { ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnGradle, type GradleRun } from './gradle.js';
+import { ensureModmixerWiring } from './scaffold.js';
 import { BRIDGE_PORT } from '../monitor/protocol.js';
 
 /**
@@ -83,6 +84,12 @@ export function resolveBridgeJar(): string {
 export interface MinecraftLaunchOptions {
   /** Wall-clock cap; the bridge auto-exits the client after this (ms). */
   testTimeoutMs?: number;
+  /**
+   * Absolute paths to already-installed mod jars to load into the dev client
+   * alongside the user's mod (compat testing). Added to the run's runtime
+   * classpath the same way the bridge jar is, so FML discovers them.
+   */
+  extraMods?: string[];
   onLine?: (line: string) => void;
   signal?: AbortSignal;
 }
@@ -97,6 +104,9 @@ export async function launchMinecraftClient(
   opts: MinecraftLaunchOptions = {},
 ): Promise<GradleRun> {
   await quitMinecraftClient();
+  // Self-heal the build.gradle wiring so a mod scaffolded before a given wiring
+  // version still gets the bridge + companion classpath hooks on next launch.
+  await ensureModmixerWiring(path.join(projectDir, 'build.gradle'));
   const bridgeJar = resolveBridgeJar();
   const args = [
     `-PmodmixerBridgeJar=${bridgeJar}`,
@@ -104,6 +114,12 @@ export async function launchMinecraftClient(
   ];
   if (opts.testTimeoutMs) {
     args.push(`-Dmodmixer.testTimeoutMs=${opts.testTimeoutMs}`);
+  }
+  // Pass extra mod jars as a single platform-delimited list (path.delimiter ===
+  // java.io.File.pathSeparator per-platform, which the Gradle snippet splits on).
+  const extraMods = (opts.extraMods ?? []).filter((p) => p.trim().length > 0);
+  if (extraMods.length > 0) {
+    args.push(`-PmodmixerExtraMods=${extraMods.join(path.delimiter)}`);
   }
   const run = await spawnGradle(projectDir, {
     tasks: ['runClient'],

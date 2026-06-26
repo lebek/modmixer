@@ -27,6 +27,7 @@ import {
   quitMinecraftClient,
   launchMinecraftClient,
 } from './launch.js';
+import { resolveCompanions } from './companions.js';
 import { minecraftSetup } from './setup.js';
 import { buildMinecraftSystemPrompt } from '../system-prompt.js';
 import { minecraftResearchTools } from './research-tools.js';
@@ -72,13 +73,19 @@ const scaffoldDescription =
   "Set up the mod's NeoForge (Gradle) project. A Minecraft mod IS a Gradle project; identity lives in gradle.properties. When the active conversation is bound to a mod (including the \"+ new mod\" placeholder) the project is normally ALREADY laid down — in that case you only need set_mod_metadata to name it, and scaffold_mod just re-stamps the identity. Use scaffold_mod to (re)create the project when it's missing. packageId is the mod id (a short lowercase word like \"coolblocks\"), NOT reverse-DNS; rimworldVersions/withCSharp are ignored. The mod is NOT yet active in-game — run_test_cycle handles launch.";
 
 const testCycleDescription =
-  "Macro: the only way to test the mod in-game. Builds the mod if needed and launches the modded client (./gradlew runClient) with the diagnostics bridge (aggregated, deduped errors streamed back over localhost), then arms background monitoring. The first run decompiles Minecraft and can take several minutes — that's expected, not a hang. If a client is already running it's stopped and relaunched. After this returns, tell the user EXACTLY what to try in-game (they're about to alt-tab) — errors arrive automatically as '[automated …]' messages via the error-triage protocol.";
+  "Macro: the only way to test the mod in-game. Builds the mod if needed and launches the modded client (./gradlew runClient) with the diagnostics bridge (aggregated, deduped errors streamed back over localhost), then arms background monitoring. The first run decompiles Minecraft and can take several minutes — that's expected, not a hang. If a client is already running it's stopped and relaunched. For compat work, pass companionMods to load the user's other installed mods into the SAME dev client. After this returns, tell the user EXACTLY what to try in-game (they're about to alt-tab) — errors arrive automatically as '[automated …]' messages via the error-triage protocol.";
 
-/** Minecraft's run_test_cycle takes only the folder — no RimWorld debug knobs. */
+/** Minecraft's run_test_cycle: the folder, plus optional compat companion mods. */
 const minecraftTestCycleParams = Type.Object({
   folder: Type.String({
     description: 'Workspace mod folder name to build and launch.',
   }),
+  companionMods: Type.Optional(
+    Type.Array(Type.String(), {
+      description:
+        'Installed mods to load into the dev client ALONGSIDE the mod under test — for compat work (e.g. "make this work with Create"). Each entry is a modId or name resolved against the user\'s installed mods; get exact ids from list_installed_mods. Their jars are added to the runClient runtime classpath so NeoForge loads them too. NOTE: only the named jars are added, NOT their dependencies — if a companion has required deps, name those as well. A companion built for a different Minecraft/NeoForge version (or a Fabric mod) is flagged and will likely fail to load. Omit for a normal solo test.',
+    }),
+  ),
 });
 
 /** A Minecraft placeholder is a gradle.properties mod id still set to "untitledmod". */
@@ -323,6 +330,33 @@ async function test(
   const { workspaceDir } = getWorkspacePaths();
   const projectDir = path.join(workspaceDir, ctx.folder);
 
+  // Compat testing: resolve any companion mods to installed jars and load them
+  // into the same dev client. Resolution is best-effort — unmatched names and
+  // version-mismatched jars are surfaced to the agent, not fatal.
+  const companionQueries = Array.isArray(ctx.params.companionMods)
+    ? (ctx.params.companionMods as unknown[]).map(String)
+    : [];
+  let extraMods: string[] = [];
+  if (companionQueries.length > 0) {
+    const res = await resolveCompanions(companionQueries);
+    extraMods = res.jarPaths;
+    for (const c of res.resolved) {
+      lines.push(
+        `Loading companion mod ${c.mod.displayName} (${c.mod.modId})` +
+          (c.versionWarning
+            ? ` — warning: it ${c.versionWarning}, so it may not load.`
+            : '.'),
+      );
+    }
+    if (res.notFound.length > 0) {
+      lines.push(
+        `Could not find installed mod(s): ${res.notFound.join(
+          ', ',
+        )} — not loaded. Use list_installed_mods for exact ids.`,
+      );
+    }
+  }
+
   // Backstop for load-time failures the in-game bridge can't catch: scan the
   // runClient output for NeoForge's mod-loading error block (which aborts the
   // mod bus before the bridge's hooks run, so a broken mod otherwise produces a
@@ -331,7 +365,7 @@ async function test(
   const onLine = makeLoadFailureDetector(ctx);
 
   try {
-    await launchMinecraftClient(projectDir, { onLine });
+    await launchMinecraftClient(projectDir, { onLine, extraMods });
   } catch (err) {
     return {
       content: [
