@@ -20,6 +20,11 @@ namespace ModMixer.Bridge
         private const int Port = 13371;
         private const int InitialBackoffMs = 500;
         private const int MaxBackoffMs = 5000;
+        // Bounded so a runaway producer can't grow the queue without limit;
+        // far above any healthy run (ErrorsChannel dedup makes overflow nearly
+        // impossible). Excess lines are dropped, matching the NeoForge bridge's
+        // offer()/drop — the producer must never block the game thread.
+        private const int MaxOutbox = 4096;
 
         private readonly ConcurrentQueue<string> outbox = new ConcurrentQueue<string>();
         private readonly ManualResetEventSlim outboxSignal = new ManualResetEventSlim(false);
@@ -54,6 +59,10 @@ namespace ModMixer.Bridge
 
         public void Send(string line)
         {
+            // Drop on overflow rather than block or grow unbounded. Send only
+            // runs while connected and post-dedup, so a full queue means the
+            // socket consumer has stalled — dropping is the safe backstop.
+            if (outbox.Count >= MaxOutbox) return;
             outbox.Enqueue(line);
             outboxSignal.Set();
         }
