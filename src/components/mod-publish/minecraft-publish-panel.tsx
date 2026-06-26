@@ -123,7 +123,7 @@ export function MinecraftPublishPanel({
                 <Field label="Title">
                   <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} className={inputCls} />
                 </Field>
-                <Field label="Summary" hint="One-line description shown in listings.">
+                <Field label="Summary" hint="One-line description shown in listings. Required by Modrinth.">
                   <input type="text" value={summary} onChange={(e) => setSummary(e.target.value)} className={inputCls} placeholder="A short, punchy summary." />
                 </Field>
                 <Field label="Description" hint="Full markdown shown on the project page.">
@@ -216,7 +216,7 @@ export function MinecraftPublishPanel({
                   </span>
                   <button
                     onClick={() => setConfirmOpen(true)}
-                    disabled={publish.busy || !title.trim() || (!isUpdate && !slug.trim())}
+                    disabled={publish.busy || !title.trim() || (!isUpdate && (!slug.trim() || !summary.trim()))}
                     className="rounded-md bg-ink px-3 py-1 text-[10px] uppercase tracking-[0.18em] text-paper transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     {publish.busy ? 'Publishing…' : isUpdate ? 'Publish update' : 'Publish to Modrinth'}
