@@ -100,7 +100,7 @@ export function GameSetupBody({
       {!requirements && <p className="text-sm text-muted">Checking…</p>}
 
       {rows.length > 0 && (
-        <div className="space-y-2">
+        <div className="space-y-1.5">
           {rows.map((r) => (
             <RequirementRow
               key={r.id}
@@ -223,16 +223,18 @@ function RequirementRow({
   };
 
   return (
-    <div className="flex items-start gap-3 rounded-md border border-line bg-surface/40 px-3.5 py-3">
+    <div className="flex items-start gap-2.5 rounded-md border border-line bg-surface/40 px-3 py-2">
       <CheckIcon tone={iconTone(req)} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <div className="text-sm font-medium text-ink">{req.label}</div>
+          <div className="flex min-w-0 items-baseline gap-2">
+            <span className="shrink-0 text-sm font-medium text-ink">
+              {req.label}
+            </span>
             {req.ok && req.hint && (
-              <div className="mt-0.5 truncate font-mono text-[11px] text-muted">
+              <span className="truncate font-mono text-[11px] text-muted">
                 {req.hint}
-              </div>
+              </span>
             )}
           </div>
           {action && (
@@ -244,7 +246,7 @@ function RequirementRow({
           )}
         </div>
         {req.detail && !req.ok && (
-          <p className="mt-2 text-xs leading-relaxed text-muted">{req.detail}</p>
+          <p className="mt-1.5 text-xs leading-relaxed text-muted">{req.detail}</p>
         )}
       </div>
     </div>
