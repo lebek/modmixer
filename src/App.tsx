@@ -808,7 +808,7 @@ export function App() {
             : activeGame
         }
         modOpen={view === 'mod' && !!focusedTab}
-        onOpenSettings={() => openSettings('games')}
+        onExit={goHome}
       />
 
       {recoveryShown && session && (

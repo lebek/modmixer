@@ -3,8 +3,8 @@
 // ModMixer scaffolds Minecraft mods by copying vendor/neoforge-mdk/template/
 // and stamping gradle.properties (see src/agent/minecraft/scaffold.ts).
 //
-// This is a build-time step (not in postinstall, so RimWorld-only installs
-// aren't forced to download it). Run: npm run fetch:neoforge-mdk
+// Runs from postinstall (idempotent — skips if the template is already
+// vendored). Run manually too: npm run fetch:neoforge-mdk
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';

@@ -18,16 +18,21 @@ import { GameSetupBody } from './game-setup-body';
  * - otherwise → a blocking overlay showing the unmet checks + index progress.
  *
  * The decompile is load-bearing for the agent (search/scaffold) and the checks
- * gate a working test loop, so this is a hard gate — there's no "chat anyway".
+ * gate a working test loop, so this is a hard gate on *chatting* with this mod —
+ * there's no "chat anyway". It is not a trap, though: the gate already contains
+ * the full setup UI (checks + their fix actions + index build), so the only
+ * other affordance it needs is a way *out* — `onExit` steps back to Home so a
+ * user who isn't ready to set this game up isn't walled into a dead end.
  */
 export function GameSetupGate({
   game,
   modOpen,
-  onOpenSettings,
+  onExit,
 }: {
   game: GameId | null;
   modOpen: boolean;
-  onOpenSettings: () => void;
+  /** Leave the gate (back to Home) without finishing setup. */
+  onExit: () => void;
 }) {
   // Only probe prerequisites when a mod is actually open (the gate is mounted
   // app-wide; we don't want the toolchain probe firing on every lens-switch).
@@ -59,10 +64,10 @@ export function GameSetupGate({
       <div className="mt-4 flex justify-end">
         <button
           type="button"
-          onClick={onOpenSettings}
+          onClick={onExit}
           className="rounded-md border border-line px-3 py-1.5 font-mono text-xs text-ink hover:bg-surface"
         >
-          Open Settings
+          Back to Home
         </button>
       </div>
     </Overlay>
@@ -71,7 +76,10 @@ export function GameSetupGate({
 
 function Overlay({ children }: { children: ReactNode }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 px-6">
+    // z-40, one tier below the z-50 interactive dialogs (Settings, confirms,
+    // session recovery): this is a passive wall, so any dialog the user
+    // explicitly opens must render *above* it rather than be trapped behind it.
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-ink/40 px-6">
       <div className="w-full max-w-md rounded-md border border-line bg-paper p-5 shadow-lg">
         {children}
       </div>
