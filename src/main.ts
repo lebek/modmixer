@@ -87,6 +87,14 @@ if (started) {
   app.quit();
 }
 
+// In dev the app name comes from Electron's defaults (which says "Electron")
+// rather than package.json's productName. Force it FIRST — before the single-
+// instance lock or anything else reads a userData-derived path — so dev resolves
+// the same `<appData>/Modmixer` profile as the packaged app. Electron caches the
+// userData path on first read; calling setName afterwards is too late and dev
+// silently lands on a separate `<appData>/Electron` profile (no index, no data).
+app.setName('Modmixer');
+
 // Privileged-scheme registration must happen synchronously before `app.ready`
 // so the renderer can use `modmixer-asset://` URLs in <img src>.
 registerAssetSchemeAsPrivileged();
@@ -105,11 +113,6 @@ app.on('second-instance', () => {
   if (win.isMinimized()) win.restore();
   win.focus();
 });
-
-// In dev the app name comes from Electron's defaults (which says "Electron")
-// rather than package.json's productName. Force it so the dock tooltip,
-// About menu, and userData paths match the packaged app.
-app.setName('Modmixer');
 
 // Demo-video harness (dev-only; driven externally from ~/projects/modmixer-demo).
 // MODMIXER_DEMO=1 opens a CDP port so the harness can drive the renderer, and
