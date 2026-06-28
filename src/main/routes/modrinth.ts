@@ -80,6 +80,20 @@ export function registerModrinthRoutes(ctx: RouteContext): void {
           : {}),
         modrinthVersion: version.versionNumber,
         lastPublishedAt: Date.now(),
+        // Remember the project metadata so the publish panel can re-seed its
+        // form after the first publish — Modrinth-only fields (summary, slug,
+        // categories, sides) have no home in the jar. Stored from effectiveMeta
+        // so the slug matches the one actually published.
+        modrinthMeta: {
+          title: effectiveMeta.title,
+          summary: effectiveMeta.summary,
+          description: effectiveMeta.description,
+          slug: result.slug || effectiveMeta.slug,
+          license: effectiveMeta.license,
+          categories: effectiveMeta.categories,
+          clientSide: effectiveMeta.clientSide,
+          serverSide: effectiveMeta.serverSide,
+        },
       });
       emitModChanged(folder);
       return result;

@@ -24,15 +24,25 @@ export function MinecraftPublishPanel({
   // failing with no way back to the input from this panel).
   const [editingToken, setEditingToken] = useState(false);
 
-  // Modrinth project metadata (project-level, applied at first publish).
-  const [slug, setSlug] = useState(slugify(mod.about.packageId || mod.about.name));
-  const [title, setTitle] = useState(mod.about.name || 'My Mod');
-  const [summary, setSummary] = useState('');
-  const [description, setDescription] = useState(mod.about.description || '');
-  const [license, setLicense] = useState('MIT');
-  const [categories, setCategories] = useState('');
-  const [clientSide, setClientSide] = useState<ModrinthSideSupport>('required');
-  const [serverSide, setServerSide] = useState<ModrinthSideSupport>('required');
+  // Modrinth project metadata (project-level, applied at first publish). Seeded
+  // from the metadata we stored on the last publish when present, so the form
+  // survives past the first publish; otherwise from the mod's manifest fields
+  // (gradle.properties, via mod.about) and Modrinth defaults for a first run.
+  const saved = mod.prefs.modrinthMeta;
+  const [slug, setSlug] = useState(
+    saved?.slug || mod.prefs.modrinthSlug || slugify(mod.about.packageId || mod.about.name),
+  );
+  const [title, setTitle] = useState(saved?.title || mod.about.name || 'My Mod');
+  const [summary, setSummary] = useState(
+    saved?.summary || deriveSummary(mod.about.description || ''),
+  );
+  const [description, setDescription] = useState(saved?.description || mod.about.description || '');
+  const [license, setLicense] = useState(saved?.license || 'MIT');
+  const [categories, setCategories] = useState(saved?.categories.join(', ') || '');
+  // No UI control for side support yet; carry the saved/default values through
+  // to the publish call (Modrinth requires both, default 'required').
+  const clientSide: ModrinthSideSupport = saved?.clientSide || 'required';
+  const serverSide: ModrinthSideSupport = saved?.serverSide || 'required';
 
   // Version number + changelog are per-publish; collected in the confirm
   // dialog (like RimWorld's change notes) rather than kept in the form.
@@ -109,34 +119,51 @@ export function MinecraftPublishPanel({
                 : 'Publish this mod to Modrinth. New projects are created as a draft pending Modrinth moderation review before they go public.'
             }
           >
-            {!isUpdate && (
-              <>
-                <Field label="Slug" hint="Lowercase, hyphenated, unique on Modrinth.">
-                  <input
-                    type="text"
-                    value={slug}
-                    onChange={(e) => setSlug(e.target.value)}
-                    className={inputCls}
-                    placeholder="my-cool-mod"
-                  />
-                </Field>
-                <Field label="Title">
-                  <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} className={inputCls} />
-                </Field>
-                <Field label="Summary" hint="One-line description shown in listings. Required by Modrinth.">
-                  <input type="text" value={summary} onChange={(e) => setSummary(e.target.value)} className={inputCls} placeholder="A short, punchy summary." />
-                </Field>
-                <Field label="Description" hint="Full markdown shown on the project page.">
-                  <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={6} className={`${inputCls} resize-y`} />
-                </Field>
-                <Field label="License (SPDX)" hint='e.g. MIT, Apache-2.0, LGPL-3.0-only. Required by Modrinth.'>
-                  <input type="text" value={license} onChange={(e) => setLicense(e.target.value)} className={inputCls} />
-                </Field>
-                <Field label="Categories" hint="Comma-separated Modrinth category slugs, e.g. utility, technology.">
-                  <input type="text" value={categories} onChange={(e) => setCategories(e.target.value)} className={inputCls} placeholder="utility, technology" />
-                </Field>
-              </>
+            {isUpdate && (
+              <p className="text-xs text-muted">
+                These project details were set on the first publish. A version
+                update doesn't change them — edit them
+                {publishedUrl ? (
+                  <>
+                    {' '}on{' '}
+                    <button
+                      onClick={() => void window.modmixer.openExternal(publishedUrl)}
+                      className="text-accent hover:underline"
+                    >
+                      Modrinth
+                    </button>
+                  </>
+                ) : (
+                  ' on Modrinth'
+                )}
+                . Set the new version number + changelog when you publish.
+              </p>
             )}
+            <Field label="Slug" hint="Lowercase, hyphenated, unique on Modrinth.">
+              <input
+                type="text"
+                value={slug}
+                onChange={(e) => setSlug(e.target.value)}
+                disabled={isUpdate}
+                className={inputCls}
+                placeholder="my-cool-mod"
+              />
+            </Field>
+            <Field label="Title">
+              <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} disabled={isUpdate} className={inputCls} />
+            </Field>
+            <Field label="Summary" hint="One-line description shown in listings. Required by Modrinth.">
+              <input type="text" value={summary} onChange={(e) => setSummary(e.target.value)} disabled={isUpdate} className={inputCls} placeholder="A short, punchy summary." />
+            </Field>
+            <Field label="Description" hint="Full markdown shown on the project page.">
+              <textarea value={description} onChange={(e) => setDescription(e.target.value)} disabled={isUpdate} rows={6} className={`${inputCls} resize-y`} />
+            </Field>
+            <Field label="License (SPDX)" hint='e.g. MIT, Apache-2.0, LGPL-3.0-only. Required by Modrinth.'>
+              <input type="text" value={license} onChange={(e) => setLicense(e.target.value)} disabled={isUpdate} className={inputCls} />
+            </Field>
+            <Field label="Categories" hint="Comma-separated Modrinth category slugs, e.g. utility, technology.">
+              <input type="text" value={categories} onChange={(e) => setCategories(e.target.value)} disabled={isUpdate} className={inputCls} placeholder="utility, technology" />
+            </Field>
 
             {progress && (
               <div className="rounded-md border border-line bg-surface/40 px-3 py-2 text-xs text-muted">
@@ -216,7 +243,7 @@ export function MinecraftPublishPanel({
                   </span>
                   <button
                     onClick={() => setConfirmOpen(true)}
-                    disabled={publish.busy || !title.trim() || (!isUpdate && (!slug.trim() || !summary.trim()))}
+                    disabled={publish.busy || !title.trim() || !slug.trim() || !summary.trim()}
                     className="rounded-md bg-ink px-3 py-1 text-[10px] uppercase tracking-[0.18em] text-paper transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     {publish.busy ? 'Publishing…' : isUpdate ? 'Publish update' : 'Publish to Modrinth'}
@@ -252,7 +279,7 @@ export function MinecraftPublishPanel({
 }
 
 const inputCls =
-  'w-full rounded-md border border-line bg-paper px-2.5 py-1.5 text-sm text-ink focus:border-accent focus:outline-none';
+  'w-full rounded-md border border-line bg-paper px-2.5 py-1.5 text-sm text-ink focus:border-accent focus:outline-none disabled:cursor-not-allowed disabled:opacity-60';
 
 /**
  * Seed the next publish's version number: bump the last numeric component of
@@ -266,6 +293,19 @@ function nextVersion(prev: string | undefined): string {
   if (!m) return prev;
   const [, head, num, tail] = m;
   return `${head}${Number(num) + 1}${tail}`;
+}
+
+/**
+ * Seed Modrinth's required one-line Summary from the mod's description (the
+ * agent fills that in at scaffold time), so the field isn't blank on a first
+ * publish. Takes the first sentence, collapsed to a single line and capped well
+ * under Modrinth's limit. The user can still rewrite it.
+ */
+function deriveSummary(desc: string): string {
+  const flat = desc.replace(/\s+/g, ' ').trim();
+  if (!flat) return '';
+  const firstSentence = flat.match(/^.*?[.!?](\s|$)/)?.[0]?.trim() || flat;
+  return firstSentence.slice(0, 120).trim();
 }
 
 function slugify(s: string): string {
