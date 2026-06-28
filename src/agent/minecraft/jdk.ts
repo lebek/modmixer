@@ -213,15 +213,38 @@ export async function provisionTemurin21(
   onProgress?: (p: ProvisionProgress) => void,
 ): Promise<JdkInfo> {
   const root = provisionRoot();
-  // Reuse a prior provision if still valid.
-  if (fs.existsSync(root)) {
-    const existing = await findExtractedHome(root);
+  const extractDir = path.join(root, 'unpacked');
+  // Reuse a prior provision if still valid. The extracted JDK home lives one
+  // level under unpacked/ (e.g. unpacked/jdk-21.0.11+10), so probe there — NOT
+  // root, which never matches and would re-provision every session. That
+  // re-provision tries to rm a JDK a leftover Gradle daemon may still hold open,
+  // which on Windows fails with EBUSY (unlink lib/modules).
+  if (fs.existsSync(extractDir)) {
+    const existing = await findExtractedHome(extractDir);
     if (existing) {
       const version = await probeJdk(existing);
       if (version) return { home: existing, version, provisioned: true };
     }
-    // Stale/partial — clear and re-provision.
-    await fsp.rm(root, { recursive: true, force: true });
+  }
+  // Stale/partial/absent — start from a clean root. A leftover Gradle daemon can
+  // keep the old JDK's lib/modules mmap-locked on Windows, making rm throw EBUSY
+  // and leaving a half-deleted tree that wedges every later attempt. Retry
+  // briefly, then surface an actionable error instead of the cryptic raw EBUSY.
+  // (The common case — a *valid* JDK — returns above and never reaches here.)
+  if (fs.existsSync(root)) {
+    try {
+      await fsp.rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'EBUSY' || code === 'EPERM' || code === 'ENOTEMPTY') {
+        throw new Error(
+          'Could not replace the bundled Java 21 toolchain — a Java or Gradle ' +
+            'process is still using it. Quit any in-progress build (or run ' +
+            `"gradlew --stop"), then try again. (${code} at ${root})`,
+        );
+      }
+      throw err;
+    }
   }
   await fsp.mkdir(root, { recursive: true });
 
@@ -235,7 +258,6 @@ export async function provisionTemurin21(
   await pipeline(Readable.fromWeb(res.body as Parameters<typeof Readable.fromWeb>[0]), fs.createWriteStream(archive));
 
   onProgress?.({ phase: 'extract', message: 'Extracting Java 21…' });
-  const extractDir = path.join(root, 'unpacked');
   await extractArchive(archive, extractDir);
   await fsp.rm(archive, { force: true });
 
