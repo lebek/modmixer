@@ -33,8 +33,10 @@ export interface GameSetupView {
   /** Re-run the prerequisite probe (after the user applies a fix). */
   recheckRequirements: () => Promise<void>;
   /**
-   * Nothing left to show: every check (required + recommended) is green and the
-   * index is fresh. The new-mod gate renders nothing in this state.
+   * The pre-chat gate has nothing blocking to show: every *required* check is
+   * green and the index is fresh. Recommended checks (ModsConfig.xml, .NET) are
+   * deferred — they don't gate chat, only the test loop that actually needs
+   * them. The new-mod gate renders nothing in this state.
    */
   allClear: boolean;
 }
@@ -131,7 +133,13 @@ export function useGameSetup(
   // Until the probe lands, treat requirements as unsatisfied so we never
   // auto-kick a build or flash "all clear" before we actually know.
   const requirementsSatisfied = requirements?.satisfied ?? false;
-  const allClear = (requirements?.allOk ?? false) && ready;
+  // The pre-chat gate blocks on this. Gate on REQUIRED checks only — a missing
+  // recommended prerequisite (e.g. ModsConfig.xml, which RimWorld writes on
+  // first launch) must not wall an existing user out of chat the way counting
+  // `allOk` did. Recommended rows still surface in onboarding + Settings →
+  // Games, and run_test_cycle re-checks the test-time ones (ModsConfig, writable
+  // Mods) before it actually needs them.
+  const allClear = requirementsSatisfied && ready;
 
   return {
     snapshot,

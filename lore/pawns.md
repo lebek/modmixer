@@ -59,7 +59,7 @@ Key points:
 
 To resolve a pawn that may be on a map OR in a caravan/transporter, use `PawnsFinder.AllMapsCaravansAndTravellingTransporters_Alive` (or the `_FreeColonists` variant for colonists). Map-only is `Find.Maps[...].mapPawns.AllPawns`.
 
-*Why it's tricky:* RimWorld spells it **"Travelling"** with two L's (British spelling), so `AllCaravansAndTravelingTransportPods_AliveOrDead` and `AllMapsCaravansAndTravelingTransporters_Alive` (one L) both fail to compile with `CS0117: 'PawnsFinder' does not contain a definition`. The single-L American spelling is the natural guess and is wrong. When in doubt, `read_csharp_symbol PawnsFinder` and copy the exact member name.
+*Why it's tricky:* RimWorld spells it **"Travelling"** with two L's (British spelling), so `AllCaravansAndTravelingTransportPods_AliveOrDead` and `AllMapsCaravansAndTravelingTransporters_Alive` (one L) both fail to compile with `CS0117: 'PawnsFinder' does not contain a definition`. The single-L American spelling is the natural guess and is wrong. When in doubt, `read_symbol PawnsFinder` and copy the exact member name.
 
 ## When assigning fixed names to humanlike pawns, keep NameTriple not NameSingle
 

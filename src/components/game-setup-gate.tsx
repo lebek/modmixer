@@ -5,12 +5,15 @@ import { useGameSetup } from './use-game-setup';
 import { GameSetupBody } from './game-setup-body';
 
 /**
- * Blocks chat until the active game is fully set up — every prerequisite check
- * is green AND the code index is fresh. Shares its entire body (the requirement
- * checks + the index build/progress) with onboarding's Setup step via
- * <GameSetupBody>, so the two paths stay identical and we make them robust once.
+ * Blocks chat until the active game is fully set up — every *required*
+ * prerequisite check is green AND the code index is fresh. Recommended checks
+ * (ModsConfig.xml, .NET) are deferred so they never wall a working user out of
+ * chat; the test loop re-checks the ones it needs. Shares its entire body (the
+ * requirement checks + the index build/progress) with onboarding's Setup step
+ * via <GameSetupBody>, so the two paths stay identical and we make them robust
+ * once.
  *
- * - allClear (all checks ok + index fresh) → renders nothing; chat proceeds.
+ * - allClear (required checks ok + index fresh) → renders nothing; chat proceeds.
  * - not modOpen (just the library lens on a game) → never nags; renders nothing.
  * - otherwise → a blocking overlay showing the unmet checks + index progress.
  *
