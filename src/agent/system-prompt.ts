@@ -1,6 +1,8 @@
 import path from 'node:path';
 import fs from 'node:fs';
+import { formatSkillsForPrompt } from '@mariozechner/pi-coding-agent';
 import { detectRimWorldPaths, detectGameVersionMajorMinorSync } from './paths.js';
+import { readUserInstructionsSync, discoverUserSkillsSync } from './user-config.js';
 import { getWorkspacePaths, parseAbout } from './workspace.js';
 import { loadSettings } from './settings.js';
 import { buildIndexSync, loreTopics } from './lore.js';
@@ -124,6 +126,37 @@ function cookbookBlock(): string {
   }
   return `Cookbook — curated reference for external frameworks Modmixer can't infer from the mod's own code (Combat Extended, Harmony, ...). BEFORE authoring in one of these areas, \`read\` the relevant file with the ordinary read tool (absolute paths below — they are outside the workspace but the read tool is allowed to reach them). These are distilled from upstream docs and carry version-stamped gotchas; treat them like read_lore but for third-party frameworks. Each file notes which parts (e.g. balance numbers) drift and should be re-checked against the live source.
 ${lines.join('\n')}`;
+}
+
+/**
+ * Power-user skills installed under ~/.modmixer/skills. We reuse pi's own
+ * formatter (the <available_skills> block + "read the file on demand" guidance)
+ * but discover from a modmixer-owned dir rather than letting pi's loader scan
+ * ~/.pi. Only name + description land in the prompt; the agent `read`s the
+ * SKILL.md when a task matches — see policy-roots.ts, which allowlists the
+ * skills dir so that read isn't rejected by the workspace sandbox.
+ *
+ * Empty string when no skills are installed, so the composed prompt is
+ * byte-identical to today for the ~all users without a skills folder (the
+ * caller spreads it conditionally — see buildSystemPrompt's invariant).
+ */
+function skillsBlock(): string {
+  const xml = formatSkillsForPrompt(discoverUserSkillsSync());
+  if (!xml.trim()) return '';
+  return `User-installed skills (from your ~/.modmixer/skills folder):${xml}`;
+}
+
+/**
+ * The user's global instructions from ~/.modmixer/AGENTS.md, folded into the
+ * prompt as their standing preferences. Placed last by the caller so it reads
+ * as the final word and can override defaults. Empty string when absent.
+ */
+function userInstructionsBlock(): string {
+  const text = readUserInstructionsSync();
+  if (!text) return '';
+  return `User's global instructions (from ~/.modmixer/AGENTS.md) — the user's standing preferences for how you work across every mod. Follow them; when one conflicts with a default behavior above, prefer the user's instruction unless doing so would break a build or violate a safety rule:
+
+${text}`;
 }
 
 function pathsBlock(ctx: PromptContext): string {
@@ -411,12 +444,16 @@ ${pathsBlock(ctx)}`;
       break;
   }
   const cookbook = cookbookBlock();
+  const skills = skillsBlock();
+  const userInstructions = userInstructionsBlock();
   return [
     head,
     scopeBlock,
     loreBlock(),
     ...(cookbook ? [cookbook] : []),
+    ...(skills ? [skills] : []),
     live ? LIVE_SHARED_RULES : SHARED_RULES,
+    ...(userInstructions ? [userInstructions] : []),
   ].join('\n\n');
 }
 
@@ -479,11 +516,15 @@ export function buildMinecraftSystemPrompt(scope: ConversationScope): string {
   const head = `You are an expert Minecraft (NeoForge) modding assistant, operating inside Modmixer, an application that helps people build and diagnose Minecraft Java mods.
 
 ${minecraftPathsBlock(ws.workspaceDir, defaultAuthor)}`;
+  const skills = skillsBlock();
+  const userInstructions = userInstructionsBlock();
   return [
     head,
     minecraftScopeBlock(scope),
     loreBlock('minecraft'),
+    ...(skills ? [skills] : []),
     MINECRAFT_RULES,
     launchModeBlock(autoLaunch),
+    ...(userInstructions ? [userInstructions] : []),
   ].join('\n\n');
 }

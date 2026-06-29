@@ -45,6 +45,14 @@ export interface PathPolicyRoots {
    */
   cookbookDir: string;
   /**
+   * The user's global skills dir (~/.modmixer/skills). Read-only, allowed so
+   * the agent can `read` a SKILL.md the system prompt advertises — the dir
+   * lives in the home folder, outside the workspace sandbox. ONLY the skills
+   * subtree is allowed; the rest of ~/.modmixer (e.g. AGENTS.md, which Modmixer
+   * reads itself at prompt-build time) stays unreachable. Null when absent.
+   */
+  userSkillsDir: string | null;
+  /**
    * Minecraft toolchain + build-cache roots, allowed read-side so the agent can
    * `read`/`grep` the bundled JDK, the Gradle user home, and the NeoForm runtime
    * cache when chasing a Gradle stacktrace into a decompiled dependency. Same
@@ -186,6 +194,7 @@ export function assertPathAllowed(
     roots.playerLogDir,
     roots.indexDir,
     roots.cookbookDir,
+    roots.userSkillsDir,
     ...roots.minecraftRoots,
     ...extraRoots,
   ].filter((p): p is string => typeof p === 'string' && p.length > 0);

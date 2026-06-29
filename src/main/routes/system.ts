@@ -2,6 +2,11 @@ import fsp from 'node:fs/promises';
 import { shell } from 'electron';
 import { getMonitorServer } from '../../agent/monitor/server.js';
 import { userLoreDir } from '../../agent/lore.js';
+import {
+  userConfigDir,
+  userInstructionsPath,
+  userSkillsDir,
+} from '../../agent/user-config.js';
 import { getAdapter } from '../../agent/adapters/index.js';
 import { getLastSetupProgress } from '../../agent/index/setup-progress.js';
 import { resolveGameId } from '../../agent/games/registry.js';
@@ -68,4 +73,71 @@ export function registerSystemRoutes(ctx: RouteContext): void {
     const err = await shell.openPath(dir);
     return err === '' ? null : err;
   });
+
+  // Power-user: open the global skills folder (~/.modmixer/skills). Seed it on
+  // first reveal with a README explaining the <name>/SKILL.md layout (the
+  // README sits at the skills root, which discovery ignores — only subdirs with
+  // a SKILL.md count). Returns null on success or an error string.
+  ipc.handle('modmixer:skills:reveal', async () => {
+    const dir = userSkillsDir();
+    await fsp.mkdir(dir, { recursive: true });
+    await writeIfAbsent(`${dir}/README.md`, SKILLS_README);
+    const err = await shell.openPath(dir);
+    return err === '' ? null : err;
+  });
+
+  // Power-user: open the global instructions file (~/.modmixer/AGENTS.md) in
+  // the OS default editor, creating it from an inert template on first use.
+  ipc.handle('modmixer:instructions:edit', async () => {
+    await fsp.mkdir(userConfigDir(), { recursive: true });
+    const file = userInstructionsPath();
+    await writeIfAbsent(file, INSTRUCTIONS_TEMPLATE);
+    const err = await shell.openPath(file);
+    return err === '' ? null : err;
+  });
 }
+
+/** Write `content` only if `file` doesn't already exist (never clobbers). */
+async function writeIfAbsent(file: string, content: string): Promise<void> {
+  try {
+    await fsp.writeFile(file, content, { flag: 'wx' });
+  } catch {
+    // EEXIST (already authored) or a transient write error — either way we
+    // still open what's there; nothing to surface.
+  }
+}
+
+// Kept inert: the whole thing is an HTML comment so an un-edited file folds a
+// harmless note into the prompt rather than active instructions.
+const INSTRUCTIONS_TEMPLATE = `<!--
+Modmixer — global instructions
+
+Anything you write in this file (outside this comment) is added to the
+assistant's instructions for every mod, in every new chat you start.
+
+Changes apply to NEW chats only; existing chats keep the instructions they were
+created with. Delete this comment and write your own instructions below.
+-->
+`;
+
+const SKILLS_README = `# Modmixer skills
+
+Each skill is a folder with a \`SKILL.md\` inside:
+
+    skills/
+      my-skill/
+        SKILL.md        <- required
+        (any other files the skill references)
+
+\`SKILL.md\` starts with YAML frontmatter:
+
+    ---
+    name: my-skill        # optional; defaults to the folder name (lowercase-kebab)
+    description: One line telling the assistant when to use this skill.
+    ---
+
+    Full instructions go here. The assistant reads this file on demand when a
+    task matches the description, so keep the description specific.
+
+Skills apply to new chats only.
+`;

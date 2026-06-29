@@ -35,6 +35,7 @@ const ROOTS: PathPolicyRoots = {
   ),
   indexDir: path.join(HOME, 'Library/Application Support/Modmixer/index'),
   cookbookDir: path.join(HOME, 'Library/Application Support/Modmixer/cookbook'),
+  userSkillsDir: path.join(HOME, '.modmixer/skills'),
   minecraftRoots: [
     path.join(HOME, 'Library/Application Support/Modmixer/toolchain'),
     path.join(HOME, '.gradle'),
@@ -76,6 +77,34 @@ describe('assertPathAllowed', () => {
       'caches/modules-2/files-2.1/net.neoforged/neoforge/sources.jar',
     );
     assert.equal(assertPathAllowed(dep, ROOTS), dep);
+  });
+
+  it('accepts a SKILL.md under the user skills dir', () => {
+    const ok = path.join(ROOTS.userSkillsDir!, 'my-skill/SKILL.md');
+    assert.equal(assertPathAllowed(ok, ROOTS), ok);
+  });
+
+  it('rejects a sibling file in ~/.modmixer outside the skills subtree', () => {
+    // AGENTS.md is read by Modmixer at prompt-build, never by the agent —
+    // only the skills/ subtree is allowlisted.
+    const outside = path.join(HOME, '.modmixer/AGENTS.md');
+    assert.throws(
+      () => assertPathAllowed(outside, ROOTS),
+      (err: unknown) =>
+        err instanceof PathPolicyError && err.kind === 'allowlist',
+    );
+  });
+
+  it('handles a null userSkillsDir', () => {
+    const noSkills: PathPolicyRoots = { ...ROOTS, userSkillsDir: null };
+    assert.throws(
+      () =>
+        assertPathAllowed(
+          path.join(HOME, '.modmixer/skills/my-skill/SKILL.md'),
+          noSkills,
+        ),
+      (err: unknown) => err instanceof PathPolicyError,
+    );
   });
 
   it('rejects /etc/passwd', () => {

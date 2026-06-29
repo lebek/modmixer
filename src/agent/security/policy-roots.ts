@@ -5,6 +5,7 @@ import { detectRimWorldPaths } from '../paths.js';
 import { getWorkspacePaths } from '../workspace.js';
 import { getIndexPaths, modCacheRoot } from '../index/paths.js';
 import { cookbookDir } from '../cookbook.js';
+import { userSkillsDir } from '../user-config.js';
 import type { PathPolicyRoots } from './path-policy.js';
 
 /**
@@ -38,6 +39,7 @@ export function getPathPolicyRoots(): PathPolicyRoots {
     playerLogDir: rim.playerLog ? path.dirname(rim.playerLog) : null,
     indexDir: idx.root,
     cookbookDir: cookbookDir(),
+    userSkillsDir: userSkillsDir(),
     minecraftRoots: [
       path.join(app.getPath('userData'), 'toolchain'),
       gradleUserHome,

@@ -317,14 +317,6 @@ export function AppSettingsDialog({
                       <div className="flex flex-wrap items-center gap-4">
                         <button
                           type="button"
-                          onClick={() => void window.modmixer.revealLoreDir()}
-                          title="Reveal the folder where Modmixer stores cross-mod modding lessons learned during your sessions."
-                          className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted/70 transition-colors hover:text-ink"
-                        >
-                          Reveal lore folder
-                        </button>
-                        <button
-                          type="button"
                           onClick={async () => {
                             await window.modmixer.resetOnboarding();
                             window.location.reload();
@@ -712,6 +704,35 @@ function AdvancedSection({
             run shell commands without asking. Turn this off when you're done.
           </div>
         )}
+      </div>
+
+      <div className="border-t border-line pt-4">
+        <div className="flex flex-wrap items-center gap-4">
+          <button
+            type="button"
+            onClick={() => void window.modmixer.editGlobalInstructions()}
+            title="Open ~/.modmixer/AGENTS.md — standing instructions added to every new chat. Applies to new chats only."
+            className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted/70 transition-colors hover:text-ink"
+          >
+            Edit AGENTS.md
+          </button>
+          <button
+            type="button"
+            onClick={() => void window.modmixer.revealSkillsDir()}
+            title="Open ~/.modmixer/skills — drop in a <name>/SKILL.md per skill (a reusable instruction packet the assistant reads on demand). See the README created in that folder. Applies to new chats only."
+            className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted/70 transition-colors hover:text-ink"
+          >
+            Skill Folder
+          </button>
+          <button
+            type="button"
+            onClick={() => void window.modmixer.revealLoreDir()}
+            title="Reveal the folder where Modmixer stores cross-mod modding lessons learned during your sessions."
+            className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted/70 transition-colors hover:text-ink"
+          >
+            Lore Folder
+          </button>
+        </div>
       </div>
     </div>
   );

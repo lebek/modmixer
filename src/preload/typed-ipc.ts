@@ -353,6 +353,10 @@ export interface Channels {
   // Lore reveal (power-user)
   'modmixer:lore:reveal': () => string | null;
 
+  // Power-user config (~/.modmixer): skills folder + global instructions
+  'modmixer:skills:reveal': () => string | null;
+  'modmixer:instructions:edit': () => string | null;
+
   // Index
   'modmixer:index:get-snapshot': () => IndexSnapshot;
   'modmixer:index:rebuild': (options?: { force?: boolean }) => IndexSnapshot;

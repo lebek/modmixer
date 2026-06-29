@@ -282,6 +282,10 @@ const api = {
   // Lore (power-user reveal)
   revealLoreDir: () => invoke('modmixer:lore:reveal'),
 
+  // Power-user config (~/.modmixer): skills folder + global instructions
+  revealSkillsDir: () => invoke('modmixer:skills:reveal'),
+  editGlobalInstructions: () => invoke('modmixer:instructions:edit'),
+
   // Confirmation gate (sensitive agent actions)
   onConfirmRequest: (
     handler: (req: import('./agent/security/confirmation-gate').ConfirmationRequest) => void,
