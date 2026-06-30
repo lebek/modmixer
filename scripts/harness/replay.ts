@@ -44,12 +44,19 @@ import { buildSystemPrompt } from '../../src/agent/system-prompt.js';
 import { ScopedResourceLoader } from '../../src/agent/resource-loader.js';
 import { launchModeHint } from '../../src/agent/launch-mode.js';
 import type { ConversationScope } from '../../src/agent/conversations.js';
+import type { GameId } from '../../src/agent/games/types.js';
 
 interface HarnessConfig {
   /** Absolute path to the source session JSONL to replay. */
   sessionFile: string;
   /** Conversation scope — drives the real system prompt. */
   scope: ConversationScope;
+  /**
+   * Game for the conversation. Drives which system prompt + tool set is built
+   * (RimWorld default; Minecraft for NeoForge chats) and which run_test_cycle
+   * result text the stub returns. Defaults to rimworld.
+   */
+  game?: GameId;
   /** Model to run the turn on. */
   model: { provider: string; modelId: string };
   /** Reasoning level for the turn. */
@@ -110,11 +117,27 @@ const STUBBED = new Set<string>([
   'game_action',
 ]);
 
+// run_test_cycle result text, the part of the Minecraft fix that lives in the
+// tool result (src/agent/minecraft/adapter.ts). baseline = pre-change text,
+// fix = post-change text. The A/B flips this together with the system-prompt
+// block so the harness measures the whole change, not half of it.
+const MC_TEST_CYCLE_BASELINE =
+  'Launched the modded client (gradlew runClient) with the diagnostics bridge. ' +
+  'The first run decompiles Minecraft and can take several minutes. Errors will ' +
+  'arrive automatically as "[automated …]" messages; tell the user what to try in-game.';
+const MC_TEST_CYCLE_FIX =
+  'Launched the modded client (gradlew runClient) with the diagnostics bridge. ' +
+  'The first run decompiles Minecraft and can take several minutes. ' +
+  'Watching the bridge in the background; errors will arrive automatically as ' +
+  '"[automated …]" messages. Tell the user what to try in-game, then end your turn — ' +
+  "don't poll or sleep to wait for errors.";
+
 function stubText(
   name: string,
   params: Record<string, unknown>,
   variant: 'baseline' | 'fix',
   live: boolean,
+  game: GameId,
 ): string {
   const folder =
     typeof params.folder === 'string' ? params.folder : '<folder>';
@@ -136,7 +159,14 @@ function stubText(
     case 'update_schematic':
       return `Updated schematic for ${folder} (shortDescription, body). The Schematic panel reflects this now.${hint}`;
     case 'run_test_cycle':
+      if (game === 'minecraft') {
+        return variant === 'fix' ? MC_TEST_CYCLE_FIX : MC_TEST_CYCLE_BASELINE;
+      }
       return 'Quit running RimWorld instance. Dev mode on. Synced the mod into RimWorld\'s Mods/. Launched RimWorld with -quicktest. Watching the in-game bridge in the background; errors will arrive as auto-prompts.';
+    case 'monitor_poll':
+      // Realistic "armed, nothing yet" so the model decides naturally whether
+      // to keep polling (the buggy loop) or end its turn.
+      return '# test run #1 — game connected\nNo errors captured in this run.';
     case 'edit':
       return 'Successfully replaced 1 block(s).';
     case 'write':
@@ -162,6 +192,7 @@ function stubTool(
   tool: AgentTool<any>,
   variant: 'baseline' | 'fix',
   live: boolean,
+  game: GameId,
   record: (call: RecordedCall) => void,
 ): AgentTool<any> {
   return {
@@ -171,7 +202,11 @@ function stubTool(
       params: Record<string, unknown>,
     ): Promise<AgentToolResult<unknown>> => {
       record({ name: tool.name, params });
-      return { content: [{ type: 'text', text: stubText(tool.name, params, variant, live) }] };
+      return {
+        content: [
+          { type: 'text', text: stubText(tool.name, params, variant, live, game) },
+        ],
+      };
     },
   };
 }
@@ -255,12 +290,42 @@ const FIX_TWO_VERBS =
   "Two verbs — once you know what you're building, classify it:";
 const OLD_TWO_VERBS = 'Two verbs — classify every request first:';
 
+// ── Minecraft test-cycle A/B (Lemonade replay) ──────────────────────────────
+// The change under test is the "Test-in-game flow" block (esp. "Your turn ends
+// … Do NOT poll in a loop or sleep") added to MINECRAFT_RULES, plus the
+// reworded run_test_cycle line that demotes monitor_poll to on-demand. baseline
+// strips both back to the pre-change text so the A/B isolates the fix. Same
+// exact-string surgery + fail-loud contract as the live-mode block above.
+const MC_FLOW_START = '\n\nTest-in-game flow when the user wants to run their mod:';
+const MC_FLOW_END = 'monitoring is push-based and runs in the background.';
+const MC_FIX_469 =
+  'streams aggregated, deduped errors back to you automatically as "[automated …]" user messages (see the test-in-game flow below). monitor_poll / monitor_get_error pull current state on demand — they are not a loop to sit in.';
+const MC_OLD_469 =
+  'streams aggregated, deduped errors back to you (read them with monitor_poll / monitor_get_error).';
+
+function minecraftBaseline(builtPrompt: string): string {
+  const startIdx = builtPrompt.indexOf(MC_FLOW_START);
+  const endIdx = builtPrompt.indexOf(MC_FLOW_END);
+  if (startIdx < 0 || endIdx < startIdx || !builtPrompt.includes(MC_FIX_469)) {
+    throw new Error(
+      'minecraft baseline variant: fix markers not found in the built system prompt — MINECRAFT_RULES drifted, update the markers in replay.ts',
+    );
+  }
+  const stripped =
+    builtPrompt.slice(0, startIdx) +
+    builtPrompt.slice(endIdx + MC_FLOW_END.length);
+  return stripped.replace(MC_FIX_469, MC_OLD_469);
+}
+
 function promptForVariant(
   builtPrompt: string,
   variant: 'baseline' | 'fix',
   live: boolean,
+  game: GameId,
 ): string {
-  if (!live || variant === 'fix') return builtPrompt;
+  if (variant === 'fix') return builtPrompt;
+  if (game === 'minecraft') return minecraftBaseline(builtPrompt);
+  if (!live) return builtPrompt;
   const startIdx = builtPrompt.indexOf(INTERPRET_START);
   const endIdx = builtPrompt.indexOf(INTERPRET_END);
   if (!builtPrompt.includes(FIX_TWO_VERBS) || startIdx < 0 || endIdx < startIdx) {
@@ -320,6 +385,7 @@ async function runOneTurn(
   fs.mkdirSync(tempSessionDir, { recursive: true });
 
   const live = cfg.live === true;
+  const game: GameId = cfg.game ?? 'rimworld';
   const calls: RecordedCall[] = [];
   const base = buildCustomTools(
     cwd,
@@ -327,19 +393,19 @@ async function runOneTurn(
     () => cfg.scope,
     () => model,
     () => [],
-    { live },
+    { live, game },
   );
   const customTools = base
     .map((t) =>
       STUBBED.has(t.name)
-        ? stubTool(t, variant, live, (c) => calls.push(c))
+        ? stubTool(t, variant, live, game, (c) => calls.push(c))
         : t,
     )
     .map((t) => toolDefinitionFromAgentTool(t));
 
   const sessionManager = SessionManager.open(tempFile, tempSessionDir, cwd);
   const resourceLoader = new ScopedResourceLoader(
-    promptForVariant(systemPrompt, variant, live),
+    promptForVariant(systemPrompt, variant, live, game),
     [],
   );
   const { session } = (await createAgentSession({
@@ -385,15 +451,30 @@ async function runOneTurn(
     }
   }
   const launched = toolNames.includes('run_test_cycle');
+  // Minecraft test-cycle scenario: the question isn't whether it launched but
+  // what it did AFTER — ending the turn (push-based, correct) vs. babysitting
+  // with monitor_poll / bash-sleep loops (the bug). Any monitor_poll or bash
+  // call after a launch is the buggy pattern.
+  const polledAfterLaunch =
+    launched &&
+    toolNames.some((n, i) => i > toolNames.indexOf('run_test_cycle') && (n === 'monitor_poll' || n === 'bash'));
+  let outcome: string;
+  if (live) {
+    outcome = classifyLiveOutcome(calls);
+  } else if (game === 'minecraft') {
+    outcome = !launched
+      ? 'no-launch'
+      : polledAfterLaunch
+        ? 'launched-then-polled'
+        : 'launched-then-ended';
+  } else {
+    outcome = launched ? 'launched-without-asking' : 'asked/held';
+  }
   return {
     variant,
     toolSequence: toolNames,
     launched,
-    outcome: live
-      ? classifyLiveOutcome(calls)
-      : launched
-        ? 'launched-without-asking'
-        : 'asked/held',
+    outcome,
     finalText: finalText.trim(),
   };
 }
@@ -428,7 +509,8 @@ async function main(): Promise<void> {
   }
 
   const live = cfg.live === true;
-  const systemPrompt = buildSystemPrompt(cfg.scope, { live });
+  const game: GameId = cfg.game ?? 'rimworld';
+  const systemPrompt = buildSystemPrompt(cfg.scope, { live, game });
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mm-harness-'));
 
   if (cfg.dry) {
@@ -436,12 +518,13 @@ async function main(): Promise<void> {
     const askFirst = !systemPrompt.includes('Launch mode — proactive');
     // Exercise the variant transform in dry mode so a marker drift fails
     // here, before any model spend.
-    const baselinePrompt = promptForVariant(systemPrompt, 'baseline', live);
+    const baselinePrompt = promptForVariant(systemPrompt, 'baseline', live, game);
     console.log(
       JSON.stringify(
         {
           dry: true,
           live,
+          game,
           model: `${model.provider}/${model.id}`,
           systemPromptChars: systemPrompt.length,
           baselinePromptChars: baselinePrompt.length,

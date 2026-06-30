@@ -382,8 +382,10 @@ async function test(
 
   lines.push(
     'Launched the modded client (gradlew runClient) with the diagnostics bridge. ' +
-      'The first run decompiles Minecraft and can take several minutes. Errors will ' +
-      'arrive automatically as "[automated …]" messages; tell the user what to try in-game.',
+      'The first run decompiles Minecraft and can take several minutes. ' +
+      'Watching the bridge in the background; errors will arrive automatically as ' +
+      '"[automated …]" messages. Tell the user what to try in-game, then end your turn — ' +
+      "don't poll or sleep to wait for errors.",
   );
   return {
     content: [{ type: 'text', text: lines.join(' ') }],

@@ -77,6 +77,11 @@ if (!fs.existsSync(convo.sessionFile)) {
 const config = {
   sessionFile: convo.sessionFile,
   scope: convo.scope,
+  // The conversation's game drives which system prompt + tool set is built
+  // (RimWorld default; Minecraft for NeoForge chats). Mirrors the app, which
+  // reads convo.game / the mod's prefs. Without this a Minecraft chat would
+  // replay against the RimWorld prompt.
+  game: convo.game ?? 'rimworld',
   // Live conversations replay with the live prompt + tool set; the variants
   // then A/B the live system prompt (see replay.ts).
   live: convo.live === true,
