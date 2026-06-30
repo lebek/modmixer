@@ -2065,17 +2065,30 @@ export class AgentHost {
     isolated: boolean;
   }): Promise<void> {
     // One game, one bridge socket, one ModsConfig.xml — in-game testing is a
-    // genuine singleton. If another conversation is already monitoring a
-    // test, refuse rather than silently stealing the bridge; the second
-    // mod's run_test_cycle surfaces this as an error tool result.
+    // genuine singleton. Refuse a second conversation's test ONLY while a
+    // bridge is genuinely connected right now: that's a real, live test worth
+    // protecting. A lingering monitoringConversationId with NO connected bridge
+    // is stale — the game closed without a clean bridge disconnect, or the
+    // bridge never connected at all (e.g. a Minecraft run the user closed
+    // mid-build, before the in-game bridge linked up; disconnect teardown is
+    // gated on having seen a connect, so that case leaves the flag armed
+    // forever). A stale flag must not wedge every future launch: take it over
+    // instead of refusing, so a dead session can't block the app until restart.
     if (
       this.monitoringConversationId &&
       this.monitoringConversationId !== opts.conversationId
     ) {
-      throw new Error(
-        'Another mod is already being tested. Only one in-game test can run ' +
-          'at a time — finish that test (or close the game) before testing ' +
-          'this mod.',
+      if (getMonitorServer().getState().kind === 'connected') {
+        throw new Error(
+          'Another mod is already being tested. Only one in-game test can run ' +
+            'at a time — finish that test (or close the game) before testing ' +
+            'this mod.',
+        );
+      }
+      console.warn(
+        `[monitor] taking over a stale test session (held by ` +
+          `${this.monitoringConversationId}, no bridge connected) for ` +
+          `conversation ${opts.conversationId}`,
       );
     }
     this.stopMonitoring();
