@@ -1,9 +1,12 @@
 package com.modmixer.bridge;
 
+import java.util.concurrent.atomic.AtomicBoolean;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import net.minecraft.client.gui.screens.TitleScreen;
+import net.minecraft.world.level.GameType;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.client.event.ScreenEvent;
 import net.neoforged.neoforge.client.gui.LoadingErrorScreen;
@@ -32,6 +35,13 @@ final class ClientHooks {
     private static final Logger LOG = LoggerFactory.getLogger("modmixerbridge");
 
     private final ModMixerBridge owner;
+
+    /**
+     * One-shot guard: auto-enter the quicktest world on the FIRST title screen
+     * only. Without it, quitting the test world back to the menu would
+     * immediately recreate another, trapping the user in a relaunch loop.
+     */
+    private final AtomicBoolean quickTestStarted = new AtomicBoolean(false);
 
     private ClientHooks(ModMixerBridge owner) {
         this.owner = owner;
@@ -62,6 +72,13 @@ final class ClientHooks {
         } else if (screen instanceof TitleScreen) {
             LOG.info("[ModMixer Bridge] TitleScreen reached — clean run");
             owner.triggerExit(false, "TitleScreen");
+            // Quicktest: from the first title screen, drop straight into a fresh
+            // superflat world (no-op when modmixer.quicktest was not supplied, or
+            // in auto-exit mode where triggerExit above already exited).
+            GameType quickTest = owner.quickTestMode();
+            if (quickTest != null && quickTestStarted.compareAndSet(false, true)) {
+                QuickTest.enterFreshFlatWorld(quickTest);
+            }
         }
     }
 }

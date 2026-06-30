@@ -19,6 +19,8 @@ import net.neoforged.fml.loading.FMLEnvironment;
 import net.neoforged.fml.loading.FMLLoader;
 import net.neoforged.neoforge.common.NeoForge;
 
+import net.minecraft.world.level.GameType;
+
 /**
  * ModMixer NeoForge bridge — entry point.
  *
@@ -49,6 +51,10 @@ import net.neoforged.neoforge.common.NeoForge;
  *       watchdog). If absent, the bridge is purely passive (interactive use).</li>
  *   <li>{@code modmixer.reportFile} — path to append NDJSON fallback records to,
  *       drained on shutdown.</li>
+ *   <li>{@code modmixer.quicktest} — if set to {@code creative}/{@code survival}
+ *       (etc.), the client auto-enters a freshly-created superflat world in that
+ *       game mode from the title screen (RimWorld {@code -quicktest} parity).
+ *       Absent → land at the title screen. Client-only; see {@link QuickTest}.</li>
  * </ul>
  *
  * <p>Dist safety: all references to client-only Minecraft/NeoForge classes
@@ -82,6 +88,9 @@ public final class ModMixerBridge {
     /** Guards against multiple exit triggers racing (timeout vs. screen event). */
     private final AtomicBoolean exited = new AtomicBoolean(false);
 
+    /** Quicktest game mode from modmixer.quicktest, or null when disabled. */
+    private final GameType quickTestMode;
+
     /**
      * NeoForge invokes this constructor with the mod's event bus. We register
      * mod-bus listeners on the supplied bus (lifecycle events like
@@ -101,6 +110,11 @@ public final class ModMixerBridge {
         Long timeout = longProp("modmixer.testTimeoutMs");
         this.autoExit = timeout != null;
         this.testTimeoutMs = timeout != null ? timeout : 0L;
+
+        // Quicktest mode (client-only effect, but parsed here from the server-safe
+        // GameType so the dedicated server never touches the client-only QuickTest
+        // class — only ClientHooks does, behind the dist guard below).
+        this.quickTestMode = parseQuickTestMode(System.getProperty("modmixer.quicktest"));
 
         String gameVersion = safeMinecraftVersion();
 
@@ -130,8 +144,8 @@ public final class ModMixerBridge {
         // (e) Watchdog (only auto-exits when a test timeout was supplied).
         startWatchdog();
 
-        LOG.info("[ModMixer Bridge] active — port={} game={} autoExit={} timeoutMs={}",
-            port, gameVersion, autoExit, testTimeoutMs);
+        LOG.info("[ModMixer Bridge] active — port={} game={} autoExit={} timeoutMs={} quicktest={}",
+            port, gameVersion, autoExit, testTimeoutMs, quickTestMode);
     }
 
     // ---- callbacks used by ClientHooks --------------------------------------
@@ -139,6 +153,16 @@ public final class ModMixerBridge {
     /** Emit one already-serialized error_event line. */
     void emit(String json) {
         client.send(json);
+    }
+
+    /**
+     * The quicktest game mode, or null when {@code modmixer.quicktest} was absent.
+     * {@link ClientHooks} reads this to decide whether to auto-enter a world on
+     * the first title screen. GameType is server-safe, so exposing it here keeps
+     * the dedicated server clear of the client-only {@link QuickTest} class.
+     */
+    GameType quickTestMode() {
+        return quickTestMode;
     }
 
     // ---- Log4j2 wiring -------------------------------------------------------
@@ -251,6 +275,31 @@ public final class ModMixerBridge {
         }
         // Pinned fallback — this bridge ships for exactly 1.21.1.
         return "1.21.1";
+    }
+
+    /**
+     * Map the {@code modmixer.quicktest} launch property to a {@link GameType},
+     * or null when absent/unrecognised (→ no auto-enter; land at the title
+     * screen, the pre-quicktest behaviour). GameType is server-safe, so this
+     * keeps the dedicated-server load path clear of the client-only
+     * {@link QuickTest} class.
+     */
+    private static GameType parseQuickTestMode(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        switch (raw.trim().toLowerCase(java.util.Locale.ROOT)) {
+            case "creative":
+                return GameType.CREATIVE;
+            case "survival":
+                return GameType.SURVIVAL;
+            case "adventure":
+                return GameType.ADVENTURE;
+            case "spectator":
+                return GameType.SPECTATOR;
+            default:
+                return null;
+        }
     }
 
     private static int intProp(String key, int dflt) {

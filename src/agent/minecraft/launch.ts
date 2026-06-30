@@ -90,6 +90,13 @@ export interface MinecraftLaunchOptions {
    * classpath the same way the bridge jar is, so FML discovers them.
    */
   extraMods?: string[];
+  /**
+   * Quicktest (RimWorld `-quicktest` parity): when set, the bridge drives the
+   * client straight from the title screen into a freshly-created superflat world
+   * in this game mode, so the user lands in-game with the mod loaded. Omitted →
+   * the client stops at the title screen as before.
+   */
+  quicktest?: 'creative' | 'survival';
   onLine?: (line: string) => void;
   signal?: AbortSignal;
 }
@@ -120,6 +127,12 @@ export async function launchMinecraftClient(
   const extraMods = (opts.extraMods ?? []).filter((p) => p.trim().length > 0);
   if (extraMods.length > 0) {
     args.push(`-PmodmixerExtraMods=${extraMods.join(path.delimiter)}`);
+  }
+  // Quicktest: the bridge reads this and auto-enters a fresh superflat world in
+  // the given game mode (the build.gradle forwarder passes all modmixer.* props
+  // through to the game JVM).
+  if (opts.quicktest) {
+    args.push(`-Dmodmixer.quicktest=${opts.quicktest}`);
   }
   const run = await spawnGradle(projectDir, {
     tasks: ['runClient'],

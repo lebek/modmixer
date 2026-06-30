@@ -195,6 +195,11 @@ export async function createMinecraftMod(
  */
 const BRIDGE_WIRING_MARKER = '// --- ModMixer diagnostics bridge';
 const COMPANION_WIRING_MARKER = '// --- ModMixer companion mods';
+// Every ModMixer-managed block starts with this prefix; ensureModmixerWiring
+// strips and regenerates everything from the first such marker so a block can be
+// UPGRADED in place (not only appended-if-absent) on a project that has an older
+// one. Our blocks are always appended at EOF in order, so nothing else follows.
+const MODMIXER_MARKER_PREFIX = '// --- ModMixer';
 
 const BRIDGE_SNIPPET = `
 
@@ -209,12 +214,12 @@ if (project.hasProperty('modmixerBridgeJar')) {
 neoForge {
     runs {
         client {
-            ['port', 'token', 'testTimeoutMs', 'reportFile'].each { k ->
-                def v = System.getProperty("modmixer.\${k}")
-                if (v != null) {
-                    systemProperty("modmixer.\${k}", v)
-                }
-            }
+            // Forward EVERY -Dmodmixer.* system property to the game JVM so the
+            // bridge can read them (port, token, testTimeoutMs, reportFile,
+            // quicktest, …). Generic on purpose: new properties need no edit here.
+            System.getProperties().stringPropertyNames()
+                .findAll { it.startsWith('modmixer.') }
+                .each { k -> systemProperty(k, System.getProperty(k)) }
         }
     }
 }
@@ -236,19 +241,33 @@ if (project.hasProperty('modmixerExtraMods')) {
 `;
 
 /**
- * Ensure the build.gradle has the current ModMixer test-loop wiring. Each block
- * is appended only when its marker is absent, so this is safe to call repeatedly
- * and on a mod scaffolded before a block existed (the launch path calls it before
- * every run to self-heal older projects). No-op when the file is missing.
+ * Strip every ModMixer-managed wiring block, returning just the project's own
+ * build.gradle. Our blocks are always appended at EOF in order, so everything
+ * from the first `// --- ModMixer …` marker on is ours to regenerate. Trailing
+ * whitespace is trimmed so re-appending the snippets (each leads with its own
+ * blank line) stays tidy and idempotent.
+ */
+function stripModmixerBlocks(content: string): string {
+  const idx = content.indexOf(MODMIXER_MARKER_PREFIX);
+  const head = idx < 0 ? content : content.slice(0, idx);
+  return head.replace(/\s+$/, '');
+}
+
+/**
+ * Ensure the build.gradle has the CURRENT ModMixer test-loop wiring. Strips any
+ * existing ModMixer block(s) and re-appends the current snippets, so a project
+ * scaffolded against an OLDER wiring version is upgraded in place (the launch
+ * path calls this before every run to self-heal older projects) — not merely
+ * left alone because a marker is present. Idempotent: regenerating identical
+ * wiring produces identical bytes and skips the write. No-op when the file is
+ * missing.
  */
 export async function ensureModmixerWiring(
   buildGradlePath: string,
 ): Promise<void> {
   if (!fs.existsSync(buildGradlePath)) return;
   const existing = await fsp.readFile(buildGradlePath, 'utf8');
-  let next = existing;
-  if (!next.includes(BRIDGE_WIRING_MARKER)) next += BRIDGE_SNIPPET;
-  if (!next.includes(COMPANION_WIRING_MARKER)) next += COMPANION_SNIPPET;
+  const next = stripModmixerBlocks(existing) + BRIDGE_SNIPPET + COMPANION_SNIPPET;
   if (next !== existing) await fsp.writeFile(buildGradlePath, next, 'utf8');
 }
 

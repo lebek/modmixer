@@ -73,13 +73,28 @@ const scaffoldDescription =
   "Set up the mod's NeoForge (Gradle) project. A Minecraft mod IS a Gradle project; identity lives in gradle.properties. When the active conversation is bound to a mod (including the \"+ new mod\" placeholder) the project is normally ALREADY laid down — in that case you only need set_mod_metadata to name it, and scaffold_mod just re-stamps the identity. Use scaffold_mod to (re)create the project when it's missing. packageId is the mod id (a short lowercase word like \"coolblocks\"), NOT reverse-DNS; rimworldVersions/withCSharp are ignored. The mod is NOT yet active in-game — run_test_cycle handles launch.";
 
 const testCycleDescription =
-  "Macro: the only way to test the mod in-game. Builds the mod if needed and launches the modded client (./gradlew runClient) with the diagnostics bridge (aggregated, deduped errors streamed back over localhost), then arms background monitoring. The first run decompiles Minecraft and can take several minutes — that's expected, not a hang. If a client is already running it's stopped and relaunched. For compat work, pass companionMods to load the user's other installed mods into the SAME dev client. After this returns, tell the user EXACTLY what to try in-game (they're about to alt-tab) — errors arrive automatically as '[automated …]' messages via the error-triage protocol.";
+  "Macro: the only way to test the mod in-game. Builds the mod if needed and launches the modded client (./gradlew runClient) with the diagnostics bridge (aggregated, deduped errors streamed back over localhost), then arms background monitoring. The first run decompiles Minecraft and can take several minutes — that's expected, not a hang. If a client is already running it's stopped and relaunched. By default (quicktest) the client drops straight into a freshly-created superflat creative world with the mod loaded — no menu clicks; pass quicktest=false to stop at the title screen instead, or gameMode=\"survival\" for survival. For compat work, pass companionMods to load the user's other installed mods into the SAME dev client. After this returns, tell the user EXACTLY what to try in-game (they're about to alt-tab) — errors arrive automatically as '[automated …]' messages via the error-triage protocol.";
 
-/** Minecraft's run_test_cycle: the folder, plus optional compat companion mods. */
+/**
+ * Minecraft's run_test_cycle params: the folder, a quicktest knob (RimWorld
+ * `-quicktest` parity), its game mode, plus optional compat companion mods.
+ */
 const minecraftTestCycleParams = Type.Object({
   folder: Type.String({
     description: 'Workspace mod folder name to build and launch.',
   }),
+  quicktest: Type.Optional(
+    Type.Boolean({
+      description:
+        "Default true. Drop the user straight into a freshly-created superflat world with the mod loaded (the Minecraft analogue of RimWorld's -quicktest), skipping the title-screen → Create World → Join clicks. The world is regenerated each cycle (no stale state) and cheats are on. Set false ONLY when the test needs the menus or a hand-made world — a custom world type, an existing save, or world-creation/main-menu UI — in which case the client stops at the title screen and the user opens a world themselves.",
+    }),
+  ),
+  gameMode: Type.Optional(
+    Type.Union([Type.Literal('creative'), Type.Literal('survival')], {
+      description:
+        'Game mode for the quicktest world (default "creative"). Use "survival" when the test needs survival mechanics — hunger, mob damage, block-breaking time, mob/loot drops. Ignored when quicktest=false.',
+    }),
+  ),
   companionMods: Type.Optional(
     Type.Array(Type.String(), {
       description:
@@ -364,8 +379,15 @@ async function test(
   // it into the agent once, so it never wrongly concludes "all good".
   const onLine = makeLoadFailureDetector(ctx);
 
+  // Quicktest (default on): auto-enter a fresh superflat world so the user lands
+  // in-game instead of clicking through the menus every cycle. Off → title
+  // screen, as before. gameMode picks creative (default) vs survival.
+  const quicktestOn = ctx.params.quicktest !== false;
+  const gameMode = ctx.params.gameMode === 'survival' ? 'survival' : 'creative';
+  const quicktest = quicktestOn ? gameMode : undefined;
+
   try {
-    await launchMinecraftClient(projectDir, { onLine, extraMods });
+    await launchMinecraftClient(projectDir, { onLine, extraMods, quicktest });
   } catch (err) {
     return {
       content: [
@@ -383,6 +405,9 @@ async function test(
   lines.push(
     'Launched the modded client (gradlew runClient) with the diagnostics bridge. ' +
       'The first run decompiles Minecraft and can take several minutes. ' +
+      (quicktest
+        ? `The client will auto-enter a fresh superflat ${quicktest} world (cheats on) with the mod loaded — no menu clicks. `
+        : 'The client will stop at the title screen; the user opens a world themselves. ') +
       'Watching the bridge in the background; errors will arrive automatically as ' +
       '"[automated …]" messages. Tell the user what to try in-game, then end your turn — ' +
       "don't poll or sleep to wait for errors.",
