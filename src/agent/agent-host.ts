@@ -54,7 +54,7 @@ import { monitorGetErrorTool } from './tools/monitor-get-error.js';
 import { monitorPollTool } from './tools/monitor-poll.js';
 import { renderSvgToPngTool } from './tools/render-svg-to-png.js';
 import { renderPreviewTool } from './tools/render-preview.js';
-import { getGame, resolveGameId } from './games/registry.js';
+import { getGame, resolveGameId, listGames } from './games/registry.js';
 import { getAdapter } from './adapters/index.js';
 import { warmSearchCache } from './index/warm-cache.js';
 import { createGuardedBashTool } from './tools/bash.js';
@@ -760,21 +760,26 @@ export class AgentHost {
     // Custom tools are rebuilt per session in constructSession — their
     // closures bind to one specific conversation's scope/model. Here we only
     // need the tool *names* for the allowlist, so throwaway builds with
-    // no-op getters are enough. Union of both modes: the allowlist is
-    // host-wide while the actual tool set is per-session, so live-only
-    // names (apply_live, game_action) must be allowed even though regular
-    // chats never construct them.
+    // no-op getters are enough. The allowlist is host-wide while the actual
+    // tool set is per-session, and pi filters each session's custom tools
+    // against this allowlist (agent-session `_refreshToolRegistry`). So it
+    // must be the UNION across every game AND both modes — otherwise a
+    // game-specific tool (e.g. Minecraft's inspect_mod) or a live-only name
+    // (apply_live, game_action) gets silently dropped from sessions that
+    // legitimately include it.
     const toolNames = new Set<string>();
-    for (const live of [false, true]) {
-      for (const t of buildCustomTools(
-        this.cwd,
-        '',
-        () => null,
-        () => null,
-        () => [],
-        { live },
-      )) {
-        if (!BUILTIN_TOOL_NAMES.includes(t.name)) toolNames.add(t.name);
+    for (const game of listGames().map((g) => g.id)) {
+      for (const live of [false, true]) {
+        for (const t of buildCustomTools(
+          this.cwd,
+          '',
+          () => null,
+          () => null,
+          () => [],
+          { live, game },
+        )) {
+          if (!BUILTIN_TOOL_NAMES.includes(t.name)) toolNames.add(t.name);
+        }
       }
     }
     this.allowedToolNames = [...BUILTIN_TOOL_NAMES, ...toolNames];
