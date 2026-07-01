@@ -211,15 +211,22 @@ if (project.hasProperty('modmixerBridgeJar')) {
         localRuntime files(project.property('modmixerBridgeJar'))
     }
 }
+// Snapshot EVERY -Dmodmixer.* system property so it can be forwarded to the game
+// JVM below, where the bridge reads it (port, token, testTimeoutMs, reportFile,
+// quicktest, …). Generic on purpose: new properties need no edit here.
+//
+// Read via the provider API, NOT a bulk System.getProperties() scan: gradle.properties
+// enables the configuration cache, and a bulk read isn't tracked per-key — so once the
+// cache is warm a later launch that ADDS a modmixer.* prop (e.g. quicktest) reuses the
+// stale task graph and silently drops it, leaving the client at the title screen instead
+// of the test world. systemPropertiesPrefixedBy IS a tracked config-cache input, so
+// changing the modmixer.* set correctly invalidates the cache. Read here at script scope
+// (not inside the neoForge run closure) so 'providers' resolves against the project.
+def modmixerProps = providers.systemPropertiesPrefixedBy('modmixer.').get()
 neoForge {
     runs {
         client {
-            // Forward EVERY -Dmodmixer.* system property to the game JVM so the
-            // bridge can read them (port, token, testTimeoutMs, reportFile,
-            // quicktest, …). Generic on purpose: new properties need no edit here.
-            System.getProperties().stringPropertyNames()
-                .findAll { it.startsWith('modmixer.') }
-                .each { k -> systemProperty(k, System.getProperty(k)) }
+            modmixerProps.each { k, v -> systemProperty(k, v) }
         }
     }
 }

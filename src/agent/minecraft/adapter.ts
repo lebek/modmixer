@@ -404,7 +404,7 @@ async function test(
   lines.push(
     'Launched the modded client (gradlew runClient) with the diagnostics bridge. ' +
       (quicktest
-        ? `The client will auto-enter a fresh superflat ${quicktest} world (cheats on) with the mod loaded — no menu clicks. `
+        ? `The client is launching and is set to auto-enter a fresh superflat ${quicktest} world (cheats on) with the mod loaded. That's not guaranteed — it may still be booting, and if world entry fails the client stops at the title screen. Do NOT tell the user they're already in-game; ask them to confirm they've landed in the world (or to open one from the menu if they haven't) before relying on repro steps. `
         : 'The client will stop at the title screen; the user opens a world themselves. ') +
       'Watching the bridge in the background; errors will arrive automatically as ' +
       '"[automated …]" messages. Tell the user what to try in-game, then end your turn — ' +
