@@ -495,7 +495,7 @@ async function main(): Promise<void> {
         (m: any) =>
           m.provider === cfg.model.provider && m.id === cfg.model.modelId,
       );
-  if (!model) {
+  if (!model && !cfg.dry) {
     const available = reg
       .getAll()
       .map((m: any) => `${m.provider}/${m.id}`)
@@ -514,23 +514,90 @@ async function main(): Promise<void> {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mm-harness-'));
 
   if (cfg.dry) {
-    const { prompt } = makeTruncatedSession(cfg, tmpDir, 'dry');
+    const { prompt, tempFile } = makeTruncatedSession(cfg, tmpDir, 'dry');
     const askFirst = !systemPrompt.includes('Launch mode — proactive');
     // Exercise the variant transform in dry mode so a marker drift fails
-    // here, before any model spend.
-    const baselinePrompt = promptForVariant(systemPrompt, 'baseline', live, game);
+    // here, before any model spend. Marker drift is orthogonal to the tool
+    // dump, so don't let it abort the run — record it instead.
+    let baselinePromptChars = -1;
+    let baselineTransformError: string | null = null;
+    try {
+      baselinePromptChars = promptForVariant(systemPrompt, 'baseline', live, game).length;
+    } catch (err) {
+      baselineTransformError = err instanceof Error ? err.message : String(err);
+    }
+    // Build the EXACT tool set the live turn would send to the model, so we
+    // can confirm which tools are actually in the payload for this scope/game.
+    const cwd = (host as any).cwd as string;
+    const toolSet = buildCustomTools(
+      cwd,
+      'harness-dry',
+      () => cfg.scope,
+      () => model ?? null,
+      () => [],
+      { live, game },
+    );
+    const toolNames = toolSet.map((t) => t.name).sort();
+    // GROUND TRUTH: construct the session exactly like a live turn (mirrors
+    // runOneTurn / AgentHost.constructSession) and read back the tool list pi
+    // actually resolves into `agent.state.tools` — i.e. what gets sent to the
+    // model. This closes the gap between "buildCustomTools returns X" and "pi
+    // exposes X to the model". No prompt() call, so no model spend.
+    let sessionToolNames: string[] | null = null;
+    let sessionToolsError: string | null = null;
+    try {
+      const agentDir = (host as any).agentDir as string;
+      const customTools = toolSet.map((t) => toolDefinitionFromAgentTool(t));
+      const sessionManager = SessionManager.open(
+        tempFile,
+        path.join(tmpDir, 'sessions-dry'),
+        cwd,
+      );
+      const resourceLoader = new ScopedResourceLoader(systemPrompt, []);
+      const { session } = (await createAgentSession({
+        cwd,
+        agentDir,
+        authStorage: (host as any).authStorage,
+        modelRegistry: (host as any).modelRegistry,
+        settingsManager: (host as any).settingsManager,
+        sessionManager,
+        resourceLoader,
+        model,
+        thinkingLevel: (cfg.thinkingLevel as any) ?? 'high',
+        tools: (host as any).allowedToolNames,
+        customTools,
+      })) as { session: AgentSession };
+      sessionToolNames = (session.agent.state.tools ?? [])
+        .map((t: any) => t?.name)
+        .filter((n: any): n is string => typeof n === 'string')
+        .sort();
+    } catch (err) {
+      sessionToolsError = err instanceof Error ? err.message : String(err);
+    }
     console.log(
       JSON.stringify(
         {
           dry: true,
           live,
           game,
-          model: `${model.provider}/${model.id}`,
+          model: model ? `${model.provider}/${model.id}` : '(not registered — dry)',
           systemPromptChars: systemPrompt.length,
-          baselinePromptChars: baselinePrompt.length,
+          baselinePromptChars,
+          baselineTransformError,
           systemPromptLaunchMode: askFirst ? 'ask-first' : 'proactive',
           replayPrompt: prompt,
           hintFixVariant: live ? '(n/a in live mode)' : launchModeHint().trim(),
+          toolCount: toolNames.length,
+          toolNames,
+          hasInspectMod: toolNames.includes('inspect_mod'),
+          systemPromptMentionsInspectMod: systemPrompt.includes('inspect_mod'),
+          // Ground truth from the constructed session (what the model receives):
+          sessionToolCount: sessionToolNames ? sessionToolNames.length : null,
+          sessionToolNames,
+          sessionHasInspectMod: sessionToolNames
+            ? sessionToolNames.includes('inspect_mod')
+            : null,
+          sessionToolsError,
         },
         null,
         2,
