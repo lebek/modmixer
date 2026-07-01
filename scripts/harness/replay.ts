@@ -117,21 +117,6 @@ const STUBBED = new Set<string>([
   'game_action',
 ]);
 
-// run_test_cycle result text, the part of the Minecraft fix that lives in the
-// tool result (src/agent/minecraft/adapter.ts). baseline = pre-change text,
-// fix = post-change text. The A/B flips this together with the system-prompt
-// block so the harness measures the whole change, not half of it.
-const MC_TEST_CYCLE_BASELINE =
-  'Launched the modded client (gradlew runClient) with the diagnostics bridge. ' +
-  'The first run decompiles Minecraft and can take several minutes. Errors will ' +
-  'arrive automatically as "[automated …]" messages; tell the user what to try in-game.';
-const MC_TEST_CYCLE_FIX =
-  'Launched the modded client (gradlew runClient) with the diagnostics bridge. ' +
-  'The first run decompiles Minecraft and can take several minutes. ' +
-  'Watching the bridge in the background; errors will arrive automatically as ' +
-  '"[automated …]" messages. Tell the user what to try in-game, then end your turn — ' +
-  "don't poll or sleep to wait for errors.";
-
 function stubText(
   name: string,
   params: Record<string, unknown>,
@@ -160,7 +145,13 @@ function stubText(
       return `Updated schematic for ${folder} (shortDescription, body). The Schematic panel reflects this now.${hint}`;
     case 'run_test_cycle':
       if (game === 'minecraft') {
-        return variant === 'fix' ? MC_TEST_CYCLE_FIX : MC_TEST_CYCLE_BASELINE;
+        return (
+          'Launched the modded client (gradlew runClient) with the diagnostics bridge. ' +
+          'The first run decompiles Minecraft and can take several minutes. ' +
+          'Watching the bridge in the background; errors will arrive automatically as ' +
+          '"[automated …]" messages. Tell the user what to try in-game, then end your turn — ' +
+          "don't poll or sleep to wait for errors."
+        );
       }
       return 'Quit running RimWorld instance. Dev mode on. Synced the mod into RimWorld\'s Mods/. Launched RimWorld with -quicktest. Watching the in-game bridge in the background; errors will arrive as auto-prompts.';
     case 'monitor_poll':
@@ -290,41 +281,12 @@ const FIX_TWO_VERBS =
   "Two verbs — once you know what you're building, classify it:";
 const OLD_TWO_VERBS = 'Two verbs — classify every request first:';
 
-// ── Minecraft test-cycle A/B (Lemonade replay) ──────────────────────────────
-// The change under test is the "Test-in-game flow" block (esp. "Your turn ends
-// … Do NOT poll in a loop or sleep") added to MINECRAFT_RULES, plus the
-// reworded run_test_cycle line that demotes monitor_poll to on-demand. baseline
-// strips both back to the pre-change text so the A/B isolates the fix. Same
-// exact-string surgery + fail-loud contract as the live-mode block above.
-const MC_FLOW_START = '\n\nTest-in-game flow when the user wants to run their mod:';
-const MC_FLOW_END = 'monitoring is push-based and runs in the background.';
-const MC_FIX_469 =
-  'streams aggregated, deduped errors back to you automatically as "[automated …]" user messages (see the test-in-game flow below). monitor_poll / monitor_get_error pull current state on demand — they are not a loop to sit in.';
-const MC_OLD_469 =
-  'streams aggregated, deduped errors back to you (read them with monitor_poll / monitor_get_error).';
-
-function minecraftBaseline(builtPrompt: string): string {
-  const startIdx = builtPrompt.indexOf(MC_FLOW_START);
-  const endIdx = builtPrompt.indexOf(MC_FLOW_END);
-  if (startIdx < 0 || endIdx < startIdx || !builtPrompt.includes(MC_FIX_469)) {
-    throw new Error(
-      'minecraft baseline variant: fix markers not found in the built system prompt — MINECRAFT_RULES drifted, update the markers in replay.ts',
-    );
-  }
-  const stripped =
-    builtPrompt.slice(0, startIdx) +
-    builtPrompt.slice(endIdx + MC_FLOW_END.length);
-  return stripped.replace(MC_FIX_469, MC_OLD_469);
-}
-
 function promptForVariant(
   builtPrompt: string,
   variant: 'baseline' | 'fix',
   live: boolean,
-  game: GameId,
 ): string {
   if (variant === 'fix') return builtPrompt;
-  if (game === 'minecraft') return minecraftBaseline(builtPrompt);
   if (!live) return builtPrompt;
   const startIdx = builtPrompt.indexOf(INTERPRET_START);
   const endIdx = builtPrompt.indexOf(INTERPRET_END);
@@ -405,7 +367,7 @@ async function runOneTurn(
 
   const sessionManager = SessionManager.open(tempFile, tempSessionDir, cwd);
   const resourceLoader = new ScopedResourceLoader(
-    promptForVariant(systemPrompt, variant, live, game),
+    promptForVariant(systemPrompt, variant, live),
     [],
   );
   const { session } = (await createAgentSession({
@@ -522,7 +484,7 @@ async function main(): Promise<void> {
     let baselinePromptChars = -1;
     let baselineTransformError: string | null = null;
     try {
-      baselinePromptChars = promptForVariant(systemPrompt, 'baseline', live, game).length;
+      baselinePromptChars = promptForVariant(systemPrompt, 'baseline', live).length;
     } catch (err) {
       baselineTransformError = err instanceof Error ? err.message : String(err);
     }
