@@ -32,6 +32,8 @@ import {
   removePanelAttachment,
   clearPanelAttachments,
   markIdle,
+  restorePanelDraft,
+  isConversationBusy,
 } from '../conversations-store';
 import type {
   AttachmentInput,
@@ -232,7 +234,20 @@ export function ChatPanel({
   const interruptAction = useAsyncAction(() =>
     window.modmixer.interrupt(conversation.id),
   );
-  const error = send.error ?? interruptAction.error ?? modelChange.error;
+  const retryAction = useAsyncAction(() =>
+    window.modmixer.retry(conversation.id),
+  );
+  const runRetry = retryAction.run;
+  // Stable identity — MessageBubble is memoized on this prop. The busy check
+  // reads the store non-reactively so a stale click (turn already restarted)
+  // is a no-op; the main process guards again on its side.
+  const retry = useCallback(async () => {
+    if (isConversationBusy(conversation.id)) return;
+    const result = await runRetry();
+    if (result === null) markIdle(conversation.id);
+  }, [conversation.id, runRetry]);
+  const error =
+    send.error ?? interruptAction.error ?? modelChange.error ?? retryAction.error;
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   // The streaming assistant message is appended as the last row so it
@@ -261,6 +276,22 @@ export function ChatPanel({
     },
     [rowVirtualizer],
   );
+  // A settled live turn always ends with an assistant message (stop / error /
+  // aborted — even Stop mid-tool appends a final aborted one), so an idle
+  // transcript ending in user/toolResult — or in an assistant message still
+  // waiting on its tool results — can only mean the app died mid-turn.
+  // Offer to pick the turn back up.
+  const lastMessage = visible.length > 0 ? visible[visible.length - 1] : null;
+  const interrupted =
+    !busy &&
+    !streaming &&
+    !loading &&
+    lastMessage != null &&
+    (lastMessage.role === 'user' ||
+      lastMessage.role === 'toolResult' ||
+      (lastMessage.role === 'assistant' &&
+        lastMessage.stopReason === 'toolUse'));
+
   const { pinned, hasNewBelow, jumpToBottom } = useScrollPin(
     scrollRef,
     [visible.length, streaming, toolStates, compacting],
@@ -278,8 +309,14 @@ export function ChatPanel({
     if (import.meta.env.DEV && window.__demo?.consumeSend(conversation.id, text))
       return;
     const result = await send.run(text, staged);
-    // null = the IPC threw before any agent_end event would clear busy.
-    if (result === null) markIdle(conversation.id);
+    // null = the IPC threw before any agent_end event would clear busy. A
+    // rejection this early never reached the transcript, so put the text and
+    // attachments back — pressing Send again is the retry.
+    if (result === null) {
+      markIdle(conversation.id);
+      restorePanelDraft(conversation.id, text);
+      addPanelAttachments(conversation.id, staged);
+    }
   };
 
   const interrupt = async () => {
@@ -528,6 +565,25 @@ export function ChatPanel({
                     isStreaming={
                       streaming != null && vi.index === visible.length - 1
                     }
+                    onRetry={
+                      !busy &&
+                      !streaming &&
+                      !retryAction.busy &&
+                      vi.index === visible.length - 1 &&
+                      m.role === 'assistant' &&
+                      m.stopReason === 'error'
+                        ? retry
+                        : undefined
+                    }
+                    // Stays on through the dead air between pressing Retry
+                    // and the model's first token — the row stops being last
+                    // (and this flips off) once the new message streams in.
+                    retrying={
+                      (busy || retryAction.busy) &&
+                      vi.index === visible.length - 1 &&
+                      m.role === 'assistant' &&
+                      m.stopReason === 'error'
+                    }
                   />
                 </div>
               );
@@ -542,6 +598,24 @@ export function ChatPanel({
         {error && (
           <div className="mt-3 rounded-md border border-failed/40 bg-failed/5 px-3 py-2 text-xs text-failed">
             {error}
+          </div>
+        )}
+        {interrupted && (
+          <div className="mt-3 flex items-center justify-between gap-3 rounded-md border border-line bg-paper/70 px-3 py-2 text-xs text-muted">
+            <span>This chat was interrupted before the agent finished.</span>
+            {retryAction.busy ? (
+              <span className="inline-flex shrink-0 items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-subtle">
+                <span className="juicy-bounce-dot inline-block h-1 w-1 rounded-full bg-pending" />
+                resuming…
+              </span>
+            ) : (
+              <button
+                onClick={() => void retry()}
+                className="inline-flex shrink-0 items-center rounded-md border border-line px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-ink transition-colors hover:border-ink/40 hover:bg-surface"
+              >
+                Resume
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -1026,13 +1100,19 @@ type MessageBubbleProps = {
   toolStates: Record<string, { name: string; status: ToolStatus }>;
   toolCallArgs?: Record<string, unknown>;
   isStreaming: boolean;
+  /** Set only on the last message when it's a retryable error row. */
+  onRetry?: () => void;
+  /** True while a retry of this error row is in flight (no new tokens yet). */
+  retrying?: boolean;
 };
 
 const MessageBubble = memo(MessageBubbleImpl, (prev, next) => {
   if (
     prev.message !== next.message ||
     prev.isStreaming !== next.isStreaming ||
-    prev.toolCallArgs !== next.toolCallArgs
+    prev.toolCallArgs !== next.toolCallArgs ||
+    prev.onRetry !== next.onRetry ||
+    prev.retrying !== next.retrying
   ) {
     return false;
   }
@@ -1053,6 +1133,8 @@ function MessageBubbleImpl({
   toolStates,
   toolCallArgs,
   isStreaming,
+  onRetry,
+  retrying,
 }: MessageBubbleProps) {
   if (message.role === 'user') {
     const text = extractText(message.content);
@@ -1090,9 +1172,9 @@ function MessageBubbleImpl({
     const text = extractText(message.content);
     const toolCalls = extractToolCalls(message.content);
     // A turn that ended in a provider error (e.g. 529 overloaded). Auto-retry
-    // is off, so this is terminal: we render it as an error row and the user
-    // re-sends to retry. Partial content (text/tools streamed before the
-    // failure) is still shown above the error note.
+    // is off, so this is terminal: we render it as an error row whose Retry
+    // button re-runs the turn. Partial content (text/tools streamed before
+    // the failure) is still shown above the error note.
     const isError = message.stopReason === 'error';
     const hasContent = !!text || toolCalls.length > 0;
     // Some models (e.g. Kimi K2.6 via OpenRouter) ignore reasoning=none and
@@ -1157,7 +1239,13 @@ function MessageBubbleImpl({
             status={toolStates[c.id]?.status ?? 'running'}
           />
         ))}
-        {isError && <AgentErrorNote raw={message.errorMessage} />}
+        {isError && (
+          <AgentErrorNote
+            raw={message.errorMessage}
+            onRetry={onRetry}
+            retrying={retrying}
+          />
+        )}
       </div>
     );
   }
@@ -1191,18 +1279,39 @@ function ThinkingIndicator() {
 }
 
 // Shown in place of a blank bubble when a turn ends in a provider error.
-// States the failure plainly and tells the user the recovery is to re-send —
-// there's no auto-retry, so the next message they send is the retry.
-function AgentErrorNote({ raw }: { raw: string | undefined }) {
+// The last message's error row is actionable: its Retry button re-runs the
+// turn (modmixer:agent:retry) and swaps to a "retrying…" pulse once pressed,
+// so the dead air before the model's first token doesn't read as "nothing
+// happened". Historical error rows show the bare error text.
+function AgentErrorNote({
+  raw,
+  onRetry,
+  retrying,
+}: {
+  raw: string | undefined;
+  onRetry?: () => void;
+  retrying?: boolean;
+}) {
   return (
     <div className="flex items-start gap-1.5 text-[13px] leading-snug text-failed">
       <span aria-hidden className="select-none">
         ⚠
       </span>
-      <span>
-        {formatAgentError(raw)}{' '}
-        <span className="text-subtle">— send your message again to retry.</span>
-      </span>
+      <span>{formatAgentError(raw)}</span>
+      {onRetry && (
+        <button
+          onClick={onRetry}
+          className="ml-auto inline-flex shrink-0 items-center rounded-md border border-failed/50 px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-failed transition-colors hover:bg-failed/10"
+        >
+          Retry
+        </button>
+      )}
+      {retrying && (
+        <span className="ml-auto inline-flex shrink-0 items-center gap-1.5 self-center font-mono text-[10px] uppercase tracking-[0.18em] text-subtle">
+          <span className="juicy-bounce-dot inline-block h-1 w-1 rounded-full bg-pending" />
+          retrying…
+        </span>
+      )}
     </div>
   );
 }

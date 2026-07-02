@@ -747,7 +747,7 @@ export class AgentHost {
     this.settingsManager = SettingsManager.create(this.cwd, this.agentDir);
     // ModMixer deliberately does not use the harness's app-level auto-retry.
     // A failed turn (e.g. an Anthropic 529 "overloaded") is surfaced in the
-    // chat as an error row, and the user re-sends to retry. The auto-retry
+    // chat as an error row with a Retry button (see retry()). The auto-retry
     // loop is worse than that here: each failed attempt lands as a blank
     // assistant bubble, the backoff window has no Stop affordance to cancel
     // into, and a message sent mid-backoff races the scheduled continue().
@@ -1457,6 +1457,42 @@ export class AgentHost {
     const entry = this.sessions.get(conversationId);
     if (!entry) return;
     await entry.session.abort();
+  }
+
+  /**
+   * Re-run the turn that last failed (the error row's Retry button) or that
+   * a dead process cut short (the Resume banner). Same recipe as pi's own
+   * auto-retry (agent-session `_handleRetryableError`): drop the trailing
+   * failed assistant message from live context — it stays in the session
+   * file as history — then `continue()` from the preceding user/toolResult
+   * message.
+   *
+   * Trailing shapes this accepts:
+   *  - assistant `error`: the errored turn; popped, then re-run.
+   *  - assistant `toolUse`: process died after the message landed but before
+   *    its tool results. Unreachable in a settled live session (those always
+   *    end in stop/error/aborted), so popping is safe.
+   *  - user / toolResult: process died mid-request; nothing to pop.
+   * Anything else (normal `stop`, user-initiated `aborted`) means a stale
+   * click — no-op rather than regenerate a turn the user didn't ask about.
+   */
+  async retry(conversationId: string): Promise<void> {
+    const entry = this.sessions.get(conversationId);
+    if (!entry) {
+      throw new Error(`No open session for conversation: ${conversationId}`);
+    }
+    const agent = entry.session.agent;
+    if (agent.signal) return; // a run is already in flight
+    const messages = agent.state.messages;
+    const last = messages[messages.length - 1];
+    if (!last) return;
+    if (last.role === 'assistant') {
+      if (last.stopReason !== 'error' && last.stopReason !== 'toolUse') return;
+      agent.state.messages = messages.slice(0, -1);
+    } else if (last.role !== 'user' && last.role !== 'toolResult') {
+      return;
+    }
+    await agent.continue();
   }
 
   // =========================================================================

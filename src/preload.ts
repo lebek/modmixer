@@ -52,6 +52,8 @@ const api = {
   ) => invoke('modmixer:agent:send', conversationId, text, attachments),
   interrupt: (conversationId: string) =>
     invoke('modmixer:agent:interrupt', conversationId),
+  retry: (conversationId: string) =>
+    invoke('modmixer:agent:retry', conversationId),
   closeConversation: (conversationId: string) =>
     invoke('modmixer:agent:close', conversationId),
   releaseIdleConversation: (conversationId: string) =>

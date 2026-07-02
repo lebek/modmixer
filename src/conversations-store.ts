@@ -203,6 +203,18 @@ export function setPanelDraft(conversationId: string, draft: string): void {
   notifyPanel(conversationId);
 }
 
+/**
+ * Put a failed send's text back in the box so pressing Send again is the
+ * retry. Skipped if the user already started typing a replacement — their
+ * words win over the restored ones.
+ */
+export function restorePanelDraft(conversationId: string, draft: string): void {
+  const cur = panels.get(conversationId) ?? EMPTY_PANEL;
+  if (cur.draft.trim() !== '') return;
+  panels.set(conversationId, { ...cur, draft });
+  notifyPanel(conversationId);
+}
+
 export function setPanelModel(
   conversationId: string,
   model: ModelSelection | null,

@@ -154,6 +154,7 @@ export interface Channels {
     attachments?: PreparedAttachment[],
   ) => void;
   'modmixer:agent:interrupt': (conversationId: string) => void;
+  'modmixer:agent:retry': (conversationId: string) => void;
   'modmixer:agent:close': (conversationId: string) => void;
   'modmixer:agent:release-idle': (conversationId: string) => void;
   'modmixer:agent:get-context-usage': (

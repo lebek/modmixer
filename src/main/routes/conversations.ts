@@ -47,6 +47,16 @@ export function registerConversationRoutes(ctx: RouteContext): void {
     },
   );
 
+  // Re-run a turn that ended in a provider error or was cut short by an app
+  // crash. Consent-gated like send: it starts an agent run.
+  ipc.handle(
+    'modmixer:agent:retry',
+    async (_evt, conversationId: string) => {
+      requireConsent();
+      await host.retry(conversationId);
+    },
+  );
+
   ipc.handle('modmixer:agent:close', async (_evt, conversationId: string) => {
     await host.closeSession(conversationId);
   });
