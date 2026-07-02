@@ -4,7 +4,7 @@ import {
   enrichSymbolRow,
   type ParentLookup,
   type SymbolRow,
-} from '../index/resolve-symbol.js';
+} from '../index/resolve-symbol-core.js';
 
 /**
  * The resolver tests exercise the pure enrichment helper. We can't load the

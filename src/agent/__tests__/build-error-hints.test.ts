@@ -5,7 +5,7 @@ import {
   extractSymbolFromMessage,
   formatHints,
   type BuildErrorHint,
-} from '../build-error-hints.js';
+} from '../build-error-hints-core.js';
 
 describe('parseDiagnostics', () => {
   it('parses a CS1061 line with a trailing csproj suffix', () => {

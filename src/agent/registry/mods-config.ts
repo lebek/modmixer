@@ -5,8 +5,16 @@
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
-import { isRimWorldRunning } from '../rimworld/game.js';
 import { detectRimWorldPaths } from '../paths.js';
+
+// Lazily loaded: `../rimworld/game.js` pulls in the agent runtime (and its
+// ESM-only deps), which the pure-XML unit tests of this module must not drag
+// in at import time. Only the async write paths need it, so defer the import
+// to first call.
+async function rimWorldRunning(): Promise<boolean> {
+  const { isRimWorldRunning } = await import('../rimworld/game.js');
+  return isRimWorldRunning();
+}
 
 export interface ModsConfigContents {
   /** Game version string from <version>, e.g. "1.6.123 rev123". May be empty. */
@@ -64,7 +72,7 @@ export async function writeActiveMods(activeMods: string[]): Promise<void> {
       'ModsConfig.xml not found. Launch RimWorld at least once first so it can create the file.',
     );
   }
-  if (await isRimWorldRunning()) {
+  if (await rimWorldRunning()) {
     throw new Error(
       "RimWorld is currently running. Edits to ModsConfig.xml are overwritten when the game quits, and a running game won't pick up new mods. Quit RimWorld first, then retry.",
     );
@@ -93,7 +101,7 @@ export async function restoreFromSnapshot(snapshot: string): Promise<void> {
   if (!file) {
     throw new Error('ModsConfig.xml path could not be resolved.');
   }
-  if (await isRimWorldRunning()) {
+  if (await rimWorldRunning()) {
     throw new Error(
       'RimWorld is running — quit it first so the restore is not overwritten.',
     );
