@@ -35,11 +35,17 @@ export function registerModrinthRoutes(ctx: RouteContext): void {
     async (
       _evt,
       folder: string,
-      meta: ModrinthPublishMeta,
+      // Project metadata from the first-publish dialog; null on updates —
+      // after creation the project is owned and edited on modrinth.com.
+      meta: ModrinthPublishMeta | null,
       version: ModrinthVersionMeta,
     ) => {
       const mod = await getWorkspaceMod(folder);
       if (!mod) throw new Error(`Mod not found: ${folder}`);
+      const isRepublish = !!mod.prefs.modrinthProjectId;
+      if (!isRepublish && !meta) {
+        throw new Error('Project details are required for a first publish.');
+      }
       const win = getWindow();
       const emit = (event: ModrinthPublishProgressEvent) =>
         win?.webContents.send('modmixer:modrinth:progress', { folder, ...event });
@@ -75,48 +81,21 @@ export function registerModrinthRoutes(ctx: RouteContext): void {
         throw new Error(error);
       }
 
-      // On re-publish the project slug can't change via the version endpoint
-      // (and Modrinth doesn't return it), so reuse the slug we already stored
-      // rather than the form's packageId-derived guess — otherwise the "View on
-      // Modrinth" URL points at a slug that may not exist.
-      const isRepublish = !!mod.prefs.modrinthProjectId;
-      const effectiveMeta =
-        isRepublish && mod.prefs.modrinthSlug
-          ? { ...meta, slug: mod.prefs.modrinthSlug }
-          : meta;
-
       const result = await publishToModrinth({
         jarPath: build.jarPath,
         projectId: mod.prefs.modrinthProjectId,
-        meta: effectiveMeta,
+        meta: meta ?? undefined,
         version: { ...version, versionNumber },
         onProgress: emit,
       });
 
+      // The project id is the only Modrinth state worth keeping: it links
+      // updates to the project and builds the public URL (ids resolve on
+      // modrinth.com and, unlike slugs, can't be renamed on the site).
       await writeModPrefs(folder, {
         modrinthProjectId: result.projectId,
-        // Only (re)store the slug when we actually learned it from Modrinth (new
-        // project creation, or a mod that had none yet). On re-publish keep the
-        // known-good stored slug rather than clobbering it with a guess.
-        ...(result.projectCreated || !mod.prefs.modrinthSlug
-          ? { modrinthSlug: result.slug }
-          : {}),
         modrinthVersion: versionNumber,
         lastPublishedAt: Date.now(),
-        // Remember the project metadata so the publish panel can re-seed its
-        // form after the first publish — Modrinth-only fields (summary, slug,
-        // categories, sides) have no home in the jar. Stored from effectiveMeta
-        // so the slug matches the one actually published.
-        modrinthMeta: {
-          title: effectiveMeta.title,
-          summary: effectiveMeta.summary,
-          description: effectiveMeta.description,
-          slug: result.slug || effectiveMeta.slug,
-          license: effectiveMeta.license,
-          categories: effectiveMeta.categories,
-          clientSide: effectiveMeta.clientSide,
-          serverSide: effectiveMeta.serverSide,
-        },
       });
       emitModChanged(folder);
       return result;

@@ -1,15 +1,20 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { AboutMetadata, WorkspaceMod } from '../../agent/workspace';
-import type {
-  ModrinthPublishProgressEvent,
-  ModrinthSideSupport,
-} from '../../agent/minecraft/modrinth';
+import type { ModrinthPublishProgressEvent } from '../../agent/minecraft/modrinth';
 import { useAsyncAction } from '@/lib/use-async-action';
 import { ErrorBanner, Field, Section } from './ui';
-import { MinecraftPublishConfirmDialog } from './minecraft-publish-confirm-dialog';
+import {
+  MinecraftPublishConfirmDialog,
+  type MinecraftPublishConfirmResult,
+} from './minecraft-publish-confirm-dialog';
 import { DangerZone } from './danger-zone';
 
-/** Minecraft mods publish to Modrinth (not Steam Workshop). */
+/**
+ * Minecraft mods publish to Modrinth (not Steam Workshop). The panel holds the
+ * mod's own identity (gradle.properties, editable any time) plus the publish
+ * action; Modrinth project metadata is collected once in the first-publish
+ * dialog and owned on modrinth.com afterwards — nothing here to go stale.
+ */
 export function MinecraftPublishPanel({
   mod,
   onDeleted,
@@ -24,35 +29,14 @@ export function MinecraftPublishPanel({
   // failing with no way back to the input from this panel).
   const [editingToken, setEditingToken] = useState(false);
 
-  // Modrinth project metadata (project-level, applied at first publish). Seeded
-  // from the metadata we stored on the last publish when present, so the form
-  // survives past the first publish; otherwise from the mod's manifest fields
-  // (gradle.properties, via mod.about) and Modrinth defaults for a first run.
-  // Seeded (not plain) state so an identity change in the About section above
-  // flows into fields the user hasn't hand-edited.
-  const saved = mod.prefs.modrinthMeta;
-  const [slug, setSlug] = useSeededState(
-    saved?.slug || mod.prefs.modrinthSlug || slugify(mod.about.packageId || mod.about.name),
-  );
-  const [title, setTitle] = useSeededState(saved?.title || mod.about.name || 'My Mod');
-  const [summary, setSummary] = useSeededState(
-    saved?.summary || deriveSummary(mod.about.description || ''),
-  );
-  const [description, setDescription] = useSeededState(saved?.description || mod.about.description || '');
-  const [license, setLicense] = useState(saved?.license || 'MIT');
-  const [categories, setCategories] = useState(saved?.categories.join(', ') || '');
-  // No UI control for side support yet; carry the saved/default values through
-  // to the publish call (Modrinth requires both, default 'required').
-  const clientSide: ModrinthSideSupport = saved?.clientSide || 'required';
-  const serverSide: ModrinthSideSupport = saved?.serverSide || 'required';
-
-  // Version number + changelog are per-publish; collected in the confirm
-  // dialog (like RimWorld's change notes) rather than kept in the form.
   const [confirmOpen, setConfirmOpen] = useState(false);
-
   const [progress, setProgress] = useState<ModrinthPublishProgressEvent | null>(null);
+  // Project URLs are id-based: modrinth.com resolves ids, and unlike a slug an
+  // id can't be renamed on the site out from under our stored link.
   const [publishedUrl, setPublishedUrl] = useState<string | null>(
-    mod.prefs.modrinthSlug ? `https://modrinth.com/mod/${mod.prefs.modrinthSlug}` : null,
+    mod.prefs.modrinthProjectId
+      ? `https://modrinth.com/mod/${mod.prefs.modrinthProjectId}`
+      : null,
   );
 
   const isUpdate = !!mod.prefs.modrinthProjectId;
@@ -78,35 +62,25 @@ export function MinecraftPublishPanel({
     }
   });
 
-  const publish = useAsyncAction(
-    async (version: { versionNumber: string; changelog: string }) => {
-      setProgress(null);
-      await window.modmixer.publishToModrinth(
-        mod.folder,
-        {
-          slug: slugify(slug),
-          title,
-          summary,
-          description,
-          categories: categories
-            .split(',')
-            .map((c) => c.trim().toLowerCase())
-            .filter(Boolean),
-          license,
-          clientSide,
-          serverSide,
-        },
-        {
-          versionNumber: version.versionNumber,
-          versionType: 'release',
-          changelog: version.changelog,
-        },
-      );
-    },
-  );
+  const publish = useAsyncAction(async (result: MinecraftPublishConfirmResult) => {
+    setProgress(null);
+    await window.modmixer.publishToModrinth(
+      mod.folder,
+      // Project fields exist only on a first publish. Side support has no UI
+      // control yet; Modrinth requires both, default 'required'.
+      result.project
+        ? { ...result.project, clientSide: 'required', serverSide: 'required' }
+        : null,
+      {
+        versionNumber: result.versionNumber,
+        versionType: 'release',
+        changelog: result.changelog,
+      },
+    );
+  });
 
   // The token form shows up front until a token is stored, and on demand
-  // afterwards (to replace a bad one). The metadata above is always editable.
+  // afterwards (to replace a bad one).
   const showTokenForm = hasToken === false || editingToken;
 
   return (
@@ -119,56 +93,10 @@ export function MinecraftPublishPanel({
             title="Modrinth"
             description={
               isUpdate
-                ? 'Upload a new version to your existing Modrinth project.'
-                : 'Publish this mod to Modrinth. New projects are created as a draft pending Modrinth moderation review before they go public.'
+                ? 'Upload a new version to your existing Modrinth project. Project details (title, description, categories, …) are edited on Modrinth itself.'
+                : "Publish this mod to Modrinth. You'll set the project details in the next step; new projects are created as a draft pending Modrinth moderation review before they go public."
             }
           >
-            {isUpdate && (
-              <p className="text-xs text-muted">
-                These project details were set on the first publish. A version
-                update doesn't change them — edit them
-                {publishedUrl ? (
-                  <>
-                    {' '}on{' '}
-                    <button
-                      onClick={() => void window.modmixer.openExternal(publishedUrl)}
-                      className="text-accent hover:underline"
-                    >
-                      Modrinth
-                    </button>
-                  </>
-                ) : (
-                  ' on Modrinth'
-                )}
-                . Set the new version number + changelog when you publish.
-              </p>
-            )}
-            <Field label="Slug" hint="Lowercase, hyphenated, unique on Modrinth.">
-              <input
-                type="text"
-                value={slug}
-                onChange={(e) => setSlug(e.target.value)}
-                disabled={isUpdate}
-                className={inputCls}
-                placeholder="my-cool-mod"
-              />
-            </Field>
-            <Field label="Title">
-              <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} disabled={isUpdate} className={inputCls} />
-            </Field>
-            <Field label="Summary" hint="One-line description shown in listings. Required by Modrinth.">
-              <input type="text" value={summary} onChange={(e) => setSummary(e.target.value)} disabled={isUpdate} className={inputCls} placeholder="A short, punchy summary." />
-            </Field>
-            <Field label="Description" hint="Full markdown shown on the project page.">
-              <textarea value={description} onChange={(e) => setDescription(e.target.value)} disabled={isUpdate} rows={6} className={`${inputCls} resize-y`} />
-            </Field>
-            <Field label="License (SPDX)" hint='e.g. MIT, Apache-2.0, LGPL-3.0-only. Required by Modrinth.'>
-              <input type="text" value={license} onChange={(e) => setLicense(e.target.value)} disabled={isUpdate} className={inputCls} />
-            </Field>
-            <Field label="Categories" hint="Comma-separated Modrinth category slugs, e.g. utility, technology.">
-              <input type="text" value={categories} onChange={(e) => setCategories(e.target.value)} disabled={isUpdate} className={inputCls} placeholder="utility, technology" />
-            </Field>
-
             {progress && (
               <div className="rounded-md border border-line bg-surface/40 px-3 py-2 text-xs text-muted">
                 {progressLabel(progress)}
@@ -247,7 +175,7 @@ export function MinecraftPublishPanel({
                   </span>
                   <button
                     onClick={() => setConfirmOpen(true)}
-                    disabled={publish.busy || !title.trim() || !slug.trim() || !summary.trim()}
+                    disabled={publish.busy}
                     className="rounded-md bg-ink px-3 py-1 text-[10px] uppercase tracking-[0.18em] text-paper transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     {publish.busy ? 'Publishing…' : isUpdate ? 'Publish update' : 'Publish to Modrinth'}
@@ -270,8 +198,8 @@ export function MinecraftPublishPanel({
       <MinecraftPublishConfirmDialog
         open={confirmOpen}
         isUpdate={isUpdate}
-        modName={title}
-        defaultVersion={nextVersion(mod.prefs.modrinthVersion)}
+        about={mod.about}
+        defaultVersion={defaultVersion(mod)}
         onCancel={() => setConfirmOpen(false)}
         onConfirm={(result) => {
           setConfirmOpen(false);
@@ -285,9 +213,9 @@ export function MinecraftPublishPanel({
 /**
  * The mod's own identity — name / id / author / description as they ship in
  * the jar (gradle.properties). Distinct from the Modrinth project fields, and
- * editable at any time (unlike those, which freeze after first publish).
- * Mirrors the RimWorld panel's About section, including the banner shown when
- * the agent rewrites the metadata mid-edit.
+ * editable at any time (unlike those, which Modrinth owns after first
+ * publish). Mirrors the RimWorld panel's About section, including the banner
+ * shown when the agent rewrites the metadata mid-edit.
  */
 function MinecraftAboutSection({ mod }: { mod: WorkspaceMod }) {
   const [name, setName] = useState(mod.about.name);
@@ -443,31 +371,28 @@ function MinecraftAboutSection({ mod }: { mod: WorkspaceMod }) {
   );
 }
 
-/**
- * useState that re-follows its seed: while the current value is whatever the
- * seed last was (i.e. the user hasn't hand-edited it), a new seed — e.g. the
- * mod was renamed in the About section, changing the derived defaults —
- * replaces the value; a hand-edited value is left alone. Mod switches don't
- * come through here: the panel is keyed by folder and remounts.
- */
-function useSeededState(seed: string): [string, (v: string) => void] {
-  const [value, setValue] = useState(seed);
-  const prevSeed = useRef(seed);
-  if (seed !== prevSeed.current) {
-    if (value === prevSeed.current) setValue(seed);
-    prevSeed.current = seed;
-  }
-  return [value, setValue];
-}
-
 const inputCls =
   'w-full rounded-md border border-line bg-paper px-2.5 py-1.5 text-sm text-ink focus:border-accent focus:outline-none disabled:cursor-not-allowed disabled:opacity-60';
 
 /**
- * Seed the next publish's version number: bump the last numeric component of
- * the previously published version (1.0.0 → 1.0.1), or start at 1.0.0 for a mod
- * that's never been published. Modrinth rejects a duplicate version, so a
- * sensible pre-fill beats re-typing — the user can still override it.
+ * Seed the publish dialog's version. gradle.properties is the authority — the
+ * mod's version IS what's baked into the jar — so a hand-bumped (or
+ * agent-bumped) version is offered as-is. Only when it still equals the last
+ * published version do we suggest the next patch bump (Modrinth rejects
+ * duplicate version numbers). Falls back to bumping the last published
+ * version for mods whose gradle.properties is missing/unreadable.
+ */
+function defaultVersion(mod: WorkspaceMod): string {
+  const gradleVersion = mod.about.version?.trim();
+  if (!gradleVersion) return nextVersion(mod.prefs.modrinthVersion);
+  return gradleVersion === mod.prefs.modrinthVersion
+    ? nextVersion(gradleVersion)
+    : gradleVersion;
+}
+
+/**
+ * Bump the last numeric component of a version (1.0.0 → 1.0.1), or start at
+ * 1.0.0 when there's nothing to bump.
  */
 function nextVersion(prev: string | undefined): string {
   if (!prev) return '1.0.0';
@@ -475,27 +400,6 @@ function nextVersion(prev: string | undefined): string {
   if (!m) return prev;
   const [, head, num, tail] = m;
   return `${head}${Number(num) + 1}${tail}`;
-}
-
-/**
- * Seed Modrinth's required one-line Summary from the mod's description (the
- * agent fills that in at scaffold time), so the field isn't blank on a first
- * publish. Takes the first sentence, collapsed to a single line and capped well
- * under Modrinth's limit. The user can still rewrite it.
- */
-function deriveSummary(desc: string): string {
-  const flat = desc.replace(/\s+/g, ' ').trim();
-  if (!flat) return '';
-  const firstSentence = flat.match(/^.*?[.!?](\s|$)/)?.[0]?.trim() || flat;
-  return firstSentence.slice(0, 120).trim();
-}
-
-function slugify(s: string): string {
-  return s
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 64);
 }
 
 function progressLabel(e: ModrinthPublishProgressEvent): string {

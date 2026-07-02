@@ -4,28 +4,6 @@ import fsp from 'node:fs/promises';
 import { getWorkspacePaths } from './workspace.js';
 import type { GameId } from './games/types.js';
 import { DEFAULT_GAME_ID, resolveGameId } from './games/registry.js';
-import type { ModrinthSideSupport } from './minecraft/modrinth.js';
-
-/**
- * The Modrinth project metadata last used to publish a Minecraft mod. Unlike
- * the manifest fields (which live in gradle.properties and travel inside the
- * jar), Modrinth-only fields — summary, slug, categories, side support — have
- * no home in the mod itself, so we remember them here. Persisting the whole set
- * lets the publish panel re-seed its form after the first publish instead of
- * losing the values (title/description are also stored so the panel reloads
- * from one place). Read-only on update: a re-publish only uploads a new version
- * and never pushes these back to Modrinth (edits made on modrinth.com win).
- */
-export interface ModrinthSavedMeta {
-  title: string;
-  summary: string;
-  description: string;
-  slug: string;
-  license: string;
-  categories: string[];
-  clientSide: ModrinthSideSupport;
-  serverSide: ModrinthSideSupport;
-}
 
 /**
  * Per-mod *user* preferences. Unlike the Schematic (agent-owned and rewritten
@@ -57,12 +35,16 @@ export interface ModPrefs {
   game: GameId;
   /**
    * Modrinth project id (Minecraft mods), stamped on first publish. Reusing it
-   * on the next publish updates the existing project (skipping re-review) rather
-   * than creating a new one. Undefined until first published to Modrinth.
+   * on the next publish updates the existing project (skipping re-review)
+   * rather than creating a new one, and it builds the public project URL
+   * (modrinth.com resolves ids as well as slugs, and unlike the slug an id
+   * can't be renamed on the site). Undefined until first published.
+   *
+   * This is deliberately the ONLY Modrinth project state we keep: project
+   * metadata (title, slug, description, …) is collected once in the
+   * first-publish dialog and owned by Modrinth afterwards — edit it there.
    */
   modrinthProjectId?: string;
-  /** Modrinth project slug, for building the public URL. */
-  modrinthSlug?: string;
   /**
    * Version number of the most recent successful Modrinth publish. Used to
    * pre-fill the publish dialog with the next patch bump — Modrinth rejects a
@@ -70,13 +52,6 @@ export interface ModPrefs {
    * published.
    */
   modrinthVersion?: string;
-  /**
-   * The Modrinth project metadata last published from Modmixer. Stamped on
-   * every successful Modrinth publish so the publish panel can re-seed its form
-   * (Modrinth-only fields like summary/slug/categories have nowhere else to
-   * live). Undefined until first published to Modrinth.
-   */
-  modrinthMeta?: ModrinthSavedMeta;
 }
 
 const SIDECAR_DIR = '.modmixer';
@@ -93,29 +68,6 @@ function defaults(): ModPrefs {
 function sidecarPath(folder: string): string {
   const { workspaceDir } = getWorkspacePaths();
   return path.join(workspaceDir, folder, SIDECAR_DIR, SIDECAR_FILE);
-}
-
-function asSide(v: unknown): ModrinthSideSupport {
-  return v === 'optional' || v === 'unsupported' ? v : 'required';
-}
-
-/** Tolerant parse of the persisted Modrinth metadata (user-editable on disk). */
-function parseModrinthMeta(v: unknown): ModrinthSavedMeta | undefined {
-  if (!v || typeof v !== 'object') return undefined;
-  const r = v as Record<string, unknown>;
-  const str = (x: unknown): string => (typeof x === 'string' ? x : '');
-  return {
-    title: str(r.title),
-    summary: str(r.summary),
-    description: str(r.description),
-    slug: str(r.slug),
-    license: str(r.license),
-    categories: Array.isArray(r.categories)
-      ? r.categories.filter((c): c is string => typeof c === 'string')
-      : [],
-    clientSide: asSide(r.clientSide),
-    serverSide: asSide(r.serverSide),
-  };
 }
 
 function parsePrefs(raw: string): ModPrefs {
@@ -135,13 +87,10 @@ function parsePrefs(raw: string): ModPrefs {
         typeof parsed.modrinthProjectId === 'string'
           ? parsed.modrinthProjectId
           : undefined,
-      modrinthSlug:
-        typeof parsed.modrinthSlug === 'string' ? parsed.modrinthSlug : undefined,
       modrinthVersion:
         typeof parsed.modrinthVersion === 'string'
           ? parsed.modrinthVersion
           : undefined,
-      modrinthMeta: parseModrinthMeta(parsed.modrinthMeta),
     };
   } catch {
     return defaults();
@@ -185,14 +134,10 @@ export async function writeModPrefs(
       'modrinthProjectId' in patch
         ? patch.modrinthProjectId
         : current.modrinthProjectId,
-    modrinthSlug:
-      'modrinthSlug' in patch ? patch.modrinthSlug : current.modrinthSlug,
     modrinthVersion:
       'modrinthVersion' in patch
         ? patch.modrinthVersion
         : current.modrinthVersion,
-    modrinthMeta:
-      'modrinthMeta' in patch ? patch.modrinthMeta : current.modrinthMeta,
   };
   await fsp.mkdir(path.join(modDir, SIDECAR_DIR), { recursive: true });
   await fsp.writeFile(

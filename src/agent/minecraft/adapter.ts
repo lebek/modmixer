@@ -125,6 +125,7 @@ function readModMetadata(
           packageId: meta.modId,
           author: meta.author,
           description: meta.description,
+          version: meta.version || undefined,
         }
       : emptyAbout(folder),
   );

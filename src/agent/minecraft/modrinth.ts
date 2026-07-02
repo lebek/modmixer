@@ -703,8 +703,9 @@ export interface PublishToModrinthOptions {
    * is created from `meta` first.
    */
   projectId?: string;
-  /** Project-level metadata, used only when creating a new project. */
-  meta: ModrinthPublishMeta;
+  /** Project-level metadata. Required when creating a new project (no
+   *  projectId); ignored on update — Modrinth owns it after first publish. */
+  meta?: ModrinthPublishMeta;
   /** Version-level metadata for the build being uploaded. */
   version: ModrinthVersionMeta;
   /** Optional progress callback; mirrors workshop.ts's onProgress shape. */
@@ -739,6 +740,11 @@ export async function publishToModrinth(
     let projectCreated = false;
 
     if (!projectId) {
+      if (!meta) {
+        throw new Error(
+          'Project metadata is required to create a new Modrinth project.',
+        );
+      }
       emit({ status: 'creating-project' });
       const project = await createModrinthProject(meta, token);
       projectId = project.projectId;
@@ -750,11 +756,10 @@ export async function publishToModrinth(
         slug,
         url: project.url,
       });
-    } else {
-      // Reusing an existing project — its slug isn't returned by the version
-      // endpoint, so fall back to the slug the caller supplied for the URL.
-      slug = meta.slug;
     }
+    // On update, slug stays '' and URLs fall back to the project id below —
+    // modrinth.com resolves ids, and unlike a slug an id can't be renamed on
+    // the site out from under our stored link.
 
     emit({ status: 'uploading-version', projectId, slug });
     const uploaded = await createModrinthVersion(projectId, jarPath, version, token);

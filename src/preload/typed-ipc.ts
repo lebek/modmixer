@@ -382,7 +382,7 @@ export interface Channels {
   'modmixer:modrinth:set-token': (token: string) => boolean;
   'modmixer:modrinth:publish': (
     folder: string,
-    meta: ModrinthPublishMeta,
+    meta: ModrinthPublishMeta | null,
     version: ModrinthVersionMeta,
   ) => ModrinthPublishResult;
 

@@ -31,6 +31,12 @@ export interface AboutMetadata {
   packageId: string;
   description: string;
   author: string;
+  /**
+   * The mod's own version. Minecraft: gradle.properties mod_version (baked
+   * into the jar name and neoforge.mods.toml at build time). RimWorld doesn't
+   * surface one here yet, so it's optional.
+   */
+  version?: string;
   supportedVersions: string[];
   /** Hard deps from <modDependencies>. Empty when none declared. */
   modDependencies: ModDependency[];

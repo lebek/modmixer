@@ -327,9 +327,11 @@ const api = {
   hasModrinthToken: () => invoke('modmixer:modrinth:has-token'),
   setModrinthToken: (token: string) =>
     invoke('modmixer:modrinth:set-token', token),
+  // meta is only present on a first publish (project creation); updates pass
+  // null — project metadata is owned on modrinth.com afterwards.
   publishToModrinth: (
     folder: string,
-    meta: import('./agent/minecraft/modrinth').ModrinthPublishMeta,
+    meta: import('./agent/minecraft/modrinth').ModrinthPublishMeta | null,
     version: import('./agent/minecraft/modrinth').ModrinthVersionMeta,
   ) => invoke('modmixer:modrinth:publish', folder, meta, version),
   onModrinthProgress: (
