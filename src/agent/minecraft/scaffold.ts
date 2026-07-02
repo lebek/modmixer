@@ -362,6 +362,10 @@ export interface MinecraftMetaPatch {
   /** New mod id (slugified). When it differs from the current id, the whole
    *  project is renamed (Java @Mod id, package, resource namespaces). */
   modId?: string;
+  /** New mod version (gradle.properties mod_version). Gradle bakes it into the
+   *  jar file name (<mod_id>-<mod_version>.jar) and expands it into the in-jar
+   *  neoforge.mods.toml at build time. */
+  version?: string;
 }
 
 /**
@@ -394,6 +398,13 @@ export async function writeMinecraftMeta(
     if (desc !== current.mod_description) {
       values.mod_description = desc;
       changed.push('description');
+    }
+  }
+  if (patch.version) {
+    const version = patch.version.trim();
+    if (version && version !== current.mod_version) {
+      values.mod_version = version;
+      changed.push('version');
     }
   }
 

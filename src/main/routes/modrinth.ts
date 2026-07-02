@@ -2,6 +2,7 @@ import { getWorkspaceMod } from '../../agent/workspace.js';
 import { emitModChanged } from '../../agent/mod-events.js';
 import { writeModPrefs } from '../../agent/mod-prefs.js';
 import { buildMod } from '../../agent/minecraft/gradle.js';
+import { writeMinecraftMeta } from '../../agent/minecraft/scaffold.js';
 import {
   getModrinthToken,
   setModrinthToken,
@@ -44,7 +45,29 @@ export function registerModrinthRoutes(ctx: RouteContext): void {
         win?.webContents.send('modmixer:modrinth:progress', { folder, ...event });
 
       emit({ status: 'preparing' });
-      // Build the shippable jar first; a publish must reflect current code.
+      // Bake the version into gradle.properties before building: Gradle names
+      // the jar <mod_id>-<mod_version>.jar and expands ${mod_version} into the
+      // in-jar neoforge.mods.toml, so without this every release would ship
+      // with the scaffold-time version. Validate first — the version lands
+      // inside a quoted toml string and NeoForge wants a maven-ish form.
+      const versionNumber = version.versionNumber.trim();
+      if (!/^[0-9A-Za-z][0-9A-Za-z.+_-]*$/.test(versionNumber)) {
+        const error = `Invalid version number "${version.versionNumber}" — use letters, digits, dots, hyphens (e.g. 1.0.1).`;
+        emit({ status: 'error', error });
+        throw new Error(error);
+      }
+      try {
+        const changed = await writeMinecraftMeta(mod.workspacePath, {
+          version: versionNumber,
+        });
+        if (changed.includes('version')) emitModChanged(folder);
+      } catch (err) {
+        const error = (err as Error).message;
+        emit({ status: 'error', error });
+        throw new Error(error);
+      }
+
+      // Build the shippable jar; a publish must reflect current code.
       const build = await buildMod(mod.workspacePath);
       if (!build.ok || !build.jarPath) {
         const error = 'Build failed — fix compile errors before publishing.';
@@ -66,7 +89,7 @@ export function registerModrinthRoutes(ctx: RouteContext): void {
         jarPath: build.jarPath,
         projectId: mod.prefs.modrinthProjectId,
         meta: effectiveMeta,
-        version,
+        version: { ...version, versionNumber },
         onProgress: emit,
       });
 
@@ -78,7 +101,7 @@ export function registerModrinthRoutes(ctx: RouteContext): void {
         ...(result.projectCreated || !mod.prefs.modrinthSlug
           ? { modrinthSlug: result.slug }
           : {}),
-        modrinthVersion: version.versionNumber,
+        modrinthVersion: versionNumber,
         lastPublishedAt: Date.now(),
         // Remember the project metadata so the publish panel can re-seed its
         // form after the first publish — Modrinth-only fields (summary, slug,
