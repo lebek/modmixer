@@ -22,9 +22,16 @@ export function ModPublishPanel(props: {
 }) {
   // Non-Workshop games (Minecraft → Modrinth) keep their identity in a different
   // manifest and get a separate panel. Branch here (before any hooks) so each
-  // panel keeps a stable hook order.
+  // panel keeps a stable hook order. Keyed by folder so switching mods remounts
+  // with fresh form state (the RimWorld panel reseeds via effects instead).
   if (!getGame(props.mod.prefs.game).capabilities.steamWorkshop) {
-    return <MinecraftPublishPanel mod={props.mod} onDeleted={props.onDeleted} />;
+    return (
+      <MinecraftPublishPanel
+        key={props.mod.folder}
+        mod={props.mod}
+        onDeleted={props.onDeleted}
+      />
+    );
   }
   return <RimWorldPublishPanel {...props} />;
 }

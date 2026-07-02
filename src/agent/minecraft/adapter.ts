@@ -143,7 +143,13 @@ async function writeModMetadata(
     modId: patch.packageId,
   });
   if (changed.length === 0) {
-    throw new Error('set_mod_metadata called with no fields to update.');
+    // Not an error: the Settings/Publish UI saves the whole form, and after
+    // normalization (id slugified, description flattened) every field can
+    // already match what's on disk.
+    return {
+      changed,
+      message: `gradle.properties for ${folder} already matches — nothing to update.`,
+    };
   }
   return {
     changed,

@@ -189,9 +189,10 @@ export async function writeAbout(
   const modDir = path.join(workspaceDir, folder);
   if (!fs.existsSync(modDir)) return null;
   // About.xml is RimWorld's identity format; this is the RimWorld writer,
-  // reached only via the RimWorld adapter and the RimWorld-only Deps/About IPC
-  // routes. Minecraft identity is written through its own adapter
-  // (gradle.properties), so no game check is needed here.
+  // reached only via the RimWorld adapter and the RimWorld-only write-deps IPC
+  // route (the read/write-about routes dispatch through the game adapter).
+  // Minecraft identity is written through its own adapter (gradle.properties),
+  // so no game check is needed here.
   const aboutDir = path.join(modDir, 'About');
   await fsp.mkdir(aboutDir, { recursive: true });
   const aboutPath = path.join(aboutDir, 'About.xml');

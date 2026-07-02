@@ -1,7 +1,9 @@
+import path from 'node:path';
 import { dialog } from 'electron';
 import {
   createUntitledMod,
   deleteWorkspaceMod,
+  getWorkspaceMod,
   getWorkspacePaths,
   importModFromFolder,
   listWorkspaceMods,
@@ -13,6 +15,8 @@ import {
   type ImportModResult,
   type WorkspaceMod,
 } from '../../agent/workspace.js';
+import { getAdapter } from '../../agent/adapters/index.js';
+import { readModPrefs } from '../../agent/mod-prefs.js';
 import { readSchematic } from '../../agent/schematic.js';
 import { scanDefs } from '../../agent/defs-scan.js';
 import { emitModChanged } from '../../agent/mod-events.js';
@@ -141,9 +145,18 @@ export function registerModRoutes(ctx: RouteContext): void {
     return { result, mods: await listWorkspaceMods() };
   });
 
-  ipc.handle('modmixer:mods:read-about', (_evt, folder: string) =>
-    readModAbout(folder),
-  );
+  // Identity reads/writes dispatch through the game adapter: RimWorld uses
+  // About.xml, Minecraft gradle.properties (where renaming the id rebrands the
+  // whole project — @Mod id, Java packages, resource namespaces). write-deps
+  // below stays a direct About.xml patch; it's RimWorld-only.
+  ipc.handle('modmixer:mods:read-about', async (_evt, folder: string) => {
+    const prefs = await readModPrefs(folder);
+    const { workspaceDir } = getWorkspacePaths();
+    return getAdapter(prefs.game).readModMetadata(
+      path.join(workspaceDir, folder),
+      folder,
+    );
+  });
 
   ipc.handle('modmixer:mods:read-schematic', (_evt, folder: string) =>
     readSchematic(folder),
@@ -156,9 +169,15 @@ export function registerModRoutes(ctx: RouteContext): void {
   ipc.handle(
     'modmixer:mods:write-about',
     async (_evt, folder: string, patch: Partial<AboutMetadata>) => {
-      const updated = await writeAbout(folder, patch);
+      const prefs = await readModPrefs(folder);
+      const { workspaceDir } = getWorkspacePaths();
+      await getAdapter(prefs.game).writeModMetadata(
+        path.join(workspaceDir, folder),
+        folder,
+        patch,
+      );
       emitModChanged(folder);
-      return updated;
+      return getWorkspaceMod(folder);
     },
   );
 
