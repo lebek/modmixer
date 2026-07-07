@@ -1177,15 +1177,21 @@ function MessageBubbleImpl({
     // the failure) is still shown above the error note.
     const isError = message.stopReason === 'error';
     const hasContent = !!text || toolCalls.length > 0;
+    // Reasoning models (Opus, Fable, Kimi, DeepSeek…) stream a readable
+    // "thinking" summary ahead of their answer. We tuck it behind a
+    // disclosure above the reply.
+    const thinking = extractThinking(message.content);
+    const hasThinking = !!thinking;
+    // A finished turn that produced only reasoning — no answer text, no tools.
     // Some models (e.g. Kimi K2.6 via OpenRouter) ignore reasoning=none and
-    // return their entire answer inside a thinking block. Surface it instead
-    // of leaving the bubble blank — but only when the turn is actually done,
-    // since mid-stream a thinking-only state usually means text is still on
-    // its way.
-    const fallbackThinking =
-      !hasContent && !isStreaming ? extractThinking(message.content) : '';
-    const showSpinner = !hasContent && !fallbackThinking && isStreaming;
-    const copyText = text || fallbackThinking;
+    // reply entirely inside a thinking block; that block IS the answer, so we
+    // render it as the body rather than hiding it behind the disclosure.
+    const thinkingIsReply = hasThinking && !hasContent && !isStreaming;
+    // Mid-turn, with reasoning streaming in ahead of any answer text. Show it
+    // live (auto-expanded) so the wait isn't dead air.
+    const liveThinking = hasThinking && !hasContent && isStreaming;
+    const showSpinner = !hasContent && !hasThinking && isStreaming;
+    const copyText = text || thinking;
     // Slugs like "moonshotai/kimi-k2.6" or "accounts/fireworks/models/kimi-k2p6"
     // — only the tail is meaningful in the bubble header.
     const modelLabel = message.model.split('/').pop() || message.model;
@@ -1224,10 +1230,13 @@ function MessageBubbleImpl({
             )}
           </div>
         </div>
+        {hasThinking && !thinkingIsReply && (
+          <ThinkingPanel thinking={thinking} live={liveThinking} />
+        )}
         {text && <Markdown>{text}</Markdown>}
-        {fallbackThinking && (
+        {thinkingIsReply && (
           <div className="opacity-80">
-            <Markdown>{fallbackThinking}</Markdown>
+            <Markdown>{thinking}</Markdown>
           </div>
         )}
         {showSpinner && <ThinkingIndicator />}
@@ -1259,6 +1268,69 @@ function MessageBubbleImpl({
   }
 
   return null;
+}
+
+function ChevronRightIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="m9 6 6 6-6 6" />
+    </svg>
+  );
+}
+
+/**
+ * Collapsible reasoning summary shown above an assistant reply. Always starts
+ * collapsed and stays that way until the user clicks — reasoning is opt-in, not
+ * pushed. While the model is still reasoning ahead of its answer (`live`), the
+ * header shows an animated THINKING… label; once the answer lands it settles to
+ * THOUGHTS.
+ */
+function ThinkingPanel({ thinking, live }: { thinking: string; live: boolean }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mb-1.5">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center gap-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.18em] text-subtle transition-colors hover:text-muted"
+      >
+        <ChevronRightIcon
+          className={cn('h-3 w-3 transition-transform', open && 'rotate-90')}
+        />
+        {live ? (
+          <span className="inline-flex items-center gap-1.5">
+            <span className="inline-flex items-end gap-0.5">
+              {[0, 140, 280].map((delay) => (
+                <span
+                  key={delay}
+                  className="juicy-bounce-dot inline-block h-1 w-1 rounded-full bg-pending"
+                  style={{ animationDelay: `${delay}ms` }}
+                />
+              ))}
+            </span>
+            <span>Thinking…</span>
+          </span>
+        ) : (
+          <span>Thoughts</span>
+        )}
+      </button>
+      {open && (
+        <div className="mt-1 border-l-2 border-line pl-3 opacity-70">
+          <Markdown>{thinking}</Markdown>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function ThinkingIndicator() {
