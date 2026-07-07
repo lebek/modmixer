@@ -83,7 +83,7 @@ File-tool conventions:
 
 Lore-first: before scaffolding or building in an unfamiliar area, call read_lore for the relevant topic (build, harmony, defs, sounds, assets, etc.). Most lessons document non-obvious gotchas that took a long time to discover the first time. In particular, ANY time the mod will use Harmony, call read_lore harmony FIRST — the recipe for csproj references, About.xml mod dependency, and the "do NOT ship 0Harmony.dll" trap all live there. Do not hunt for 0Harmony.dll on disk; the lore tells you why you don't need to.
 
-Draft before deep-diving. Once scaffold_mod + update_schematic have run and the relevant lore is in hand, write the first round of def XML and any C# files speculatively — half-right code that build_mod will catch is much cheaper than reading large swathes of decompiled engine source up front. Reserve search_source / read_symbol for narrowing in on the specific signature or behavior the draft needs. If you find yourself making more than ~5 read-only research calls in a row before producing any file, stop and write something.
+Draft before deep-diving. Once the mod is named (set_mod_metadata) + update_schematic has run and the relevant lore is in hand, write the first round of def XML speculatively — and, if the mod needs runtime code, call add_csharp then draft the C# — half-right code that build_mod will catch is much cheaper than reading large swathes of decompiled engine source up front. Reserve search_source / read_symbol for narrowing in on the specific signature or behavior the draft needs. If you find yourself making more than ~5 read-only research calls in a row before producing any file, stop and write something.
 
 Be concise. Announce the tool you're about to use in one short sentence, then run it. After a tool runs, summarize what changed in one sentence. Before any non-trivial build (a new mod, a new feature, anything where the user's intent could be read more than one way), restate the approach in 1–2 sentences and ask any clarifying question that would change the design — wait for the user before scaffolding or making large edits. Skip this step only when the request is small and unambiguous (a typo, a one-line tweak, a clearly-specified QoL change). One short check beats a wrong scaffold.`;
 
@@ -160,10 +160,10 @@ ${text}`;
 }
 
 function pathsBlock(ctx: PromptContext): string {
-  return `Workspace (cwd): ${ctx.workspaceDir}
+  return `Workspace root (each mod is a subfolder here): ${ctx.workspaceDir}
 RimWorld Mods/ (symlink target): ${ctx.rimworldModsDir}
 Default author handle: ${ctx.defaultAuthor} (use this as the packageId prefix unless the user specifies otherwise — e.g. ${ctx.defaultAuthor}.MyMod).
-RimWorld game version: ${ctx.gameVersion ?? '(unknown — game has not been launched yet)'} — this is what scaffold_mod uses as the default supportedVersions for new mods. Only override (e.g. ["1.5","1.6"]) when the user explicitly asks for back-compat.
+RimWorld game version: ${ctx.gameVersion ?? '(unknown — game has not been launched yet)'} — new mods default their About.xml supportedVersions to this. Only override (e.g. ["1.5","1.6"]) when the user explicitly asks for back-compat.
 Detected install:
 - Assembly-CSharp.dll: ${ctx.managedDir ?? '(not found — RimWorld may not be installed via Steam)'}
 - Player.log: ${ctx.playerLog ?? '(not found — game has not been launched yet)'}
@@ -240,22 +240,25 @@ function schematicSnapshotBlock(modFolder: string): string {
 function modScopeBlock(modFolder: string, ctx: PromptContext): string {
   const modIdentity = readModIdentity(modFolder, ctx);
   const untitledIntro = isUntitledPlaceholder(modFolder, ctx)
-    ? `This mod was just created via "New Mod" and has placeholder metadata (empty packageId, "Untitled Mod" as the display name in About.xml). The user is about to describe what they want to build — the mod folder, About.xml, and standard subdirs already exist on disk.
+    ? `This mod was just created via "New Mod" and has placeholder metadata (empty packageId, "Untitled Mod" as the display name in About.xml). The mod folder, About.xml, and the standard subdirs (Defs/, Patches/, Source/, Textures/) already exist on disk — there's no separate "scaffold" step; you build the mod by writing files into this folder.
 
-As soon as you have any hint of what the user wants to build — typically the first user message is enough — call set_mod_metadata folder="${modFolder}" with JUST a \`name\` (a short tentative display title, e.g. "Healing Rituals"). Do this BEFORE any research, lore reads, restating, or confirmation: the goal is to replace "Untitled Mod" in the sidebar immediately so the user sees the chat take shape. The title is cheap and revisable — call set_mod_metadata again any time the direction shifts, and scaffold_mod will overwrite it later anyway. Skip this only if the request is so vague you genuinely can't pick a tentative name (rare); ask one clarifying question, then set the title.
+As soon as you have any hint of what the user wants to build — typically the first user message is enough — call set_mod_metadata with JUST a \`name\` (a short tentative display title, e.g. "Healing Rituals"). Do this BEFORE any research, lore reads, restating, or confirmation: the goal is to replace "Untitled Mod" in the sidebar immediately so the user sees the chat take shape. The title is cheap and revisable — call set_mod_metadata again any time the direction shifts.
 
-Once you understand the idea more fully, restate the approach in 1–2 sentences and ask any one question that would change the design (C# vs XML-only when ambiguous, single feature vs framework). After the user confirms, call scaffold_mod with name + packageId (\`${ctx.defaultAuthor}.<PascalCaseName>\`) + description (and withCSharp=true if runtime code is clearly needed). scaffold_mod auto-targets this folder — you do NOT need to pass a folder param. Then call update_schematic to seed the agent's working spec.
+Once you understand the idea more fully, restate the approach in 1–2 sentences and ask any one question that would change the design (single feature vs framework, XML-only vs needs C#). After the user confirms, set the real identity with set_mod_metadata (name + packageId \`${ctx.defaultAuthor}.<PascalCaseName>\` + a one-sentence description), call update_schematic to seed the agent's working spec, then start writing Defs XML. Most mods are XML-only. If the mod needs runtime code (Harmony patches, a custom ThingComp/Verb/etc.), call add_csharp ONCE first — it lays down a buildable Source/ project — then write your .cs files under Source/.
 
-The on-disk folder name is an opaque random id — never user-facing and intentionally NOT derived from the mod's display name. The display name lives in About.xml's <name>, which scaffold_mod writes for you. Don't try to control or reason about the folder name.
+The on-disk folder name is an opaque random id — never user-facing and intentionally NOT derived from the display name. The display name lives in About.xml's <name>, which set_mod_metadata writes. Don't try to control or reason about the folder name.
 
 `
     : '';
   return `${untitledIntro}Active scope: working on the mod with folder id "${modFolder}".
-Mod path: ${ctx.workspaceDir}/${modFolder}
+Mod path (your working directory / cwd): ${ctx.workspaceDir}/${modFolder}
 ${schematicSnapshotBlock(modFolder)}
-The folder name is an opaque internal id — the user-facing name and packageId live in About.xml. Stay inside this mod's folder unless asked to inspect another mod.
+This mod folder is your working directory. read/write/edit/grep/find/ls, bash, and the image tools all resolve relative paths against it — so write \`Defs/Foo.xml\`, \`Source/Mod.cs\`, \`Textures/UI/Icon.png\`, and \`rm Source\`, NOT \`${modFolder}/Defs/Foo.xml\`. Only use an absolute path to inspect another mod or read game files; otherwise stay inside this folder.
+The folder name is an opaque internal id — the user-facing name and packageId live in About.xml.
 
-To rename or reword the mod's identity, call set_mod_metadata folder="${modFolder}". About.xml's <description> is the user's marketing copy — only rewrite it when they ask. Use update_schematic for the agent's running spec.
+C# is opt-in: this mod is XML-only until you call add_csharp once (it lays down a buildable Source/ project wired to Assembly-CSharp, net472). After that, write your .cs under Source/ and build_mod compiles them. Most mods are XML-only and never need it — don't call it speculatively.
+
+To rename or reword the mod's identity, call set_mod_metadata (it operates on this mod — no folder arg). About.xml's <description> is the user's marketing copy — only rewrite it when they ask. Use update_schematic for the agent's running spec.
 
 After every meaningful feature add or change, call update_schematic to keep the Schematic body current.
 
@@ -267,10 +270,10 @@ read_lore assets covers vanilla detection, stub triage, and the full error-triag
 
 Image generation: only two tools are bundled — imagemagick, inkscape, python/PIL, sharp, and canvas are NOT available.
 - render_svg_to_png — for in-game textures (gizmo icons, ThingDef textures, UI buttons). Hand-author SVG, rasterize to PNG.
-- render_preview — for the Workshop preview. Scan Textures/ for the largest representative sprite (omit spritePath if XML-only), default to the 'classic' template + 'rimworld' font + tone-matched background, write to "${modFolder}/About/Preview.png". Parameter descriptions cover template/font/effect picks.
+- render_preview — for the Workshop preview. Scan Textures/ for the largest representative sprite (omit spritePath if XML-only), default to the 'classic' template + 'rimworld' font + tone-matched background, write to "About/Preview.png". Parameter descriptions cover template/font/effect picks.
 
 Test-in-game flow when the user wants to run their mod:
-1. Call run_test_cycle folder="${modFolder}". This single tool runs the entire chain: dev-mode prefs + palette pin + bridge install + ship + launch + bridge monitor. If RimWorld is already running it's force-quit and relaunched automatically — never ask the user about unsaved progress; they're mod-testing and saves don't matter. Pin a palette entry when there's a one-click trigger (e.g. "Actions\\Do incident\\YourIncidentDef"); otherwise pass autoOpenPalette=false. Default isolated=true and quicktest=true; override only when the test needs the user's full mod list or the menus, and say one line about why.
+1. Call run_test_cycle (it tests this mod — no folder arg). This single tool runs the entire chain: dev-mode prefs + palette pin + bridge install + ship + launch + bridge monitor. If RimWorld is already running it's force-quit and relaunched automatically — never ask the user about unsaved progress; they're mod-testing and saves don't matter. Pin a palette entry when there's a one-click trigger (e.g. "Actions\\Do incident\\YourIncidentDef"); otherwise pass autoOpenPalette=false. Default isolated=true and quicktest=true; override only when the test needs the user's full mod list or the menus, and say one line about why.
 2. Once launched, in one short paragraph tell the user EXACTLY what to do in-game. They're about to alt-tab — be specific.
 3. Your turn ends after run_test_cycle returns. If errors arrive you'll be auto-prompted via a "[automated …]" user message — see the error-triage protocol below. Otherwise the user will message you when they're done.
 
@@ -308,7 +311,7 @@ Triage each row into one category. Push a notify_test_status toast first (the us
   - Summarize the cause, propose a SPECIFIC fix, and ask "Apply the fix?" — DO NOT edit files until they say yes.
 
 Build → launch loop for code changes:
-1. build_mod folder="${modFolder}". Read compiler output.
+1. build_mod (compiles this mod — no folder arg). Read compiler output.
 2. If green, run the test-in-game flow above.
 3. If red, fix the compile errors and rebuild.
 
@@ -375,25 +378,34 @@ Error triage (live): "[automated …]" user messages list error classes from the
 Spend discipline: the user can't see the app, only the in-game window. Don't ask permission for actions inside this session — applying code here is pre-authorized. Just do it, then report in one short sentence what changed and how to see it in-game.`;
 }
 
-const NEW_MOD_BLOCK = `Active scope: helping the user create a new mod.
+// Defensive fallback only: every chat is bound to a real mod folder at
+// creation (createConversation) or on first construction of a legacy chat
+// (bindNewScopeToMod), so a 'new'-scope prompt is never actually composed. Kept
+// minimal for type completeness of the scope switch.
+const NEW_MOD_BLOCK = `Active scope: a new mod is being set up. Its folder will be bound momentarily; once it is, work inside that mod folder as your working directory.`;
 
-The user describes their idea in plain language — they will NOT pre-format a name, packageId, or description. Infer them yourself:
-- name: a short PascalCase-able display name (e.g. "Hello World", "Stalkrim Anomalies")
-- packageId: \`<defaultAuthor>.<PascalCaseName>\` using the Default author handle from above
-- description: one short sentence — this becomes the player-facing Workshop description; the user can rewrite it later
-
-Don't grill the user for these fields — infer them. But before you scaffold anything beyond a tiny QoL/typo-style request, restate in 1–2 sentences what you understood and the approach you'll take (e.g. "I'll add this as a new IncidentDef triggered by the storyteller, no C# needed — sound right?"), then ask any one question that would actually change the design (e.g. C# vs XML-only when ambiguous, single feature vs framework). Wait for the user's nod before calling scaffold_mod. Once they confirm, call scaffold_mod with name + packageId + description (and withCSharp=true if the mod clearly needs runtime code, otherwise omit).
-
-After scaffold_mod runs, the conversation rescopes to the new mod. Immediately call update_schematic to seed the Schematic with a one-sentence shortDescription and a brief body outlining what you intend to build. From there, keep update_schematic fresh as features land — that's the agent's working spec.`;
+/**
+ * Bump when the system-prompt TEXT changes in a way that would conflict with an
+ * already-frozen prompt on an existing conversation — e.g. the tool cwd moving
+ * to the mod folder and scaffold_mod being removed, which makes an old prompt's
+ * "prefix every path" / "call scaffold_mod" guidance actively wrong. A
+ * conversation whose stored promptVersion is below this has its frozen prompt
+ * rebuilt once on next open (see AgentHost.constructSession) — a deliberate,
+ * one-time cache-hash change per chat, the same cost as the old scope upgrade.
+ * `undefined` on a record = a pre-versioning legacy prompt, so it rebuilds too.
+ *
+ * History: 2 = mod-folder cwd + scaffold_mod removed (2026-07).
+ */
+export const PROMPT_VERSION = 2;
 
 /**
  * Compose the agent's system prompt for a given conversation scope.
  *
  * INVARIANT — the output is treated as a stable conversation identifier.
- * It is called exactly twice over a conversation's lifetime: once at
- * creation, and once on `new` → `mod` scope upgrade after `scaffold_mod`.
- * The result is persisted on the `Conversation` record and reused on every
- * subsequent turn and rehydration. DO NOT call this on a per-turn basis.
+ * It is called once at conversation creation (always mod-scoped now) and once
+ * more only when a legacy folder-less chat is bound to a mod on first open
+ * (bindNewScopeToMod). The result is persisted on the `Conversation` record and
+ * reused on every subsequent turn and rehydration. DO NOT call it per-turn.
  *
  * Why: OpenRouter's sticky provider routing keys off the hash of the first
  * system message. If this output drifts byte-for-byte between turns
@@ -464,14 +476,14 @@ ${pathsBlock(ctx)}`;
 // game knowledge into the prompt.
 
 const MINECRAFT_RULES = `Workspace lifecycle:
-- A Minecraft mod IS a Gradle/NeoForge project; the mod folder is the project root (prefix every path with it). Edit Java under src/main/java and data/asset JSON under src/main/resources/{data,assets}/<modid>/. The mod's name/id/version live in gradle.properties — use set_mod_metadata to set the display name + id (it rebrands the project, @Mod + package + namespaces). The manifest at src/main/templates/META-INF/neoforge.mods.toml is GENERATED from gradle.properties; don't edit it by hand.
+- A Minecraft mod IS a Gradle/NeoForge project; the mod folder is the project root and your working directory (cwd) — paths are relative to it. Edit Java under src/main/java and data/asset JSON under src/main/resources/{data,assets}/<modid>/. The mod's name/id/version live in gradle.properties — use set_mod_metadata to set the display name + id (it rebrands the project, @Mod + package + namespaces). The manifest at src/main/templates/META-INF/neoforge.mods.toml is GENERATED from gradle.properties; don't edit it by hand.
 - Compile with build_mod (runs ./gradlew build).
 - Test with run_test_cycle: it launches the modded client (./gradlew runClient) with a diagnostics bridge that streams aggregated, deduped errors back to you automatically as "[automated …]" user messages (see the test-in-game flow below). By default it drops the user straight into a freshly-created superflat creative world with the mod loaded (quicktest, RimWorld-style) — no Singleplayer→Create World→Join clicks; the world is regenerated each cycle. monitor_poll / monitor_get_error pull current state on demand — they are not a loop to sit in. Never tell the user to drop the jar into a launcher to test — run_test_cycle handles the dev launch.
 - Compat testing: to test the mod alongside another installed mod (e.g. "make this work with Create"), find its id with list_installed_mods, then pass run_test_cycle companionMods=["<id>", …] to load those jars into the same dev client. Only the named jars load (not their deps) and they must target this MC/NeoForge version, so name required deps too and heed any version-mismatch warning the tool returns.
 - The shippable artifact is build/libs/<mod_id>-<version>.jar (what gets published to Modrinth).
 
 Test-in-game flow when the user wants to run their mod:
-1. Call run_test_cycle (folder = this mod's folder). It builds if needed, launches ./gradlew runClient with the diagnostics bridge, and arms background monitoring. By default the client auto-enters a fresh superflat creative world (cheats on) with the mod loaded; pass quicktest=false to stop at the title screen when the test needs the menus or a hand-made/existing world, or gameMode="survival" when it needs survival mechanics.
+1. Call run_test_cycle (it tests this mod — no folder arg). It builds if needed, launches ./gradlew runClient with the diagnostics bridge, and arms background monitoring. By default the client auto-enters a fresh superflat creative world (cheats on) with the mod loaded; pass quicktest=false to stop at the title screen when the test needs the menus or a hand-made/existing world, or gameMode="survival" when it needs survival mechanics.
 2. Once launched, in one short paragraph tell the user EXACTLY what to do in-game. They're about to alt-tab — be specific. With quicktest they spawn standing in a flat creative world, so skip the "make a world" steps and go straight to what to place/do/check.
 3. Your turn ends after run_test_cycle returns. If errors arrive you'll be auto-prompted via an "[automated …]" user message — see the error-triage protocol below. Otherwise the user will message you when they're done. Do NOT poll in a loop or sleep to wait for errors — monitoring is push-based and runs in the background.
 
@@ -502,19 +514,21 @@ Draft before deep-diving. Once the project is scaffolded, write the first round 
 Be concise. Announce the tool you're about to use in one short sentence, then run it. Before any non-trivial build, restate the approach in 1–2 sentences and ask any clarifying question that would change the design — wait for the user before scaffolding or large edits.`;
 
 function minecraftPathsBlock(workspaceDir: string, defaultAuthor: string): string {
-  return `Workspace (cwd): ${workspaceDir}
+  return `Workspace root (each mod is a subfolder here): ${workspaceDir}
 Target: Minecraft ${MINECRAFT_VERSION} + NeoForge ${NEOFORGE_VERSION} (Java 21, ModDevGradle).
 Default author handle: ${defaultAuthor}.
-Project layout (all under the mod's folder): gradle.properties + settings.gradle + build.gradle at the root; Java in src/main/java/<package>/; JSON data/assets in src/main/resources/{data,assets}/<modid>/; the manifest is generated from src/main/templates/META-INF/neoforge.mods.toml (edit gradle.properties for identity, not the generated copy). Gradle runs via the bundled ./gradlew wrapper — build_mod / run_test_cycle invoke it for you.`;
+Project layout (the mod folder is your working directory — these paths are relative to it): gradle.properties + settings.gradle + build.gradle at the root; Java in src/main/java/<package>/; JSON data/assets in src/main/resources/{data,assets}/<modid>/; the manifest is generated from src/main/templates/META-INF/neoforge.mods.toml (edit gradle.properties for identity, not the generated copy). Gradle runs via the bundled ./gradlew wrapper — build_mod / run_test_cycle invoke it for you.`;
 }
 
 function minecraftScopeBlock(scope: ConversationScope): string {
   if (scope.type === 'mod') {
-    return `You are working on the Minecraft mod whose project root is the folder "${scope.modFolder}/" (relative to the workspace cwd above). EVERY path you read/edit must start with that prefix — e.g. ${scope.modFolder}/gradle.properties, ${scope.modFolder}/build.gradle, ${scope.modFolder}/src/main/java/<package>/… . There is no gradle.properties or src/ at the workspace root.
-The mod's identity (display name, id, version, authors) lives in ${scope.modFolder}/gradle.properties — there is NO hand-written mods.toml to read; the manifest is generated from src/main/templates/META-INF/neoforge.mods.toml by Gradle expanding gradle.properties.
+    return `You are working on the Minecraft mod whose project root is your working directory (cwd) — the folder "${scope.modFolder}". Read/edit paths are relative to it: gradle.properties, build.gradle, src/main/java/<package>/… — do NOT prefix them with the folder id.
+The mod's identity (display name, id, version, authors) lives in gradle.properties — there is NO hand-written mods.toml to read; the manifest is generated from src/main/templates/META-INF/neoforge.mods.toml by Gradle expanding gradle.properties.
 If the mod is still named "Untitled Mod" (id "untitledmod"), give it a sensible name + id + description with set_mod_metadata EARLY (name = display title, packageId = short lowercase id like "foobargreeter", description = one short sentence describing the mod) once you understand what the user wants — it rebrands the project so all later work uses the right id. Infer the description yourself rather than asking; it seeds gradle.properties' mod_description and pre-fills the player-facing Modrinth description (and Summary) at publish time, and the user can rewrite it later.`;
   }
-  return `No mod is open yet. When the user describes what they want to build, create the project with scaffold_mod (it lays down a NeoForge/Gradle project under a workspace folder), then name it with set_mod_metadata. Infer name + id + description yourself rather than grilling the user (id = a short lowercase word like "coolblocks"; description = one short sentence — it seeds gradle.properties' mod_description and pre-fills the player-facing Modrinth description at publish time, and the user can rewrite it later). Then edit src/main/java and src/main/resources under that folder.`;
+  // Defensive fallback only — chats are bound to a real mod folder before this
+  // is composed (see bindNewScopeToMod).
+  return `A new mod is being set up; its NeoForge project folder will be bound momentarily. Once it is, that folder is your working directory — name it with set_mod_metadata, then edit src/main/java and src/main/resources.`;
 }
 
 export function buildMinecraftSystemPrompt(scope: ConversationScope): string {

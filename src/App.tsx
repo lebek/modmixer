@@ -149,7 +149,7 @@ export function App() {
     const offScope = window.modmixer.onScopeUpgraded((env) => {
       if (env.scope.type !== 'mod') return;
       void refreshMods();
-      // scaffold_mod upgraded a conversation's scope — keep the tab's copy
+      // A legacy folder-less chat was just bound to a mod — keep the tab's copy
       // of the conversation in sync.
       setTabs((prev) =>
         prev.map((t) =>

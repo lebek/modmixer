@@ -174,10 +174,10 @@ export function ChatPanel({
   availableModels: ModelOption[];
   onConnect: () => void;
 }) {
-  // A mod-scoped chat with an empty packageId is the renderer-created
-  // placeholder from "+ new mod" — no scaffold_mod yet, so the UX should
-  // still read like a fresh-idea conversation, not an edit-this-mod one.
-  // Mirrors the system prompt's isUntitledPlaceholder check.
+  // A mod-scoped chat whose mod still has an empty packageId is the untitled
+  // "+ new mod" placeholder — not yet named — so the UX should still read like
+  // a fresh-idea conversation, not an edit-this-mod one. Mirrors the system
+  // prompt's isUntitledPlaceholder check.
   const effectiveScope: 'mod' | 'new' =
     conversation.scope.type === 'mod' &&
     activeMod &&

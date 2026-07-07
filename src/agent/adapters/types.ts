@@ -27,33 +27,6 @@ import type { BuildErrorHint } from '../build-error-hints.js';
 import type { AboutMetadata } from '../workspace.js';
 import type { ConversationScope } from '../conversations.js';
 
-/**
- * Inputs the scaffold_mod tool hands to a game's scaffolder. The tool resolves
- * the target folder (placeholder redirect / orphan guard / mint) and applies
- * the author default; the adapter maps these onto its own project shape
- * (RimWorld → About.xml + subfolders [+ .csproj]; Minecraft → gradle.properties
- * identity in the NeoForge project). RimWorld-only fields are ignored by games
- * that don't use them.
- */
-export interface ScaffoldOptions {
-  name: string;
-  /** RimWorld: reverse-DNS packageId. Minecraft: the mod id (slugified). */
-  packageId: string;
-  description: string;
-  author: string;
-  /** RimWorld only — supported game versions for About.xml. */
-  rimworldVersions?: string[];
-  /** RimWorld only — also emit a buildable .csproj + Mod.cs. */
-  withCSharp?: boolean;
-}
-
-export interface ScaffoldModDetails {
-  modPath: string;
-  folder: string;
-  files: string[];
-  csharp: boolean;
-}
-
 export interface BuildModDetails {
   exitCode: number;
   stdout: string;
@@ -88,14 +61,15 @@ export interface RunTestCycleDetails {
  */
 export interface TestCycleContext {
   conversationId: string;
-  /** Workspace mod folder name (lifted out of params; every game tests a folder). */
+  /** Workspace mod folder name — the mod the chat is bound to, derived by the
+   *  tool wrapper from the session cwd (not a tool param). */
   folder: string;
   /**
    * The validated run_test_cycle tool params for this game, whose shape is the
-   * adapter's own `testCycleParams` schema. The wrapper lifts the neutral
-   * `folder` out above; everything else (RimWorld's palette/quicktest/isolated/
-   * companionMods) is read by the owning adapter and stays opaque here, so the
-   * shared context never grows a field per game.
+   * adapter's own `testCycleParams` schema (RimWorld's palette/quicktest/
+   * isolated/companionMods, Minecraft's quicktest/gameMode/companionMods) —
+   * read by the owning adapter and opaque here, so the shared context never
+   * grows a field per game. The tested folder is `folder` above, not in here.
    */
   params: Record<string, unknown>;
   /** Arm the background bridge monitor bound to this conversation. */
@@ -167,8 +141,6 @@ export interface MetadataWriteResult {
  * whose model-facing copy must name the game's own project shape and workflow.
  */
 export interface GameToolText {
-  /** scaffold_mod description (RimWorld About.xml + subfolders vs NeoForge project). */
-  scaffold: string;
   /** run_test_cycle description (RimWorld Prefs/ship/launch vs gradlew runClient). */
   testCycle: string;
 }
@@ -180,21 +152,21 @@ export interface GameAdapter {
   readonly setup: GameSetupAdapter;
   /** Code-index lifecycle (startup build, per-session kick, query readiness). */
   readonly index: GameIndexAdapter;
-  /** Model-facing descriptions for the shared scaffold/test tools. */
+  /** Model-facing description for the shared run_test_cycle tool. */
   readonly toolText: GameToolText;
   /**
-   * TypeBox schema for this game's run_test_cycle parameters. Game-specific:
-   * RimWorld exposes folder + palette/quicktest/isolated/companionMods; Minecraft
-   * exposes only `folder`. The shared tool wrapper uses this as the tool's
-   * `parameters`, so a game's model never sees another game's knobs. Must include
-   * a `folder` string field (the wrapper lifts it into TestCycleContext.folder).
+   * TypeBox schema for this game's run_test_cycle parameters — the tuning knobs
+   * only (RimWorld: palette/quicktest/isolated/companionMods; Minecraft:
+   * quicktest/gameMode/companionMods). The shared tool wrapper uses this as the
+   * tool's `parameters`, so a game's model never sees another game's knobs. No
+   * `folder` field: the tested mod is the one the chat is bound to, and the
+   * wrapper derives TestCycleContext.folder from the session cwd.
    */
   readonly testCycleParams: TObject;
   /**
-   * Whether `modDir` is still the freshly-minted "Untitled Mod" placeholder (so
-   * a bare scaffold_mod redirects in-place rather than orphaning it). RimWorld:
-   * About.xml with an empty packageId; Minecraft: gradle.properties id
-   * "untitledmod".
+   * Whether `modDir` is still the freshly-minted "Untitled Mod" placeholder
+   * (drives the prompt's "name this first" nudge). RimWorld: About.xml with an
+   * empty packageId; Minecraft: gradle.properties id "untitledmod".
    */
   isPlaceholderMod(modDir: string): boolean;
   /**
@@ -241,14 +213,6 @@ export interface GameAdapter {
    * presentation in `<game>/research-tools.ts`.
    */
   researchTools(): AgentTool<any>[];
-  /**
-   * Lay down (or re-stamp) the mod's project in `modDir`. The folder is already
-   * resolved by the tool; the adapter owns the project shape.
-   */
-  scaffold(
-    modDir: string,
-    opts: ScaffoldOptions,
-  ): Promise<AgentToolResult<ScaffoldModDetails>>;
   /** Compile the mod and return full build output. `signal` may be absent. */
   build(
     modDir: string,

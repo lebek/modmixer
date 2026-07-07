@@ -4,7 +4,6 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 import { assertPathAllowed } from '../security/path-policy.js';
 import { getPathPolicyRoots } from '../security/policy-roots.js';
-import { getWorkspacePaths } from '../workspace.js';
 import { rasterizeSvg } from './lib/resvg-init.js';
 
 const Params = Type.Object({
@@ -14,7 +13,7 @@ const Params = Type.Object({
   }),
   outPath: Type.String({
     description:
-      "Output PNG path. Relative paths resolve against the workspace cwd (e.g. 'MyMod/Textures/UI/Icon.png'). Parent directories are created automatically. Must be inside the workspace.",
+      "Output PNG path, relative to the mod folder (your working directory) — e.g. 'Textures/UI/Icon.png'. Parent directories are created automatically. Must be inside the workspace.",
   }),
   width: Type.Optional(
     Type.Number({
@@ -31,17 +30,23 @@ export interface RenderSvgToPngDetails {
   height: number;
 }
 
-export const renderSvgToPngTool: AgentTool<typeof Params, RenderSvgToPngDetails> = {
+/**
+ * `cwd` is the active mod folder (the session's working directory); relative
+ * `outPath`s resolve against it, matching the guarded read/write/edit tools.
+ */
+export function createRenderSvgToPngTool(
+  cwd: string,
+): AgentTool<typeof Params, RenderSvgToPngDetails> {
+  return {
   name: 'render_svg_to_png',
   label: 'Render SVG → PNG',
   description:
-    "Rasterize an SVG to a PNG file on disk. Use this for any mod texture you generate (gizmo icons, ThingDef textures, UI buttons) — Modmixer ships only this renderer; imagemagick, inkscape, python/PIL, sharp, and canvas are NOT available, so do not shell out to them. Pass the SVG markup directly as a string. The output path resolves against the mod workspace and is path-policy-guarded.",
+    "Rasterize an SVG to a PNG file on disk. Use this for any mod texture you generate (gizmo icons, ThingDef textures, UI buttons) — Modmixer ships only this renderer; imagemagick, inkscape, python/PIL, sharp, and canvas are NOT available, so do not shell out to them. Pass the SVG markup directly as a string. The output path resolves against the mod folder and is path-policy-guarded.",
   parameters: Params,
   async execute(_id, params): Promise<AgentToolResult<RenderSvgToPngDetails>> {
-    const { workspaceDir } = getWorkspacePaths();
     const absOutPath = path.isAbsolute(params.outPath)
       ? params.outPath
-      : path.resolve(workspaceDir, params.outPath);
+      : path.resolve(cwd, params.outPath);
     assertPathAllowed(absOutPath, getPathPolicyRoots(), 'outPath');
 
     const opts =
@@ -68,4 +73,5 @@ export const renderSvgToPngTool: AgentTool<typeof Params, RenderSvgToPngDetails>
       },
     };
   },
-};
+  };
+}

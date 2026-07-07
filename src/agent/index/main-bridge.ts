@@ -110,7 +110,7 @@ export async function ensureRimworldIndexAtStartup(): Promise<void> {
       message:
         'ilspycmd not found. Install the .NET SDK and run `dotnet tool install -g ilspycmd`, ' +
         'or vendor a binary at resources/ilspycmd/<platform>-<arch>/. The C# symbol index ' +
-        '(search_source, read_symbol, scaffold-mod) cannot work without it.',
+        '(search_source, read_symbol) cannot work without it.',
     });
     return;
   }

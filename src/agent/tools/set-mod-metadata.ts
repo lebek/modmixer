@@ -1,16 +1,12 @@
 import { Type } from 'typebox';
 import path from 'node:path';
 import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
-import { getWorkspacePaths, type AboutMetadata } from '../workspace.js';
+import { type AboutMetadata } from '../workspace.js';
 import { getAdapter } from '../adapters/index.js';
 import { emitModChanged } from '../mod-events.js';
-import { readModPrefs } from '../mod-prefs.js';
+import type { GameId } from '../games/types.js';
 
 const Params = Type.Object({
-  folder: Type.String({
-    description:
-      "Workspace mod folder name. The mod must already exist (i.e. scaffold_mod has been run). Use the active mod's folder from your scope.",
-  }),
   name: Type.Optional(
     Type.String({
       description:
@@ -42,41 +38,45 @@ export interface SetModMetadataDetails {
   fields: string[];
 }
 
-export const setModMetadataTool: AgentTool<typeof Params, SetModMetadataDetails> = {
-  name: 'set_mod_metadata',
-  label: 'Set mod metadata',
-  description:
-    "Set the active mod's display identity (Name / Id / Author / Description). RimWorld writes About.xml; Minecraft writes gradle.properties (and renaming the id rebrands the whole project). Use this to give a freshly-created 'Untitled Mod' a sensible name + id once you understand what the user wants. For the agent's own running notes, use update_schematic instead.",
-  parameters: Params,
-  async execute(
-    _id,
-    params,
-  ): Promise<AgentToolResult<SetModMetadataDetails>> {
-    const { folder, ...rest } = params;
+/**
+ * Set the active mod's identity. `cwd` is the mod folder (the session's working
+ * directory) and `game` is the conversation's game, so the tool takes no folder
+ * arg — it always writes the mod the chat is bound to, via that game's adapter.
+ */
+export function createSetModMetadataTool(
+  cwd: string,
+  game: GameId,
+): AgentTool<typeof Params, SetModMetadataDetails> {
+  return {
+    name: 'set_mod_metadata',
+    label: 'Set mod metadata',
+    description:
+      "Set this mod's display identity (Name / Id / Author / Description). RimWorld writes About.xml; Minecraft writes gradle.properties (and renaming the id rebrands the whole project). Use this to give a freshly-created 'Untitled Mod' a sensible name + id once you understand what the user wants. For the agent's own running notes, use update_schematic instead.",
+    parameters: Params,
+    async execute(_id, params): Promise<AgentToolResult<SetModMetadataDetails>> {
+      const folder = path.basename(cwd);
 
-    // Build the canonical identity patch; the game's adapter maps it onto its
-    // own format (RimWorld About.xml / Minecraft gradle.properties) and reports
-    // back what changed plus a game-specific success line.
-    const patch: Partial<AboutMetadata> = {};
-    for (const [k, v] of Object.entries(rest)) {
-      if (typeof v === 'string') (patch as Record<string, string>)[k] = v;
-    }
-    if (Object.keys(patch).length === 0) {
-      throw new Error('set_mod_metadata called with no fields to update.');
-    }
+      // Build the canonical identity patch; the game's adapter maps it onto its
+      // own format (RimWorld About.xml / Minecraft gradle.properties) and
+      // reports back what changed plus a game-specific success line.
+      const patch: Partial<AboutMetadata> = {};
+      for (const [k, v] of Object.entries(params)) {
+        if (typeof v === 'string') (patch as Record<string, string>)[k] = v;
+      }
+      if (Object.keys(patch).length === 0) {
+        throw new Error('set_mod_metadata called with no fields to update.');
+      }
 
-    const prefs = await readModPrefs(folder);
-    const { workspaceDir } = getWorkspacePaths();
-    const modDir = path.join(workspaceDir, folder);
-    const { changed, message } = await getAdapter(prefs.game).writeModMetadata(
-      modDir,
-      folder,
-      patch,
-    );
-    emitModChanged(folder);
-    return {
-      content: [{ type: 'text', text: message }],
-      details: { folder, fields: changed },
-    };
-  },
-};
+      const { changed, message } = await getAdapter(game).writeModMetadata(
+        cwd,
+        folder,
+        patch,
+      );
+      emitModChanged(folder);
+      return {
+        content: [{ type: 'text', text: message }],
+        details: { folder, fields: changed },
+      };
+    },
+  };
+}

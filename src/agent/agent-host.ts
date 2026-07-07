@@ -46,14 +46,14 @@ import { createGameActionTool } from './tools/game-action.js';
 import { getWorkspaceMod } from './workspace.js';
 import { BRIDGE_PACKAGE_ID, removeBridgeInstall } from './bridge-install.js';
 import { getRegistry } from './registry/index.js';
-import { createScaffoldModTool } from './tools/scaffold-mod.js';
-import { setModMetadataTool } from './tools/set-mod-metadata.js';
-import { updateSchematicTool } from './tools/update-schematic.js';
-import { buildModTool } from './tools/build-mod.js';
+import { createAddCSharpTool } from './tools/add-csharp.js';
+import { createSetModMetadataTool } from './tools/set-mod-metadata.js';
+import { createUpdateSchematicTool } from './tools/update-schematic.js';
+import { createBuildModTool } from './tools/build-mod.js';
 import { monitorGetErrorTool } from './tools/monitor-get-error.js';
 import { monitorPollTool } from './tools/monitor-poll.js';
-import { renderSvgToPngTool } from './tools/render-svg-to-png.js';
-import { renderPreviewTool } from './tools/render-preview.js';
+import { createRenderSvgToPngTool } from './tools/render-svg-to-png.js';
+import { createRenderPreviewTool } from './tools/render-preview.js';
 import { getGame, resolveGameId, listGames } from './games/registry.js';
 import { getAdapter } from './adapters/index.js';
 import { warmSearchCache } from './index/warm-cache.js';
@@ -83,7 +83,7 @@ import {
   fetchOpenRouterCredits,
   type OpenRouterCredits,
 } from './openrouter-credits.js';
-import { getWorkspacePaths } from './workspace.js';
+import { getWorkspacePaths, createUntitledMod } from './workspace.js';
 import { ScopedResourceLoader } from './resource-loader.js';
 import { buildStripThinkingExtension } from './strip-thinking-extension.js';
 import { buildSnapshotExtension } from './snapshot-extension.js';
@@ -92,7 +92,7 @@ import {
   restoreSnapshot,
   type SaveRecord,
 } from './snapshots.js';
-import { buildSystemPrompt } from './system-prompt.js';
+import { buildSystemPrompt, PROMPT_VERSION } from './system-prompt.js';
 import { readModPrefs } from './mod-prefs.js';
 import type { GameId } from './games/types.js';
 import type { Extension } from '@mariozechner/pi-coding-agent';
@@ -175,9 +175,9 @@ export function buildCustomTools(
     // game_action are how changes reach it. Texture tools are out until
     // live content reload exists.
     return [
-      setModMetadataTool,
-      updateSchematicTool,
-      buildModTool,
+      createSetModMetadataTool(cwd, game),
+      createUpdateSchematicTool(cwd),
+      createBuildModTool(cwd, game),
       createApplyLiveTool(conversationId, getActiveScope),
       createGameActionTool(getActiveScope),
       monitorGetErrorTool,
@@ -188,11 +188,10 @@ export function buildCustomTools(
   }
 
   return [
-    createScaffoldModTool(getActiveScope, game),
-    setModMetadataTool,
-    updateSchematicTool,
-    buildModTool,
-    createRunTestCycleTool(conversationId, game),
+    createSetModMetadataTool(cwd, game),
+    createUpdateSchematicTool(cwd),
+    createBuildModTool(cwd, game),
+    createRunTestCycleTool(conversationId, game, cwd),
     notifyTestStatusTool,
     monitorGetErrorTool,
     monitorPollTool,
@@ -200,8 +199,13 @@ export function buildCustomTools(
     // SVG→PNG). Omitted for games without the asset panel — Minecraft supplies
     // Modrinth gallery images, not an in-project sprite pipeline.
     ...(getGame(game).capabilities.assetPanel
-      ? [renderSvgToPngTool, renderPreviewTool]
+      ? [createRenderSvgToPngTool(cwd), createRenderPreviewTool(cwd)]
       : []),
+    // On-demand C# project scaffold, for games whose mods compile a .NET
+    // assembly (RimWorld). Gated on buildTool, not the game id: any future
+    // dotnet-built game gets it, and Gradle/Java games (Minecraft) don't — a
+    // Minecraft mod is already a full project and has no Source/ csproj shape.
+    ...(getGame(game).buildTool === 'dotnet' ? [createAddCSharpTool(cwd)] : []),
     ...researchTools,
     // bash is the catch-all for arbitrary shell exec. The path-policy guard
     // is the safety net; the confirmation prompt is the user-facing brake.
@@ -608,14 +612,6 @@ interface OpenSession {
   session: AgentSession;
   unsubscribe: () => void;
   /**
-   * Set when an in-flight tool call (currently only scaffold_mod) upgrades
-   * this conversation's scope. The next send() for this conversation
-   * reconstructs the AgentSession against the new scope before prompting,
-   * so the user's next message hits a fresh system prompt without us
-   * mutating one in flight.
-   */
-  pendingScopeReload: ConversationScope | null;
-  /**
    * Absolute paths of files/directories the user attached to this chat.
    * Read-side guarded tools (read/grep/find/ls) treat these as extra
    * allowlist roots so the agent can inspect a dragged-in file or copy it
@@ -1021,9 +1017,60 @@ export class AgentHost {
     return all[0] ?? null;
   }
 
+  /**
+   * The working directory for a session's file/bash/image tools: the active
+   * mod's own folder, so relative paths (`Defs/Foo.xml`, `rm -rf Source`,
+   * `Textures/Icon.png`) resolve INSIDE that mod and can't reach sibling mods
+   * in the shared Mods parent. `this.cwd` (the workspace root) stays the base
+   * for session-file/settings bookkeeping; only the tool cwd narrows per mod.
+   * Every session is mod-scoped by the time this runs (see constructSession),
+   * so the workspace-root fallback is purely defensive — a missing folder,
+   * where the bash tool couldn't spawn in a cwd that doesn't exist on disk.
+   */
+  private sessionCwd(scope: ConversationScope): string {
+    if (scope.type === 'mod') {
+      const dir = path.join(this.cwd, scope.modFolder);
+      if (fs.existsSync(dir)) return dir;
+    }
+    return this.cwd;
+  }
+
+  /**
+   * Bind a legacy folder-less ('new'-scope) chat to a freshly-minted mod so
+   * every constructed session is mod-scoped — new chats are already bound at
+   * creation (createConversation), this only catches chats persisted before
+   * that. Mirrors the old scaffold_mod scope-upgrade: mint, re-scope, refreeze
+   * the prompt, bind the mod, and tell the renderer to re-hydrate.
+   */
+  private async bindNewScopeToMod(convo: Conversation): Promise<Conversation> {
+    const created = await createUntitledMod(convo.game);
+    const nextScope: ConversationScope = {
+      type: 'mod',
+      modFolder: created.folder,
+    };
+    setScope(convo.id, nextScope);
+    setSystemPrompt(
+      convo.id,
+      buildSystemPrompt(nextScope, { live: convo.live, game: convo.game }),
+      PROMPT_VERSION,
+    );
+    setActiveForMod(created.folder, convo.id);
+    this.sendToRenderer('modmixer:agent:scope-upgraded', {
+      conversationId: convo.id,
+      scope: nextScope,
+    });
+    return getConversation(convo.id) ?? convo;
+  }
+
   private async constructSession(
     convo: Conversation,
   ): Promise<OpenSession> {
+    // Every session is mod-scoped: new chats bind a folder at creation, but a
+    // legacy 'new'-scope chat from disk still needs one before its tool cwd
+    // (and prompt) can resolve to a real mod dir.
+    if (convo.scope.type === 'new') {
+      convo = await this.bindNewScopeToMod(convo);
+    }
     // A chat is about to start issuing tool calls — pre-warm the source/defs
     // corpus so the first search_source isn't a ~40s cold-cache hit. Fire and
     // forget; the cooldown inside makes repeat calls free.
@@ -1048,21 +1095,28 @@ export class AgentHost {
     // forever (see Conversation.systemPrompt for why — short version: keeps
     // OpenRouter's conversation hash stable so sticky provider routing
     // doesn't reset and lose the upstream prompt cache between turns).
-    // Legacy conversations created before that field existed backfill on
-    // first rehydration so they get the same stickiness from then on.
+    // We rebuild-and-re-freeze in two cases, both one-time per chat:
+    //   1. Backfill — a legacy chat created before the field existed.
+    //   2. Migrate — a chat whose frozen prompt predates a PROMPT_VERSION bump
+    //      and would now conflict with runtime behavior (e.g. it still says
+    //      "prefix every path" / "call scaffold_mod" but the tool cwd is the
+    //      mod folder and scaffold_mod is gone). Rebuilding costs one uncached
+    //      turn, then the new prompt is stable again.
     let systemPrompt = convo.systemPrompt;
-    if (systemPrompt === undefined) {
-      systemPrompt = buildSystemPrompt(convo.scope, { game: convo.game });
-      setSystemPrompt(convo.id, systemPrompt);
+    if (systemPrompt === undefined || (convo.promptVersion ?? 0) < PROMPT_VERSION) {
+      systemPrompt = buildSystemPrompt(convo.scope, {
+        live: convo.live,
+        game: convo.game,
+      });
+      setSystemPrompt(convo.id, systemPrompt, PROMPT_VERSION);
     }
     if (!this.stripThinkingExtension) {
       // Stateless transform — one instance services every session.
       this.stripThinkingExtension = buildStripThinkingExtension();
     }
-    // Per-session: the snapshot extension's agent_end handler closes over
-    // the mod folder, so it has to be rebuilt whenever scope changes
-    // (scope upgrade after scaffold_mod). Returns null for "new"-scope
-    // chats with no folder yet.
+    // Per-session: the snapshot extension's agent_end handler closes over the
+    // mod folder. Scope is always 'mod' here (bindNewScopeToMod ran above); the
+    // null branch is only a defensive fallback.
     const snapshotFolder =
       convo.scope.type === 'mod' ? convo.scope.modFolder : null;
     const snapshotExtension = buildSnapshotExtension({
@@ -1091,8 +1145,13 @@ export class AgentHost {
     // ready (or warm) by the time the agent searches; the build dedups and is a
     // no-op once fresh. Eager games (RimWorld) no-op — they build at startup.
     getAdapter(resolveGameId(convo.game)).index.ensureForSession();
+    // Tool cwd = the active mod's folder, so the guarded file/bash/image tools
+    // resolve relative paths inside this mod instead of the shared Mods parent
+    // (a bare `rm -rf Source` can no longer reach a sibling mod). Session I/O
+    // and settings keep using this.cwd — see sessionCwd().
+    const sessionCwd = this.sessionCwd(convo.scope);
     const customTools = buildCustomTools(
-      this.cwd,
+      sessionCwd,
       convo.id,
       () => convo.scope,
       () => sessionRef?.model ?? null,
@@ -1100,7 +1159,7 @@ export class AgentHost {
       { live: convo.live === true, game: convo.game },
     ).map((tool) => toolDefinitionFromAgentTool(tool));
     const { session } = await createAgentSession({
-      cwd: this.cwd,
+      cwd: sessionCwd,
       agentDir: this.agentDir,
       authStorage: this.authStorage,
       modelRegistry: this.modelRegistry,
@@ -1123,7 +1182,6 @@ export class AgentHost {
       scope: convo.scope,
       session,
       unsubscribe,
-      pendingScopeReload: null,
       attachmentRoots,
     };
   }
@@ -1238,48 +1296,6 @@ export class AgentHost {
       this.maybeRecoverFromTruncatedReply(conversationId, event.message);
     }
 
-    // When scaffold_mod succeeds inside a "new" scope, upgrade the
-    // conversation scope so future turns get a mod-scoped system prompt. We
-    // can't swap the running session's prompt safely mid-turn, so we mark a
-    // scope reload — the next send() will dispose and reconstruct against
-    // the new scope.
-    const scaffoldEntry = this.sessions.get(conversationId);
-    if (
-      event.type === 'tool_execution_end' &&
-      event.toolName === 'scaffold_mod' &&
-      !event.isError &&
-      scaffoldEntry &&
-      scaffoldEntry.scope.type === 'new'
-    ) {
-      const folder = (
-        event.result?.details as { folder?: string } | undefined
-      )?.folder;
-      if (folder) {
-        const nextScope: ConversationScope = {
-          type: 'mod',
-          modFolder: folder,
-        };
-        setScope(conversationId, nextScope);
-        // Refresh the snapshot so subsequent rehydrations match the prompt
-        // the freshly-reconstructed session is actually running with. This
-        // upgrade is a deliberate, one-time hash change per conversation —
-        // sticky routing re-picks here and then holds.
-        setSystemPrompt(
-          conversationId,
-          buildSystemPrompt(nextScope, {
-            game: getConversation(conversationId)?.game,
-          }),
-        );
-        setActiveForMod(folder, conversationId);
-        scaffoldEntry.pendingScopeReload = nextScope;
-        // Tell the renderer to re-hydrate the active conversation since the
-        // scope (and thus the displayed mod context) changed underneath it.
-        this.sendToRenderer('modmixer:agent:scope-upgraded', {
-          conversationId,
-          scope: nextScope,
-        });
-      }
-    }
   }
 
   /**
@@ -1361,6 +1377,25 @@ export class AgentHost {
     title?: string,
     opts?: { live?: boolean },
   ): Promise<Conversation> {
+    const settings = loadSettings();
+    // Resolve the conversation's game once, up front: a mod chat inherits the
+    // mod's game; a folder-less chat uses the active game. Frozen onto the
+    // record so the prompt + tools stay game-stable for the chat's life.
+    const game: GameId =
+      scope.type === 'mod'
+        ? (await readModPrefs(scope.modFolder)).game
+        : settings.selectedGameId;
+    // Every chat is bound to a real mod folder from message zero, so the tool
+    // cwd is always a concrete mod dir and no folder-less scope survives
+    // downstream. A 'new'-scope request mints its untitled mod here (this used
+    // to be deferred until scaffold_mod created the folder mid-chat).
+    let mintedFolder: string | null = null;
+    if (scope.type === 'new') {
+      const created = await createUntitledMod(game);
+      scope = { type: 'mod', modFolder: created.folder };
+      mintedFolder = created.folder;
+    }
+
     const sm = SessionManager.create(this.cwd, this.sessionDir);
     const id = sm.getSessionId();
     const sessionFile = sm.getSessionFile();
@@ -1372,7 +1407,9 @@ export class AgentHost {
       version: CURRENT_SESSION_VERSION,
       id,
       timestamp: new Date().toISOString(),
-      cwd: this.cwd,
+      // Record the mod folder as the session cwd, matching the tool cwd the
+      // reconstructed session runs with (see sessionCwd()).
+      cwd: this.sessionCwd(scope),
     };
     fs.mkdirSync(path.dirname(sessionFile), { recursive: true });
     fs.writeFileSync(sessionFile, `${JSON.stringify(header)}\n`);
@@ -1381,25 +1418,22 @@ export class AgentHost {
     // current settings defaults as this chat's starting model + thinking
     // level; from here they're the chat's own and the settings default only
     // affects subsequently-created chats.
-    const settings = loadSettings();
-    // Resolve the conversation's game once, here: a mod chat inherits the mod's
-    // game; a new-scope chat uses the active game. Frozen onto the record so
-    // the prompt + tools stay game-stable for the chat's life.
-    const game: GameId =
-      scope.type === 'mod'
-        ? (await readModPrefs(scope.modFolder)).game
-        : settings.selectedGameId;
-    return addConversation({
+    const convo = addConversation({
       id,
       sessionFile,
       scope,
       title,
       systemPrompt: buildSystemPrompt(scope, { live: opts?.live, game }),
+      promptVersion: PROMPT_VERSION,
       model: settings.model ?? undefined,
       thinkingLevel: settings.thinkingLevel,
       live: opts?.live,
       game,
     });
+    // Bind the freshly-minted mod to this chat so opening the mod (or a later
+    // resolve-for-mod) lands back here instead of spawning a second chat.
+    if (mintedFolder) setActiveForMod(mintedFolder, convo.id);
+    return convo;
   }
 
   async deleteConversation(id: string): Promise<void> {
@@ -1419,17 +1453,9 @@ export class AgentHost {
     text: string,
     attachments?: PreparedAttachment[],
   ): Promise<void> {
-    let entry = this.sessions.get(conversationId);
+    const entry = this.sessions.get(conversationId);
     if (!entry) {
       throw new Error(`No open session for conversation: ${conversationId}`);
-    }
-    if (entry.pendingScopeReload) {
-      const convo = getConversation(conversationId);
-      if (convo) {
-        await this.disposeSession(conversationId);
-        entry = await this.constructSession(convo);
-        this.sessions.set(conversationId, entry);
-      }
     }
     // Re-warm on every user message, not just session open: the OS evicts the
     // source corpus within minutes under memory pressure, so a chat that sat

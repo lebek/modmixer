@@ -95,7 +95,7 @@ const STUBBED = new Set<string>([
   'bash',
   'edit',
   'write',
-  'scaffold_mod',
+  'add_csharp',
   'set_mod_metadata',
   'update_schematic',
   'build_mod',
@@ -339,7 +339,15 @@ async function runOneTurn(
   variant: 'baseline' | 'fix',
   tmpDir: string,
 ): Promise<RunOutcome> {
-  const cwd = (host as any).cwd as string;
+  const workspaceCwd = (host as any).cwd as string;
+  // Mirror AgentHost.sessionCwd(): the tool cwd is the active mod's folder so
+  // relative-path resolution matches production. Falls back to the workspace
+  // root when the mod isn't present in this local workspace (or in new scope).
+  const cwd =
+    cfg.scope.type === 'mod' &&
+    fs.existsSync(path.join(workspaceCwd, cfg.scope.modFolder))
+      ? path.join(workspaceCwd, cfg.scope.modFolder)
+      : workspaceCwd;
   const agentDir = (host as any).agentDir as string;
   const runId = randomUUID().slice(0, 8);
   const { tempFile, prompt } = makeTruncatedSession(cfg, tmpDir, runId);

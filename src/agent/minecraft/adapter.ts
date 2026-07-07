@@ -41,8 +41,6 @@ import type {
   GameIndexAdapter,
   MetadataWriteResult,
   RunTestCycleDetails,
-  ScaffoldModDetails,
-  ScaffoldOptions,
   TestCycleContext,
 } from '../adapters/types.js';
 
@@ -69,9 +67,6 @@ const index: GameIndexAdapter = {
   },
 };
 
-const scaffoldDescription =
-  "Set up the mod's NeoForge (Gradle) project. A Minecraft mod IS a Gradle project; identity lives in gradle.properties. When the active conversation is bound to a mod (including the \"+ new mod\" placeholder) the project is normally ALREADY laid down — in that case you only need set_mod_metadata to name it, and scaffold_mod just re-stamps the identity. Use scaffold_mod to (re)create the project when it's missing. packageId is the mod id (a short lowercase word like \"coolblocks\"), NOT reverse-DNS; rimworldVersions/withCSharp are ignored. The mod is NOT yet active in-game — run_test_cycle handles launch.";
-
 const testCycleDescription =
   "Macro: the only way to test the mod in-game. Builds the mod if needed and launches the modded client (./gradlew runClient) with the diagnostics bridge (aggregated, deduped errors streamed back over localhost), then arms background monitoring. If a client is already running it's stopped and relaunched. By default (quicktest) the client drops straight into a freshly-created superflat creative world with the mod loaded — no menu clicks; pass quicktest=false to stop at the title screen instead, or gameMode=\"survival\" for survival. For compat work, pass companionMods to load the user's other installed mods into the SAME dev client. After this returns, tell the user EXACTLY what to try in-game (they're about to alt-tab) — errors arrive automatically as '[automated …]' messages via the error-triage protocol.";
 
@@ -80,9 +75,6 @@ const testCycleDescription =
  * `-quicktest` parity), its game mode, plus optional compat companion mods.
  */
 const minecraftTestCycleParams = Type.Object({
-  folder: Type.String({
-    description: 'Workspace mod folder name to build and launch.',
-  }),
   quicktest: Type.Optional(
     Type.Boolean({
       description:
@@ -181,58 +173,6 @@ async function createPlaceholder(
   });
 }
 
-/**
- * A Minecraft mod IS a NeoForge/Gradle project. In the normal flow the renderer
- * already laid one down (createUntitledMod → createMinecraftMod at "+ new mod"
- * time), so scaffold here RE-STAMPS identity into gradle.properties rather than
- * re-copying the MDK template (which would clobber the agent's work). It only
- * lays down a fresh project when the folder has none — e.g. a mod-less chat, or
- * recovery when the template wasn't vendored at create time. Either way it never
- * writes RimWorld files (About.xml/.csproj) into the project.
- */
-async function scaffold(
-  modDir: string,
-  opts: ScaffoldOptions,
-): Promise<AgentToolResult<ScaffoldModDetails>> {
-  const folder = path.basename(modDir);
-  const idSource = opts.packageId || opts.name;
-  if (readMinecraftMeta(modDir)) {
-    // Project already present — re-stamp identity (renaming the id rebrands the
-    // project so @Mod + package + namespaces stay matched). No template copy.
-    const changed = await writeMinecraftMeta(modDir, {
-      name: opts.name,
-      author: opts.author,
-      description: opts.description,
-      modId: idSource,
-    });
-    const text =
-      changed.length > 0
-        ? `Updated the NeoForge project identity (${changed.join(', ')}) at ${modDir}. Edit src/main/java and src/main/resources from here.`
-        : `The NeoForge project at ${modDir} is already scaffolded. Edit src/main/java and src/main/resources, or set its name/id with set_mod_metadata.`;
-    return {
-      content: [{ type: 'text', text }],
-      details: { modPath: modDir, folder, files: [], csharp: false },
-    };
-  }
-  await createMinecraftMod(modDir, {
-    modId: idSource,
-    modName: opts.name,
-    author: opts.author,
-    description: opts.description,
-  });
-  return {
-    content: [
-      {
-        type: 'text',
-        text:
-          `Scaffolded a NeoForge project at ${modDir}. Identity lives in gradle.properties ` +
-          '(set name/id via set_mod_metadata); write Java under src/main/java and data/asset JSON ' +
-          'under src/main/resources. build_mod / run_test_cycle drive the bundled ./gradlew.',
-      },
-    ],
-    details: { modPath: modDir, folder, files: [], csharp: false },
-  };
-}
 
 /**
  * Minecraft mods are Gradle/NeoForge projects: the mod folder *is* the Gradle
@@ -247,7 +187,7 @@ async function build(
     fs.existsSync(path.join(modDir, 'gradlew.bat'));
   if (!hasWrapper) {
     throw new Error(
-      `No Gradle wrapper in ${modDir}. Use scaffold_mod to lay down the NeoForge project first.`,
+      `No Gradle wrapper in ${modDir} — the NeoForge project is missing or incomplete.`,
     );
   }
   const result = await buildMinecraftMod(modDir, undefined, signal);
@@ -427,7 +367,7 @@ export const MinecraftAdapter: GameAdapter = {
   def: getGame('minecraft'),
   setup: minecraftSetup,
   index,
-  toolText: { scaffold: scaffoldDescription, testCycle: testCycleDescription },
+  toolText: { testCycle: testCycleDescription },
   testCycleParams: minecraftTestCycleParams,
   isPlaceholderMod,
   readModMetadata,
@@ -435,7 +375,6 @@ export const MinecraftAdapter: GameAdapter = {
   createPlaceholder,
   buildSystemPrompt: (scope) => buildMinecraftSystemPrompt(scope),
   researchTools: minecraftResearchTools,
-  scaffold,
   build,
   test,
 };

@@ -25,9 +25,12 @@ export async function buildRimworldMod(
   signal?: AbortSignal,
 ): Promise<AgentToolResult<BuildModDetails>> {
   const sourceDir = path.join(modDir, 'Source');
-  if (!fs.existsSync(sourceDir)) {
+  const hasCsproj =
+    fs.existsSync(sourceDir) &&
+    fs.readdirSync(sourceDir).some((f) => f.toLowerCase().endsWith('.csproj'));
+  if (!hasCsproj) {
     throw new Error(
-      `Source folder not found: ${sourceDir}. Use scaffold_mod with withCSharp=true or write a .csproj first.`,
+      `No C# project in ${sourceDir}. This mod is XML-only — call add_csharp to lay down a buildable Source/ project before building, or skip build_mod entirely for a pure-XML mod.`,
     );
   }
   // Use the SDK that setup already provisioned — never download mid-build (a

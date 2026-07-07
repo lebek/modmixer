@@ -38,9 +38,9 @@ function extractPreview(messages: AgentEndEvent['messages']): string | null {
  * back." Per-tool snapshots would be noisier without adding meaningful
  * checkpoints; per-loop matches the gamer mental model.
  *
- * Returns null for chats with no associated mod folder ("new" scope before
- * scaffold_mod runs). The host re-builds this extension after scope
- * upgrade, so the first agent_end after scaffolding lands the initial save.
+ * Returns null only when there's no associated mod folder — a defensive case,
+ * since every session is bound to a mod before it's constructed (see
+ * bindNewScopeToMod), so the extension always has a folder to snapshot.
  */
 export function buildSnapshotExtension(args: {
   folder: string | null;

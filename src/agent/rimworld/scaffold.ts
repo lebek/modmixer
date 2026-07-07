@@ -1,121 +1,44 @@
 /**
- * RimWorld scaffold: About.xml + README + the standard subfolders (About/,
- * Defs/, Patches/, Source/, Textures/), optionally a buildable .csproj + Mod.cs.
- * Extracted out of tools/scaffold-mod.ts so the scaffold_mod tool dispatches to
- * getAdapter(game).scaffold() and this RimWorld-specific layout lives in the
- * rimworld/ module. Folder resolution + the placeholder/orphan guard stay in
- * the tool (they're conversation/session concerns, not game concerns).
+ * RimWorld C# scaffold: the buildable Source/ project (ModSource.csproj +
+ * Mod.cs) that every mod folder gets at creation time. Laid down by the
+ * adapter's createPlaceholder so a mod is always a compilable project — the
+ * agent just writes C# into Source/ when it needs runtime code, with no
+ * separate "enable C#" step.
+ *
+ * The assembly/namespace name is the STABLE literal "ModSource", never derived
+ * from the (mutable) display name — so renaming the mod never has to rename the
+ * assembly, rewrite namespaces, or touch this project. The startup log line
+ * reads the mod's real name from the ContentPack at runtime, so it stays
+ * correct without baking the display name into the file.
  */
 import path from 'node:path';
 import fs from 'node:fs/promises';
-import type { AgentToolResult } from '@mariozechner/pi-agent-core';
-import {
-  detectRimWorldPaths,
-  detectGameVersionMajorMinorSync,
-} from '../paths.js';
-import type { ScaffoldModDetails, ScaffoldOptions } from '../adapters/types.js';
 
-export async function scaffoldRimworldMod(
+/** Stable assembly + root namespace for every mod's C# project. */
+const ASSEMBLY = 'ModSource';
+
+/**
+ * Write Source/ModSource.csproj + Source/Mod.cs into `modDir`, wired to the
+ * RimWorld install's Managed/ dir. Idempotent-ish: never clobbers an existing
+ * Mod.cs (the agent or a previous run may have written real code there), but
+ * always (re-)stamps the csproj so HintPaths track the current install.
+ */
+export async function layRimworldCSharpScaffold(
   modDir: string,
-  opts: ScaffoldOptions,
-): Promise<AgentToolResult<ScaffoldModDetails>> {
-  const { managedDir } = detectRimWorldPaths();
-  const folder = path.basename(modDir);
-  const subdirs = ['About', 'Defs', 'Patches', 'Source', 'Textures'];
+  opts: { managedDir: string | null },
+): Promise<void> {
+  const sourceDir = path.join(modDir, 'Source');
+  await fs.mkdir(sourceDir, { recursive: true });
 
-  await fs.mkdir(modDir, { recursive: true });
-  await Promise.all(
-    subdirs.map((d) => fs.mkdir(path.join(modDir, d), { recursive: true })),
-  );
+  const csproj = renderCsproj({ assemblyName: ASSEMBLY, managedDir: opts.managedDir });
+  await fs.writeFile(path.join(sourceDir, `${ASSEMBLY}.csproj`), csproj, 'utf8');
 
-  const versions =
-    opts.rimworldVersions && opts.rimworldVersions.length > 0
-      ? opts.rimworldVersions
-      : [detectGameVersionMajorMinorSync() ?? '1.5'];
-
-  const aboutXml = renderAboutXml({
-    name: opts.name,
-    packageId: opts.packageId,
-    description: opts.description,
-    author: opts.author,
-    versions,
-  });
-
-  const written: string[] = [];
-  await write(path.join(modDir, 'About', 'About.xml'), aboutXml, written);
-  // Don't clobber an existing README on in-place scaffolds — the user (or a
-  // previous turn) may already have written one.
-  const readmePath = path.join(modDir, 'README.md');
+  const modCsPath = path.join(sourceDir, 'Mod.cs');
   try {
-    await fs.access(readmePath);
+    await fs.access(modCsPath);
   } catch {
-    await write(readmePath, `# ${opts.name}\n\n${opts.description}\n`, written);
+    await fs.writeFile(modCsPath, renderModCs(), 'utf8');
   }
-
-  if (opts.withCSharp) {
-    // Derive the assembly / namespace from the display name, not the folder —
-    // the folder is an opaque hex id, which would produce gibberish like
-    // `Mod3a2f1b4c` everywhere RimWorld surfaces the assembly (Player.log,
-    // Harmony stack traces, def parse errors).
-    const ident = identifierFor(opts.name);
-    const csproj = renderCsproj({ assemblyName: ident, managedDir });
-    const modCs = renderModCs({ identifier: ident, displayName: opts.name });
-    await write(path.join(modDir, 'Source', `${ident}.csproj`), csproj, written);
-    await write(path.join(modDir, 'Source', 'Mod.cs'), modCs, written);
-  }
-
-  const relFiles = written.map((f) => path.relative(modDir, f));
-  const noteAboutInstall =
-    '\n\nThe mod is in the workspace but not yet active in RimWorld. run_test_cycle (folder="' +
-    folder +
-    '") will sync, enable, and launch it when you\'re ready to test.';
-  const noteAboutManaged =
-    opts.withCSharp && !managedDir
-      ? '\n\nNOTE: RimWorld install was not detected, so the .csproj has empty HintPaths. The build will fail until RimWorld is installed via Steam or you fix the HintPath manually.'
-      : '';
-
-  return {
-    content: [
-      {
-        type: 'text',
-        text: `Scaffolded mod at ${modDir}\nFiles: ${relFiles.join(', ')}${noteAboutInstall}${noteAboutManaged}`,
-      },
-    ],
-    details: {
-      modPath: modDir,
-      folder,
-      files: written,
-      csharp: !!opts.withCSharp,
-    },
-  };
-}
-
-async function write(target: string, content: string, written: string[]) {
-  await fs.writeFile(target, content, 'utf8');
-  written.push(target);
-}
-
-function renderAboutXml(input: {
-  name: string;
-  packageId: string;
-  description: string;
-  author: string;
-  versions: string[];
-}): string {
-  const versionList = input.versions
-    .map((v) => `    <li>${escape(v)}</li>`)
-    .join('\n');
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<ModMetaData>
-  <name>${escape(input.name)}</name>
-  <packageId>${escape(input.packageId)}</packageId>
-  <author>${escape(input.author)}</author>
-  <description>${escape(input.description)}</description>
-  <supportedVersions>
-${versionList}
-  </supportedVersions>
-</ModMetaData>
-`;
 }
 
 function renderCsproj(input: {
@@ -158,32 +81,18 @@ function renderCsproj(input: {
 `;
 }
 
-function renderModCs(input: { identifier: string; displayName: string }): string {
+function renderModCs(): string {
   return `using Verse;
 
-namespace ${input.identifier}
+namespace ${ASSEMBLY}
 {
-    public class ${input.identifier}Mod : Mod
+    public class ${ASSEMBLY}Mod : Mod
     {
-        public ${input.identifier}Mod(ModContentPack content) : base(content)
+        public ${ASSEMBLY}Mod(ModContentPack content) : base(content)
         {
-            Log.Message("[${input.displayName}] loaded.");
+            Log.Message($"[{content.Name}] loaded.");
         }
     }
 }
 `;
-}
-
-function identifierFor(name: string): string {
-  const cleaned = name.replace(/[^A-Za-z0-9]/g, '');
-  if (!cleaned || /^[0-9]/.test(cleaned)) return `Mod${cleaned}`;
-  return cleaned;
-}
-
-function escape(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
 }

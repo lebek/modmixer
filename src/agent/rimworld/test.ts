@@ -19,9 +19,6 @@ import type { RunTestCycleDetails, TestCycleContext } from '../adapters/types.js
  * sees these debug-session knobs.
  */
 export const rimworldTestCycleParams = Type.Object({
-  folder: Type.String({
-    description: 'Workspace mod folder name to ship and launch.',
-  }),
   paletteEntries: Type.Optional(
     Type.Array(Type.String(), {
       description:

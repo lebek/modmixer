@@ -1,14 +1,11 @@
 import { Type } from 'typebox';
+import path from 'node:path';
 import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
 import { writeSchematic } from '../schematic.js';
 import { emitModChanged } from '../mod-events.js';
 import { launchModeHint } from '../launch-mode.js';
 
 const Params = Type.Object({
-  folder: Type.String({
-    description:
-      "Workspace mod folder name. The mod must already exist (i.e. scaffold_mod has been run). Use the active mod's folder from your scope.",
-  }),
   shortDescription: Type.Optional(
     Type.String({
       description:
@@ -28,36 +25,44 @@ export interface UpdateSchematicDetails {
   fields: string[];
 }
 
-export const updateSchematicTool: AgentTool<typeof Params, UpdateSchematicDetails> = {
-  name: 'update_schematic',
-  label: 'Update schematic',
-  description:
-    "Patch the agent-owned Schematic for a workspace mod (sidecar at <modFolder>/.modmixer/schematic.json). The Schematic is the agent's running spec — what the mod is, what it includes, how each piece works. The user sees it read-only on the Schematic page alongside a live list of Defs. Call this whenever the mod gains or meaningfully changes a feature, and whenever the pitch shifts. About.xml's <description> is for the player and is owned by the user — don't write to it via this tool.",
-  parameters: Params,
-  async execute(_id, params): Promise<AgentToolResult<UpdateSchematicDetails>> {
-    const { folder, shortDescription, body } = params;
-    const patch: { shortDescription?: string; body?: string } = {};
-    if (typeof shortDescription === 'string') patch.shortDescription = shortDescription;
-    if (typeof body === 'string') patch.body = body;
-    if (Object.keys(patch).length === 0) {
-      throw new Error('update_schematic called with no fields to update.');
-    }
-    const updated = await writeSchematic(folder, patch);
-    if (!updated) {
-      throw new Error(
-        `Mod folder not found: ${folder}. Run scaffold_mod first.`,
-      );
-    }
-    emitModChanged(folder);
-    const fields = Object.keys(patch);
-    return {
-      content: [
-        {
-          type: 'text',
-          text: `Updated schematic for ${folder} (${fields.join(', ')}). The Schematic panel reflects this now.${launchModeHint()}`,
-        },
-      ],
-      details: { folder, fields },
-    };
-  },
-};
+/**
+ * Patch the agent-owned Schematic for the active mod. `cwd` is the mod folder
+ * (the session's working directory), so the tool takes no folder arg — it
+ * always writes the mod the chat is bound to.
+ */
+export function createUpdateSchematicTool(
+  cwd: string,
+): AgentTool<typeof Params, UpdateSchematicDetails> {
+  return {
+    name: 'update_schematic',
+    label: 'Update schematic',
+    description:
+      "Patch the agent-owned Schematic for this mod (sidecar at .modmixer/schematic.json). The Schematic is the agent's running spec — what the mod is, what it includes, how each piece works. The user sees it read-only on the Schematic page alongside a live list of Defs. Call this whenever the mod gains or meaningfully changes a feature, and whenever the pitch shifts. About.xml's <description> is for the player and is owned by the user — don't write to it via this tool.",
+    parameters: Params,
+    async execute(_id, params): Promise<AgentToolResult<UpdateSchematicDetails>> {
+      const folder = path.basename(cwd);
+      const { shortDescription, body } = params;
+      const patch: { shortDescription?: string; body?: string } = {};
+      if (typeof shortDescription === 'string') patch.shortDescription = shortDescription;
+      if (typeof body === 'string') patch.body = body;
+      if (Object.keys(patch).length === 0) {
+        throw new Error('update_schematic called with no fields to update.');
+      }
+      const updated = await writeSchematic(folder, patch);
+      if (!updated) {
+        throw new Error(`Mod folder not found: ${folder}.`);
+      }
+      emitModChanged(folder);
+      const fields = Object.keys(patch);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Updated schematic for ${folder} (${fields.join(', ')}). The Schematic panel reflects this now.${launchModeHint()}`,
+          },
+        ],
+        details: { folder, fields },
+      };
+    },
+  };
+}

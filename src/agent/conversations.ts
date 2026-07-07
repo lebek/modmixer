@@ -37,6 +37,13 @@ export interface Conversation {
    */
   systemPrompt?: string;
   /**
+   * Format version of the frozen `systemPrompt` (see PROMPT_VERSION in
+   * system-prompt.ts). When it lags the current PROMPT_VERSION — or is absent
+   * on a pre-versioning legacy record — the prompt is rebuilt once on next
+   * open so old chats stop conflicting with newer runtime behavior.
+   */
+  promptVersion?: number;
+  /**
    * Model this chat runs on, chosen from its in-chat toolbar. Per-conversation
    * (NOT per-mod) — a mod with several chats can run each on a different
    * model. Stamped at creation from the settings default; backfilled on first
@@ -136,6 +143,7 @@ export function addConversation(entry: {
   scope: ConversationScope;
   title?: string;
   systemPrompt?: string;
+  promptVersion?: number;
   model?: ModelSelection;
   thinkingLevel?: ThinkingLevel;
   live?: boolean;
@@ -150,6 +158,7 @@ export function addConversation(entry: {
     createdAt: now,
     updatedAt: now,
     systemPrompt: entry.systemPrompt,
+    promptVersion: entry.promptVersion,
     model: entry.model,
     thinkingLevel: entry.thinkingLevel,
     live: entry.live,
@@ -193,10 +202,15 @@ export function setScope(id: string, scope: ConversationScope): void {
   persist();
 }
 
-export function setSystemPrompt(id: string, systemPrompt: string): void {
+export function setSystemPrompt(
+  id: string,
+  systemPrompt: string,
+  promptVersion: number,
+): void {
   const c = getConversation(id);
   if (!c) return;
   c.systemPrompt = systemPrompt;
+  c.promptVersion = promptVersion;
   // Don't bump updatedAt — this is bookkeeping, not a user-visible change.
   persist();
 }

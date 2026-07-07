@@ -519,13 +519,13 @@ export async function importModFromFolder(
 }
 
 /**
- * Create a fresh "Untitled Mod" workspace folder with placeholder About.xml
- * and the standard subdirs. Used by the renderer's "+ new mod" button so
- * the chat is bound to a real on-disk mod from message zero — if scaffold
- * never runs the mod is still preserved (and discoverable in the Mods view)
- * instead of orphaned with the chat. The agent fills in the real metadata
- * via set_mod_metadata / scaffold_mod once it understands what the user
- * wants to build.
+ * Create a fresh "Untitled Mod" workspace folder via the game's
+ * createPlaceholder — RimWorld: About.xml + the standard subdirs (XML-only;
+ * C# is added on demand via the add_csharp tool). Minecraft: a buildable
+ * NeoForge gradle project. Used by the renderer's "+ new mod" button (and any
+ * 'new'-scope chat) so the chat is bound to a real on-disk mod from message
+ * zero — the agent fills in the real metadata via set_mod_metadata and writes
+ * files once it understands what the user wants to build.
  *
  * The folder name is a random hex id, not "Untitled Mod" — we never want
  * to rename folders, so the on-disk identifier stays stable for the mod's

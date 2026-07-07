@@ -33,12 +33,12 @@ const Params = Type.Object({
   ),
   outPath: Type.String({
     description:
-      "Output PNG path. Relative paths resolve against the workspace cwd (e.g. 'MyMod/About/Preview.png'). Parent dirs are created. Must be inside the workspace.",
+      "Output PNG path, relative to the mod folder (your working directory) — e.g. 'About/Preview.png'. Parent dirs are created. Must be inside the workspace.",
   }),
   spritePath: Type.Optional(
     Type.String({
       description:
-        "Path to a sprite/icon image (PNG/JPG/etc.). Relative paths resolve against the workspace; absolute paths are also accepted. Must be inside the workspace. Omit for title-only on a gradient (e.g. an XML-only mod with no art).",
+        "Path to a sprite/icon image (PNG/JPG/etc.). Relative paths resolve against the mod folder; absolute paths are also accepted. Must be inside the workspace. Omit for title-only on a gradient (e.g. an XML-only mod with no art).",
     }),
   ),
   background: Type.Optional(
@@ -50,7 +50,7 @@ const Params = Type.Object({
   backgroundImagePath: Type.Optional(
     Type.String({
       description:
-        "Path to a full-bleed background image (typically a game screenshot the user supplied). Relative paths resolve against the workspace; absolute paths are also accepted. Must be inside the workspace. When set, the image is rendered as `cover` behind the composition and the `background` color/gradient is ignored. A legibility scrim is added automatically so the title stays readable. Use this whenever the user has provided a background image — pick a `titleEffect` like `outline` or `shadow` to keep the title legible over the image.",
+        "Path to a full-bleed background image (typically a game screenshot the user supplied). Relative paths resolve against the mod folder; absolute paths are also accepted. Must be inside the workspace. When set, the image is rendered as `cover` behind the composition and the `background` color/gradient is ignored. A legibility scrim is added automatically so the title stays readable. Use this whenever the user has provided a background image — pick a `titleEffect` like `outline` or `shadow` to keep the title legible over the image.",
     }),
   ),
   titleColor: Type.Optional(
@@ -100,25 +100,34 @@ export interface RenderPreviewDetails {
   template: PreviewParams['template'];
 }
 
-export const renderPreviewTool: AgentTool<typeof Params, RenderPreviewDetails> = {
+/**
+ * `cwd` is the active mod folder (the session's working directory); relative
+ * `outPath` / `spritePath` / `backgroundImagePath` resolve against it. The
+ * workspace dir is still handed to the renderer separately for bundled asset
+ * lookup (fonts, templates), not for path resolution.
+ */
+export function createRenderPreviewTool(
+  cwd: string,
+): AgentTool<typeof Params, RenderPreviewDetails> {
+  return {
   name: 'render_preview',
   label: 'Render preview image',
   description:
-    "Render a Steam Workshop preview image (1280×720) using a curated template. Pick 'classic', 'icon-left', or 'banner'; supply the title, an optional sprite path, background, and color/effect choices. The template handles layout, font loading, intelligent wrapping, and auto-fit text sizing — short titles scale up to ~200px, long titles shrink and wrap to fit. Bundled fonts: Inter (400/700) and RimWorld (a RimWorld-style display font). Use this for the Steam Workshop preview image at <ModFolder>/About/Preview.png. The agent does NOT control raw HTML or font sizes — it picks a template and slots. This is the only image-composition tool: do not shell out to imagemagick / inkscape / python / sharp; they are not bundled.",
+    "Render a Steam Workshop preview image (1280×720) using a curated template. Pick 'classic', 'icon-left', or 'banner'; supply the title, an optional sprite path, background, and color/effect choices. The template handles layout, font loading, intelligent wrapping, and auto-fit text sizing — short titles scale up to ~200px, long titles shrink and wrap to fit. Bundled fonts: Inter (400/700) and RimWorld (a RimWorld-style display font). Use this for the Steam Workshop preview image at About/Preview.png (relative to the mod folder). The agent does NOT control raw HTML or font sizes — it picks a template and slots. This is the only image-composition tool: do not shell out to imagemagick / inkscape / python / sharp; they are not bundled.",
   parameters: Params,
   async execute(_id, params): Promise<AgentToolResult<RenderPreviewDetails>> {
     const { workspaceDir } = getWorkspacePaths();
 
     const absOutPath = path.isAbsolute(params.outPath)
       ? params.outPath
-      : path.resolve(workspaceDir, params.outPath);
+      : path.resolve(cwd, params.outPath);
     assertPathAllowed(absOutPath, getPathPolicyRoots(), 'outPath');
 
     let absSpritePath: string | undefined;
     if (params.spritePath) {
       absSpritePath = path.isAbsolute(params.spritePath)
         ? params.spritePath
-        : path.resolve(workspaceDir, params.spritePath);
+        : path.resolve(cwd, params.spritePath);
       assertPathAllowed(absSpritePath, getPathPolicyRoots(), 'spritePath');
     }
 
@@ -126,7 +135,7 @@ export const renderPreviewTool: AgentTool<typeof Params, RenderPreviewDetails> =
     if (params.backgroundImagePath) {
       absBackgroundImagePath = path.isAbsolute(params.backgroundImagePath)
         ? params.backgroundImagePath
-        : path.resolve(workspaceDir, params.backgroundImagePath);
+        : path.resolve(cwd, params.backgroundImagePath);
       assertPathAllowed(
         absBackgroundImagePath,
         getPathPolicyRoots(),
@@ -168,4 +177,5 @@ export const renderPreviewTool: AgentTool<typeof Params, RenderPreviewDetails> =
       },
     };
   },
-};
+  };
+}

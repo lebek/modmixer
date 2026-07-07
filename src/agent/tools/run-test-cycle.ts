@@ -1,3 +1,4 @@
+import path from 'node:path';
 import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
 import type { TObject } from 'typebox';
 import { getAgentHost } from '../agent-host.js';
@@ -23,13 +24,16 @@ export type { RunTestCycleDetails };
  * reportTestDiagnostic) are injected into the context here — that's why the
  * adapters never import agent-host.ts (avoids an import cycle).
  *
- * Dispatch keys off the conversation's `game` (the same source as the tool
- * description and schema), so the tool the model sees and the adapter it runs
- * are always the same game — no second read of the mod's prefs that could drift.
+ * `cwd` is the mod folder (the session's working directory): the tested mod is
+ * always the one the chat is bound to, so the schema carries no folder arg and
+ * ctx.folder is derived here. Dispatch keys off the conversation's `game` (the
+ * same source as the tool description and schema), so the tool the model sees
+ * and the adapter it runs are always the same game.
  */
 export function createRunTestCycleTool(
   conversationId: string,
-  game: GameId = 'rimworld',
+  game: GameId,
+  cwd: string,
 ): AgentTool<TObject, RunTestCycleDetails> {
   const adapter = getAdapter(game);
   return {
@@ -41,7 +45,7 @@ export function createRunTestCycleTool(
       const p = params as Record<string, unknown>;
       const ctx: TestCycleContext = {
         conversationId,
-        folder: String(p.folder),
+        folder: path.basename(cwd),
         params: p,
         startMonitoring: (args) => getAgentHost().startMonitoring(args),
         reportTestDiagnostic: (cid, message) =>

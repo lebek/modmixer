@@ -17,9 +17,9 @@ import {
  * spinning up that machinery.
  *
  * The system prompt is fixed for the lifetime of the loader. Scope changes
- * (e.g. a "new mod" conversation upgrading to a "mod" scope after
- * scaffold_mod completes) are handled by reconstructing the AgentSession
- * with a fresh loader, not by mutating an existing one.
+ * (e.g. a legacy folder-less conversation being bound to a mod on first open —
+ * see bindNewScopeToMod) are handled by reconstructing the AgentSession with a
+ * fresh loader, not by mutating an existing one.
  *
  * Stability matters beyond a single in-memory loader: the same byte string
  * must resurface on every rehydration of a conversation (across app
