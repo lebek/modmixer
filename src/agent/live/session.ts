@@ -251,7 +251,7 @@ async function scaffoldSessionMod(displayName: string): Promise<string> {
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
-    <PackageReference Include="Lib.Harmony" Version="2.3.3" ExcludeAssets="runtime" />
+    <PackageReference Include="Lib.Harmony" Version="2.4.1" ExcludeAssets="runtime" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="Assembly-CSharp">
