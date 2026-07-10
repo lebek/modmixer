@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import type { AboutMetadata } from '../../agent/workspace';
+import { DEFAULT_LICENSE_ID } from '../../agent/licenses';
+import { LicensePicker } from './license-picker';
 
 /** Modrinth project fields collected once, at first publish. */
 export interface MinecraftProjectFields {
@@ -46,7 +48,7 @@ export function MinecraftPublishConfirmDialog({
   const [slug, setSlug] = useState('');
   const [summary, setSummary] = useState('');
   const [description, setDescription] = useState('');
-  const [license, setLicense] = useState('MIT');
+  const [license, setLicense] = useState(DEFAULT_LICENSE_ID);
   const [categories, setCategories] = useState('');
 
   // Everything reseeds on the closed→open transition (and only then, so a
@@ -64,7 +66,7 @@ export function MinecraftPublishConfirmDialog({
         setSlug(slugify(about.packageId || about.name));
         setSummary(deriveSummary(about.description || ''));
         setDescription(about.description || '');
-        setLicense('MIT');
+        setLicense(about.license || DEFAULT_LICENSE_ID);
         setCategories('');
       }
     }
@@ -177,13 +179,12 @@ export function MinecraftPublishConfirmDialog({
                 />
               </DialogField>
               <DialogField
-                label="License (SPDX)"
-                hint="e.g. MIT, Apache-2.0, LGPL-3.0-only. Required by Modrinth."
+                label="License"
+                hint="Sets the project's license on Modrinth and the jar's manifest. Required by Modrinth."
               >
-                <input
-                  type="text"
+                <LicensePicker
                   value={license}
-                  onChange={(e) => setLicense(e.target.value)}
+                  onChange={setLicense}
                   className={inputCls}
                 />
               </DialogField>

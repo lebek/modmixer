@@ -52,6 +52,12 @@ export interface ModPrefs {
    * published.
    */
   modrinthVersion?: string;
+  /**
+   * The mod's SPDX license id (RimWorld). About.xml has no license field, so
+   * RimWorld's license lives here; Minecraft keeps its own in gradle.properties.
+   * Undefined until the user picks one — the publish panel then defaults to MIT.
+   */
+  license?: string;
 }
 
 const SIDECAR_DIR = '.modmixer';
@@ -91,6 +97,8 @@ function parsePrefs(raw: string): ModPrefs {
         typeof parsed.modrinthVersion === 'string'
           ? parsed.modrinthVersion
           : undefined,
+      license:
+        typeof parsed.license === 'string' ? parsed.license : undefined,
     };
   } catch {
     return defaults();
@@ -138,6 +146,7 @@ export async function writeModPrefs(
       'modrinthVersion' in patch
         ? patch.modrinthVersion
         : current.modrinthVersion,
+    license: 'license' in patch ? patch.license : current.license,
   };
   await fsp.mkdir(path.join(modDir, SIDECAR_DIR), { recursive: true });
   await fsp.writeFile(

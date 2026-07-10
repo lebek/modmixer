@@ -15,6 +15,7 @@ import {
   type AboutMetadata,
 } from '../workspace.js';
 import { buildMod as buildMinecraftMod } from './gradle.js';
+import { syncLicenseFile } from '../license-file.js';
 import { launchModeHint } from '../launch-mode.js';
 import {
   createMinecraftMod,
@@ -118,6 +119,7 @@ function readModMetadata(
           author: meta.author,
           description: meta.description,
           version: meta.version || undefined,
+          license: meta.license || undefined,
         }
       : emptyAbout(folder),
   );
@@ -134,7 +136,18 @@ async function writeModMetadata(
     author: patch.author,
     description: patch.description,
     modId: patch.packageId,
+    license: patch.license,
   });
+  // Keep a LICENSE file in step with the chosen license (gradle mod_license is
+  // the jar-manifest source; this is the human-readable file in the source tree).
+  if (patch.license !== undefined) {
+    const author =
+      patch.author ?? readMinecraftMeta(modDir)?.author ?? '';
+    await syncLicenseFile(modDir, patch.license, {
+      author,
+      year: new Date().getFullYear(),
+    });
+  }
   if (changed.length === 0) {
     // Not an error: the Settings/Publish UI saves the whole form, and after
     // normalization (id slugified, description flattened) every field can

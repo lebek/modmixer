@@ -2,9 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import type { AboutMetadata, WorkspaceMod } from '../agent/workspace';
 import type { PublishProgressEvent } from '../agent/rimworld/workshop';
 import { getGame } from '../agent/games/registry';
+import { DEFAULT_LICENSE_ID, licenseFooter } from '../agent/licenses';
 import { derivePackageId } from '@/lib/identifiers';
 import { useAsyncAction } from '@/lib/use-async-action';
 import { ErrorBanner, Field, PublishProgress, Section } from './mod-publish/ui';
+import { LicensePicker } from './mod-publish/license-picker';
 import { PreviewImage } from './mod-publish/preview-image';
 import {
   LinkExistingControl,
@@ -51,6 +53,7 @@ function RimWorldPublishPanel({
   const [packageId, setPackageId] = useState(mod.about.packageId);
   const [author, setAuthor] = useState(mod.about.author);
   const [description, setDescription] = useState(mod.about.description);
+  const [license, setLicense] = useState(mod.about.license ?? DEFAULT_LICENSE_ID);
   const [defaultAuthor, setDefaultAuthor] = useState('');
   const [savedSnapshot, setSavedSnapshot] = useState<AboutMetadata>(mod.about);
   const [packageIdSticky, setPackageIdSticky] = useState(false);
@@ -77,6 +80,7 @@ function RimWorldPublishPanel({
     setPackageId(about.packageId);
     setAuthor(about.author);
     setDescription(about.description);
+    setLicense(about.license ?? DEFAULT_LICENSE_ID);
     setSavedSnapshot(about);
     const a = defaultAuthorRef.current || 'author';
     const wouldDerive = derivePackageId(a, about.name);
@@ -105,7 +109,8 @@ function RimWorldPublishPanel({
           about.name === name &&
           about.packageId === packageId &&
           about.author === author &&
-          about.description === description;
+          about.description === description &&
+          (about.license ?? DEFAULT_LICENSE_ID) === license;
         if (matchesLocal) {
           setSavedSnapshot(about);
           setExternalUpdate(false);
@@ -115,7 +120,8 @@ function RimWorldPublishPanel({
           name !== savedSnapshot.name ||
           packageId !== savedSnapshot.packageId ||
           author !== savedSnapshot.author ||
-          description !== savedSnapshot.description;
+          description !== savedSnapshot.description ||
+          license !== (savedSnapshot.license ?? DEFAULT_LICENSE_ID);
         if (isDirty) {
           setExternalUpdate(true);
           setSavedSnapshot(about);
@@ -124,7 +130,7 @@ function RimWorldPublishPanel({
         }
       });
     });
-  }, [mod.folder, name, packageId, author, description, savedSnapshot]);
+  }, [mod.folder, name, packageId, author, description, license, savedSnapshot]);
 
   // Stream upload progress for THIS mod only.
   useEffect(() => {
@@ -171,7 +177,8 @@ function RimWorldPublishPanel({
     name !== savedSnapshot.name ||
     packageId !== savedSnapshot.packageId ||
     author !== savedSnapshot.author ||
-    description !== savedSnapshot.description;
+    description !== savedSnapshot.description ||
+    license !== (savedSnapshot.license ?? DEFAULT_LICENSE_ID);
 
   const save = useAsyncAction(async () => {
     const updated = await window.modmixer.writeModAbout(mod.folder, {
@@ -179,9 +186,17 @@ function RimWorldPublishPanel({
       packageId,
       author,
       description,
+      license,
     });
     const about =
-      updated?.about ?? { ...savedSnapshot, name, packageId, author, description };
+      updated?.about ?? {
+        ...savedSnapshot,
+        name,
+        packageId,
+        author,
+        description,
+        license,
+      };
     setSavedSnapshot(about);
     setExternalUpdate(false);
   });
@@ -302,6 +317,32 @@ function RimWorldPublishPanel({
               />
             </Field>
 
+            <Field
+              label="License"
+              hint="Ships as a LICENSE file with your mod. Use “add to description” to also show it on the Workshop page — it just adds a line above that you can edit or delete."
+              action={
+                licenseFooter(license) &&
+                !description.includes(licenseFooter(license)) ? (
+                  <button
+                    onClick={() =>
+                      setDescription((d) =>
+                        appendLicenseLine(d, licenseFooter(license)),
+                      )
+                    }
+                    className="text-[10px] uppercase tracking-[0.18em] text-muted transition-colors hover:text-ink"
+                  >
+                    add to description
+                  </button>
+                ) : null
+              }
+            >
+              <LicensePicker
+                value={license}
+                onChange={setLicense}
+                className="w-full rounded-md border border-line bg-paper px-2.5 py-1.5 text-sm text-ink focus:border-accent focus:outline-none"
+              />
+            </Field>
+
             {save.error && <ErrorBanner>{save.error}</ErrorBanner>}
 
             <div className="flex items-center justify-end gap-2 pt-2">
@@ -405,6 +446,20 @@ function RimWorldPublishPanel({
       />
     </div>
   );
+}
+
+/**
+ * Append the license line to the description, replacing a trailing "License: …"
+ * line we may have added before (so switching licenses swaps the line rather
+ * than stacking a second one). Only a License line at the very end is touched —
+ * anything the user has written elsewhere is left alone.
+ */
+function appendLicenseLine(description: string, footer: string): string {
+  const base = description
+    .replace(/\n*\s*License:\s.*$/, '')
+    .replace(/\s+$/, '');
+  if (!footer) return base;
+  return base ? `${base}\n\n${footer}` : footer;
 }
 
 function workshopUrlFor(id: string | null): string | null {

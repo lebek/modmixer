@@ -56,6 +56,8 @@ export interface MinecraftMeta {
   author: string;
   description: string;
   version: string;
+  /** SPDX license id from gradle mod_license (expanded into the jar manifest). */
+  license: string;
 }
 
 function parseGradleProps(content: string): Record<string, string> {
@@ -86,6 +88,7 @@ export function readMinecraftMeta(modDir: string): MinecraftMeta | null {
       author: props.mod_authors ?? '',
       description: props.mod_description ?? '',
       version: props.mod_version ?? '',
+      license: props.mod_license ?? '',
     };
   } catch {
     return null;
@@ -366,6 +369,9 @@ export interface MinecraftMetaPatch {
    *  jar file name (<mod_id>-<mod_version>.jar) and expands it into the in-jar
    *  neoforge.mods.toml at build time. */
   version?: string;
+  /** New SPDX license id (gradle.properties mod_license). Expanded into the
+   *  in-jar neoforge.mods.toml `license` field. */
+  license?: string;
 }
 
 /**
@@ -405,6 +411,13 @@ export async function writeMinecraftMeta(
     if (version && version !== current.mod_version) {
       values.mod_version = version;
       changed.push('version');
+    }
+  }
+  if (patch.license !== undefined) {
+    const license = patch.license.trim();
+    if (license && license !== current.mod_license) {
+      values.mod_license = license;
+      changed.push('license');
     }
   }
 

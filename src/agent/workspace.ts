@@ -37,6 +37,14 @@ export interface AboutMetadata {
    * surface one here yet, so it's optional.
    */
   version?: string;
+  /**
+   * SPDX license id (e.g. "MIT", "CC0-1.0", "All-Rights-Reserved"), or a custom
+   * id the user typed. A mod-level property surfaced uniformly to the UI, but
+   * stored per game: RimWorld keeps it in the .modmixer prefs sidecar (About.xml
+   * has no license field), Minecraft in gradle.properties mod_license. Undefined
+   * when never set — the picker defaults to MIT.
+   */
+  license?: string;
   supportedVersions: string[];
   /** Hard deps from <modDependencies>. Empty when none declared. */
   modDependencies: ModDependency[];

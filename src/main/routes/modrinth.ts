@@ -3,6 +3,7 @@ import { emitModChanged } from '../../agent/mod-events.js';
 import { writeModPrefs } from '../../agent/mod-prefs.js';
 import { buildMod } from '../../agent/minecraft/gradle.js';
 import { writeMinecraftMeta } from '../../agent/minecraft/scaffold.js';
+import { syncLicenseFile } from '../../agent/license-file.js';
 import {
   getModrinthToken,
   setModrinthToken,
@@ -65,12 +66,29 @@ export function registerModrinthRoutes(ctx: RouteContext): void {
       try {
         const changed = await writeMinecraftMeta(mod.workspacePath, {
           version: versionNumber,
+          // First publish sets the project license (Modrinth's license_id); bake
+          // the same id into gradle mod_license so the in-jar manifest agrees.
+          ...(meta ? { license: meta.license } : {}),
         });
-        if (changed.includes('version')) emitModChanged(folder);
+        if (changed.length > 0) emitModChanged(folder);
       } catch (err) {
         const error = (err as Error).message;
         emit({ status: 'error', error });
         throw new Error(error);
+      }
+
+      // Keep a human-readable LICENSE file in the source tree in step with the
+      // chosen license. Best-effort — the manifest license above is what ships
+      // in the jar, so a file-write hiccup must not fail the publish.
+      if (meta) {
+        try {
+          await syncLicenseFile(mod.workspacePath, meta.license, {
+            author: mod.about.author,
+            year: new Date().getFullYear(),
+          });
+        } catch (err) {
+          console.warn('[modrinth] LICENSE file write failed:', err);
+        }
       }
 
       // Build the shippable jar; a publish must reflect current code.

@@ -22,6 +22,8 @@ import {
   parseAbout,
   type AboutMetadata,
 } from '../workspace.js';
+import { readModPrefs, writeModPrefs } from '../mod-prefs.js';
+import { syncLicenseFile } from '../license-file.js';
 import type {
   GameAdapter,
   GameIndexAdapter,
@@ -53,21 +55,40 @@ function isPlaceholderMod(modDir: string): boolean {
   }
 }
 
-/** RimWorld identity lives in About.xml. */
+/** RimWorld identity lives in About.xml — except the license, which has no
+ *  About.xml field and is kept in the .modmixer prefs sidecar plus a LICENSE
+ *  file in the mod folder (which ships to the Workshop). */
 async function writeModMetadata(
-  _modDir: string,
+  modDir: string,
   folder: string,
   patch: Partial<AboutMetadata>,
 ): Promise<MetadataWriteResult> {
-  const updated = await writeAbout(folder, patch);
-  if (!updated) {
-    throw new Error(`Mod folder not found: ${folder}.`);
+  const { license, ...aboutPatch } = patch;
+  const changed: string[] = [];
+
+  if (Object.keys(aboutPatch).length > 0) {
+    const updated = await writeAbout(folder, aboutPatch);
+    if (!updated) {
+      throw new Error(`Mod folder not found: ${folder}.`);
+    }
+    changed.push(...Object.keys(aboutPatch));
   }
+
+  if (license !== undefined) {
+    await writeModPrefs(folder, { license });
+    const author = patch.author ?? (await readModAbout(folder))?.author ?? '';
+    await syncLicenseFile(modDir, license, {
+      author,
+      year: new Date().getFullYear(),
+    });
+    changed.push('license');
+  }
+
   const summary = Object.entries(patch)
     .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
     .join(', ');
   return {
-    changed: Object.keys(patch),
+    changed,
     message: `Updated About.xml for ${folder} (${summary}). The Settings panel reflects this now.`,
   };
 }
@@ -100,7 +121,13 @@ export const RimWorldAdapter: GameAdapter = {
   toolText: { testCycle: testCycleDescription },
   testCycleParams: rimworldTestCycleParams,
   isPlaceholderMod,
-  readModMetadata: (_modDir, folder) => readModAbout(folder),
+  readModMetadata: async (_modDir, folder) => {
+    const about = await readModAbout(folder);
+    // License has no About.xml home — merge it in from the prefs sidecar so the
+    // UI sees it on mod.about.license, same as Minecraft.
+    if (about) about.license = (await readModPrefs(folder)).license;
+    return about;
+  },
   writeModMetadata,
   createPlaceholder,
   buildSystemPrompt: buildRimworldSystemPrompt,

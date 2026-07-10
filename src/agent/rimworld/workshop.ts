@@ -5,7 +5,9 @@ import fsp from 'node:fs/promises';
 import { EventEmitter } from 'node:events';
 import { app, utilityProcess, type UtilityProcess } from 'electron';
 import { getWorkspacePaths, readModAbout } from '../workspace.js';
-import { writeModPrefs } from '../mod-prefs.js';
+import { readModPrefs, writeModPrefs } from '../mod-prefs.js';
+import { syncLicenseFile } from '../license-file.js';
+import { DEFAULT_LICENSE_ID } from '../licenses.js';
 import { STEAM_PREVIEW_LIMIT_BYTES } from '../assets/preview-normalize.js';
 import { commitTurn } from '../snapshots.js';
 import { track } from '../telemetry.js';
@@ -406,13 +408,24 @@ export async function publishToWorkshop(
     throw new Error('Set a description in About.xml before publishing.');
   }
 
-  // Remember the user's leaderboard choice for next time (persist-on-publish).
-  // Written before the upload so the preference sticks even if Steam fails.
-  await writeModPrefs(folder, { trackOnLeaderboard });
-
   const { workspaceDir } = getWorkspacePaths();
   const modFolder = path.join(workspaceDir, folder);
   const previewPath = previewPathFor(folder);
+
+  // Resolve the mod's license (default MIT) and materialize it before the
+  // upload — so the choice sticks even if Steam fails, and so a mod always
+  // ships with a license even if the publish panel was never explicitly saved:
+  // persist the id (alongside the leaderboard choice) and write the LICENSE
+  // file (the publish stager ships it — it's not excluded). Surfacing the
+  // license on the Workshop *page* is opt-in and NOT done here: the publish
+  // panel lets the user add a "License: …" line to the editable description,
+  // which then flows to Steam as part of about.description like any other text.
+  const licenseId = (await readModPrefs(folder)).license ?? DEFAULT_LICENSE_ID;
+  await writeModPrefs(folder, { trackOnLeaderboard, license: licenseId });
+  await syncLicenseFile(modFolder, licenseId, {
+    author: about.author,
+    year: new Date().getFullYear(),
+  });
 
   // Preflight: Steam caps preview images at 1 MiB and rejects oversize uploads
   // with an opaque k_EResultLimitExceeded. Our generate/browse paths normalize
