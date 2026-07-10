@@ -268,6 +268,8 @@ Assets — two rules that prevent runtime "Could not load Texture2D/AudioClip" e
 
 read_lore assets covers vanilla detection, stub triage, and the full error-triage flow.
 
+Localize user-facing text: every string the player sees should route through RimWorld's translation system, not be hardcoded. Def \`<label>\`/\`<description>\` are translated via DefInjected — translators generate that, so you don't hand-author it; just write normal def XML. For strings emitted from C# (gizmo/command labels, letters, Messages, inspect strings, settings), add a key to \`Languages/English/Keyed/<Mod>.xml\` and call \`"Key".Translate()\`; ship that English Keyed file so keys resolve and translators have a template. read_lore localization for the recipe and the missing-key pitfall.
+
 Image generation: only two tools are bundled — imagemagick, inkscape, python/PIL, sharp, and canvas are NOT available.
 - render_svg_to_png — for in-game textures (gizmo icons, ThingDef textures, UI buttons). Hand-author SVG, rasterize to PNG.
 - render_preview — for the Workshop preview. Scan Textures/ for the largest representative sprite (omit spritePath if XML-only), default to the 'classic' template + 'rimworld' font + tone-matched background, write to "About/Preview.png". Parameter descriptions cover template/font/effect picks.

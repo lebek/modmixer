@@ -556,3 +556,9 @@ To run Unity/main-thread work (Texture2D ctor, EncodeToPNG, Scribe, Messages) fr
 Reliable pattern: enqueue actions into a `static Queue<Action>` (lock-guarded) and drain them from a method guaranteed to run on the main thread every frame — e.g. a Harmony Postfix on `UIRoot_Play.UIRootOnGUI` / `UIRoot_Entry.UIRootOnGUI` calling a `DrainMainQueue()`. OnGUI runs on the Unity main thread for both the menu and in-game.
 
 *Why it's tricky:* `ExecuteWhenFinished` works correctly when called *during* game load (a long event is active, so it defers) — which is exactly when most prewarm/init code runs — so the same call site looks fine until something triggers it from a worker while idle (e.g. a mod-options button kicking off a background pipeline).
+
+## Menu, gizmo, and command labels use sentence case — not Title Case
+
+RimWorld UI text is sentence case: `"Set target fuel level"`, `"Copy settings"`, `"Allow"`, `"Draft"` — first word (and proper nouns) capitalized, nothing else. This applies to `Command`/`Gizmo` `defaultLabel`, `FloatMenuOption` text, `Designator` labels, `ITab`/`MainTabWindow` labels, settings rows, and button captions. Def `<label>` values go one step further — they're fully lowercase (`"wooden table"`, `"steel"`) and RimWorld auto-capitalizes them at display sites via `.CapitalizeFirst()`.
+
+*Why it's tricky:* Title Case ("Set Target Fuel Level") reads as "polished" and is an LLM's default, but it visibly clashes with vanilla and every other mod's UI — one of the fastest tells of an amateur mod. Match vanilla's casing exactly; don't Title-Case.
