@@ -1,26 +1,8 @@
-import type { ThinkingLevel } from '@mariozechner/pi-agent-core';
-
-// Inlined rather than imported from agent/settings.ts because that module
-// imports from "electron" (main-process-only) and the renderer can't load it.
-const THINKING_LEVELS: ThinkingLevel[] = [
-  'off',
-  'minimal',
-  'low',
-  'medium',
-  'high',
-  'xhigh',
-  'max',
-];
-
-const LEVEL_LABELS: Record<ThinkingLevel, string> = {
-  off: 'Off',
-  minimal: 'Minimal',
-  low: 'Low',
-  medium: 'Medium',
-  high: 'High',
-  xhigh: 'Extra High',
-  max: 'Max',
-};
+import {
+  LEVEL_LABELS,
+  THINKING_LEVELS,
+  type MixerThinkingLevel as ThinkingLevel,
+} from '../lib/thinking-levels';
 
 export function ThinkingPicker({
   current,

@@ -2,9 +2,9 @@ import {
   createSyntheticSourceInfo,
   type ContextEvent,
   type Extension,
-} from '@mariozechner/pi-coding-agent';
-import type { AgentMessage } from '@mariozechner/pi-agent-core';
-import type { AssistantMessage } from '@mariozechner/pi-ai';
+} from '@earendil-works/pi-coding-agent';
+import type { AgentMessage } from '@earendil-works/pi-agent-core';
+import type { AssistantMessage } from '@earendil-works/pi-ai';
 
 // pi-coding-agent's `ContextEventResult` is the return contract for the
 // "context" event handler; it isn't re-exported at the package root, so the

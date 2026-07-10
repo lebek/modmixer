@@ -1,9 +1,9 @@
-import { createBashTool } from '@mariozechner/pi-coding-agent';
+import { createBashTool } from '@earendil-works/pi-coding-agent';
 import type {
   AgentTool,
   AgentToolResult,
   AgentToolUpdateCallback,
-} from '@mariozechner/pi-agent-core';
+} from '@earendil-works/pi-agent-core';
 import { assertCommandAllowed } from '../security/path-policy.js';
 
 /**

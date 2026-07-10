@@ -1,7 +1,7 @@
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { Type } from 'typebox';
-import type { AgentTool } from '@mariozechner/pi-agent-core';
+import type { AgentTool } from '@earendil-works/pi-agent-core';
 import { withConfirmation } from '../with-confirmation.js';
 
 /**

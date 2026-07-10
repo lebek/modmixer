@@ -1,5 +1,5 @@
 import { Type } from 'typebox';
-import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
+import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
 import { getAdapter } from '../adapters/index.js';
 import type { GameId } from '../games/types.js';
 import type { BuildModDetails } from '../adapters/types.js';

@@ -1,0 +1,19 @@
+diff --git a/node_modules/@earendil-works/pi-coding-agent/package.json b/node_modules/@earendil-works/pi-coding-agent/package.json
+index bce2eda..cbe5019 100644
+--- a/node_modules/@earendil-works/pi-coding-agent/package.json
++++ b/node_modules/@earendil-works/pi-coding-agent/package.json
+@@ -14,10 +14,12 @@
+ 	"exports": {
+ 		".": {
+ 			"types": "./dist/index.d.ts",
+-			"import": "./dist/index.js"
++			"import": "./dist/index.js",
++			"default": "./dist/index.js"
+ 		},
+ 		"./rpc-entry": {
+-			"import": "./dist/rpc-entry.js"
++			"import": "./dist/rpc-entry.js",
++			"default": "./dist/rpc-entry.js"
+ 		}
+ 	},
+ 	"files": [

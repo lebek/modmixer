@@ -1,6 +1,6 @@
 import { Type } from 'typebox';
 import type { TObject } from 'typebox';
-import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
+import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import { getIndexPaths } from '../index/paths.js';

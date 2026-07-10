@@ -1,5 +1,5 @@
 import { Type } from 'typebox';
-import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
+import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { modCacheRoot } from '../index/paths.js';

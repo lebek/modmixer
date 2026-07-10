@@ -9,7 +9,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { spawn } from 'node:child_process';
-import type { AgentToolResult } from '@mariozechner/pi-agent-core';
+import type { AgentToolResult } from '@earendil-works/pi-agent-core';
 import { lintMod, formatFindings, type LintFinding } from '../build-lint.js';
 import {
   extractHints,

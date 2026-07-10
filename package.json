@@ -46,6 +46,7 @@
     "@tailwindcss/vite": "^4.2.4",
     "@types/better-sqlite3": "^7.6.12",
     "@types/electron-squirrel-startup": "^1.0.2",
+    "@types/proper-lockfile": "^4.1.4",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@typescript-eslint/eslint-plugin": "^5.62.0",
@@ -63,11 +64,11 @@
     "vite": "^5.4.21"
   },
   "dependencies": {
+    "@earendil-works/pi-agent-core": "^0.80.6",
+    "@earendil-works/pi-ai": "^0.80.6",
+    "@earendil-works/pi-coding-agent": "^0.80.6",
     "@fontsource/inter": "^5.2.8",
     "@fontsource/jetbrains-mono": "^5.2.8",
-    "@mariozechner/pi-agent-core": "^0.70.5",
-    "@mariozechner/pi-ai": "^0.70.5",
-    "@mariozechner/pi-coding-agent": "^0.70.6",
     "@resvg/resvg-wasm": "^2.6.2",
     "@sentry/electron": "^7.12.0",
     "@tanstack/react-virtual": "^3.13.24",
@@ -78,6 +79,7 @@
     "fast-xml-parser": "^5.7.2",
     "isomorphic-git": "^1.37.6",
     "posthog-node": "^5.30.8",
+    "proper-lockfile": "^4.1.2",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "react-markdown": "^10.1.0",
@@ -85,6 +87,7 @@
     "smol-toml": "^1.7.0",
     "steamworks.js": "^0.4.0",
     "tailwind-merge": "^3.5.0",
+    "typebox": "1.1.38",
     "update-electron-app": "^3.1.2",
     "web-tree-sitter": "^0.24.5"
   }

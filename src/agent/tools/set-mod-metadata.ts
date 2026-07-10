@@ -1,6 +1,6 @@
 import { Type } from 'typebox';
 import path from 'node:path';
-import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
+import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
 import { type AboutMetadata } from '../workspace.js';
 import { getAdapter } from '../adapters/index.js';
 import { emitModChanged } from '../mod-events.js';

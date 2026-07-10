@@ -6,7 +6,7 @@
  * it leaks into the shared tool files.
  */
 import { Type } from 'typebox';
-import type { AgentTool } from '@mariozechner/pi-agent-core';
+import type { AgentTool } from '@earendil-works/pi-agent-core';
 import { getIndexStatus } from '../index/rebuild.js';
 import type { SymbolMatch } from '../index/resolve-symbol.js';
 import {

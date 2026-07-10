@@ -149,28 +149,96 @@ async function stagePrunedSteamworks() {
   }
 }
 
-// Stage @silvia-odwyer/photon-node inside a directory literally named
-// node_modules so it lands at resources/node_modules/@silvia-odwyer/
-// photon-node in the packaged app. photon-node is the pure-WASM image
-// library behind pi-coding-agent's read tool (resizes images before they're
-// sent to the model). Unlike better-sqlite3 / web-tree-sitter / resvg-wasm,
-// its loader is buried inside @mariozechner/pi-coding-agent and does a bare
-// `import("@silvia-odwyer/photon-node")` with no resourcesPath fallback — so
-// we can't dual-resolve it from our own code. Shipping it inside a
-// node_modules/ tree under resourcesPath lets Node's bare-specifier
-// resolution find it by directory walk-up out of the asar. photon-node
-// vendors its photon_rs_bg.wasm sibling, so copying the whole package dir
-// keeps its own __dirname-relative readFileSync working.
-async function stagePhotonNodeModules() {
-  const src = path.resolve(
-    __dirname,
-    'node_modules/@silvia-odwyer/photon-node',
-  );
+// Stage the pi agent packages (and their full runtime dependency closure)
+// inside a directory literally named node_modules so they land at
+// resources/node_modules/ in the packaged app. As of pi 0.80.x the packages
+// can't be bundled (bundler-proof dynamic imports in the OAuth flows, jiti
+// extension loading, import.meta.url asset resolution), so vite.main.config.ts
+// marks them external and the bundled main.js resolves them at runtime by
+// bare-specifier directory walk-up out of the asar — app.asar/.vite/build →
+// app.asar → resources/node_modules.
+//
+// The closure is computed from the installed tree, not hand-listed: every
+// dependency that resolves at the project's top-level node_modules is copied
+// there; packages that resolve nested (pi-coding-agent ships an
+// npm-shrinkwrap.json, so npm installs its entire tree under its own
+// node_modules/) travel with their parent's recursive copy. This includes
+// @silvia-odwyer/photon-node, the WASM image library behind pi's read tool,
+// which was previously the sole staged package here.
+async function stagePiNodeModules() {
+  const projectNm = path.resolve(__dirname, 'node_modules');
   const stageRoot = path.resolve(__dirname, 'dist/node_modules');
-  const dest = path.join(stageRoot, '@silvia-odwyer/photon-node');
   await fs.rm(stageRoot, { recursive: true, force: true });
-  await fs.mkdir(path.dirname(dest), { recursive: true });
-  await fs.cp(src, dest, { recursive: true });
+
+  const roots = [
+    '@earendil-works/pi-coding-agent',
+    '@earendil-works/pi-ai',
+    '@earendil-works/pi-agent-core',
+    'typebox',
+    // Usually absent at the top level: pi-coding-agent's shrinkwrap keeps it
+    // nested under its own node_modules/, where pi's read tool resolves it.
+    // Listed so it still ships standalone if a future install hoists it.
+    '@silvia-odwyer/photon-node',
+  ].filter((name) =>
+    fsSync.existsSync(path.join(projectNm, name, 'package.json')),
+  );
+  const staged = new Set<string>(roots);
+  const visited = new Set<string>();
+
+  const walk = async (pkgDir: string): Promise<void> => {
+    if (visited.has(pkgDir)) return;
+    visited.add(pkgDir);
+    let pkg: {
+      dependencies?: Record<string, string>;
+      optionalDependencies?: Record<string, string>;
+    };
+    try {
+      pkg = JSON.parse(
+        await fs.readFile(path.join(pkgDir, 'package.json'), 'utf8'),
+      );
+    } catch {
+      return;
+    }
+    const deps = Object.keys({
+      ...pkg.dependencies,
+      ...pkg.optionalDependencies,
+    });
+    for (const dep of deps) {
+      // Node resolution: nearest node_modules walking up from the dependent,
+      // stopping at the project root. Missing deps are skipped — platform-
+      // specific optionalDependencies legitimately aren't installed.
+      let found: string | null = null;
+      for (
+        let dir = pkgDir;
+        ;
+        dir = path.dirname(dir)
+      ) {
+        const candidate = path.join(dir, 'node_modules', dep);
+        if (fsSync.existsSync(path.join(candidate, 'package.json'))) {
+          found = candidate;
+          break;
+        }
+        if (dir === __dirname || path.dirname(dir) === dir) break;
+      }
+      if (!found) continue;
+      // Top-level resolutions must be staged by name; nested ones ship
+      // inside their parent's copy but still get walked, because their own
+      // deps may resolve at the top level.
+      if (path.relative(projectNm, found).split(path.sep).join('/') === dep) {
+        staged.add(dep);
+      }
+      await walk(found);
+    }
+  };
+
+  for (const name of roots) {
+    await walk(path.join(projectNm, name));
+  }
+  for (const name of staged) {
+    await fs.cp(path.join(projectNm, name), path.join(stageRoot, name), {
+      recursive: true,
+    });
+  }
 }
 
 // Azure Trusted Signing wiring. The release workflow installs the
@@ -286,12 +354,13 @@ const config: ForgeConfig = {
       // resources/preview-templates/, resolved at runtime in
       // preview-template-renderer.ts via the dual-resolve pattern.
       'assets/preview-templates',
-      // Staged node_modules tree (currently just @silvia-odwyer/photon-node).
-      // Flattens to resources/node_modules/, so the bare
-      // `import("@silvia-odwyer/photon-node")` inside pi-coding-agent's read
-      // tool resolves by directory walk-up. Built by stagePhotonNodeModules
-      // in generateAssets. See that function for why photon can't use the
-      // resourcesPath dual-resolve pattern the other native/wasm deps use.
+      // Staged node_modules tree: the pi agent packages plus their full
+      // runtime dependency closure (and photon-node). Flattens to
+      // resources/node_modules/, so the bundled main.js's external
+      // require('@earendil-works/…') and pi's own internal imports resolve
+      // by directory walk-up out of the asar. Built by stagePiNodeModules in
+      // generateAssets; see that function for why pi can't be bundled or use
+      // the resourcesPath dual-resolve pattern the other native/wasm deps use.
       'dist/node_modules',
     ],
   },
@@ -305,7 +374,7 @@ const config: ForgeConfig = {
       await stagePrunedSteamworks();
       await stageBetterSqlite();
       await stageBridge();
-      await stagePhotonNodeModules();
+      await stagePiNodeModules();
     },
   },
   // Forge's ForgeRebuildOptions explicitly omits `arch`; the value is read

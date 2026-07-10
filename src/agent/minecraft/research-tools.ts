@@ -6,7 +6,7 @@
  * into the shared tool files.
  */
 import { Type } from 'typebox';
-import type { AgentTool } from '@mariozechner/pi-agent-core';
+import type { AgentTool } from '@earendil-works/pi-agent-core';
 import { ensureMinecraftIndexInBackground } from '../index/rebuild-minecraft.js';
 import type { SymbolMatch } from '../index/resolve-symbol.js';
 import {

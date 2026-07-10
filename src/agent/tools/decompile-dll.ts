@@ -1,5 +1,5 @@
 import { Type } from 'typebox';
-import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
+import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
 import fs from 'node:fs';
 import { assertPathAllowed } from '../security/path-policy.js';
 import { getPathPolicyRoots } from '../security/policy-roots.js';

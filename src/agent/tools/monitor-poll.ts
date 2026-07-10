@@ -6,7 +6,7 @@
 // (one run_test_cycle launch); this lists that run's classes only.
 
 import { Type } from 'typebox';
-import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
+import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
 import { getMonitorServer } from '../monitor/server.js';
 
 const Params = Type.Object({});

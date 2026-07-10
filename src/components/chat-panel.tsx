@@ -8,7 +8,8 @@ import {
   type DragEvent,
 } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import type { AgentMessage, ThinkingLevel } from '@mariozechner/pi-agent-core';
+import type { AgentMessage } from '@earendil-works/pi-agent-core';
+import type { MixerThinkingLevel as ThinkingLevel } from '../lib/thinking-levels';
 import type { Conversation } from '../agent/conversations';
 import type { WorkspaceMod } from '../agent/workspace';
 import type { ModelOption } from '../agent/models';

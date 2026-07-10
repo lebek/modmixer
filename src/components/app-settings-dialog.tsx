@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { ThinkingLevel } from '@mariozechner/pi-agent-core';
+import type { MixerThinkingLevel as ThinkingLevel } from '../lib/thinking-levels';
 import { sanitizeAuthorHandle } from '@/lib/identifiers';
 import type {
   OAuthEvent,

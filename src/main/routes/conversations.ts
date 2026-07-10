@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { clipboard } from 'electron';
-import type { ThinkingLevel } from '@mariozechner/pi-agent-core';
+import type { MixerThinkingLevel as ThinkingLevel } from '../../lib/thinking-levels.js';
 import {
   archiveConversation,
   clearActiveForMod,

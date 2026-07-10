@@ -9,7 +9,7 @@ import {
 } from 'node:fs';
 import { dirname } from 'node:path';
 import lockfile from 'proper-lockfile';
-import type { AuthStorageBackend } from '@mariozechner/pi-coding-agent';
+import type { AuthStorageBackend } from '@earendil-works/pi-coding-agent';
 
 interface LockResult<T> {
   result: T;

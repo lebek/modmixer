@@ -13,21 +13,25 @@ import {
   type ContextUsage,
   type SessionHeader,
   type ToolDefinition,
-} from '@mariozechner/pi-coding-agent';
-import {
-  complete,
-  type Api,
-  type ImageContent,
-  type Model,
-  type OAuthAuthInfo,
-  type OAuthPrompt,
-  type OAuthProviderId,
-} from '@mariozechner/pi-ai';
+} from '@earendil-works/pi-coding-agent';
+import type {
+  Api,
+  ImageContent,
+  Model,
+  Models,
+  OAuthAuthInfo,
+  OAuthPrompt,
+  OAuthProviderId,
+} from '@earendil-works/pi-ai';
+import { builtinModels } from '@earendil-works/pi-ai/providers/all';
 import type {
   AgentMessage,
   AgentTool,
-  ThinkingLevel,
-} from '@mariozechner/pi-agent-core';
+} from '@earendil-works/pi-agent-core';
+import {
+  toPiThinking,
+  type MixerThinkingLevel as ThinkingLevel,
+} from '../lib/thinking-levels.js';
 import {
   ErrorBuffer,
   formatErrorSummary,
@@ -95,7 +99,7 @@ import {
 import { buildSystemPrompt, PROMPT_VERSION } from './system-prompt.js';
 import { readModPrefs } from './mod-prefs.js';
 import type { GameId } from './games/types.js';
-import type { Extension } from '@mariozechner/pi-coding-agent';
+import type { Extension } from '@earendil-works/pi-coding-agent';
 import {
   addAttachmentPaths,
   addConversation,
@@ -358,7 +362,13 @@ const FEATURED_MODELS: Record<string, string[]> = {
     'claude-sonnet-4-6',
     'claude-haiku-4-5',
   ],
-  'openai-codex': ['gpt-5.5', 'gpt-5.4', 'gpt-5.3-codex'],
+  'openai-codex': [
+    'gpt-5.6-sol',
+    'gpt-5.6-terra',
+    'gpt-5.6-luna',
+    'gpt-5.5',
+    'gpt-5.4',
+  ],
   'github-copilot': [
     'claude-opus-4.7',
     'claude-sonnet-4.6',
@@ -385,7 +395,7 @@ const FEATURED_MODELS: Record<string, string[]> = {
  */
 const DEFAULT_MODEL: Record<string, string> = {
   anthropic: 'claude-sonnet-4-6',
-  'openai-codex': 'gpt-5.4',
+  'openai-codex': 'gpt-5.6-terra',
   'github-copilot': 'claude-sonnet-4.6',
   'google-gemini-cli': 'gemini-2.5-pro',
   'google-antigravity': 'claude-sonnet-4-6',
@@ -407,9 +417,11 @@ const MODEL_COST_TIER: Record<string, '$' | '$$' | '$$$'> = {
   'claude-haiku-4-5': '$',
   'claude-opus-4-6-thinking': '$$$',
   // OpenAI
+  'gpt-5.6-sol': '$$$',
+  'gpt-5.6-terra': '$$',
+  'gpt-5.6-luna': '$',
   'gpt-5.5': '$$$',
   'gpt-5.4': '$$',
-  'gpt-5.3-codex': '$',
   // GitHub Copilot (uses dotted ids)
   'claude-opus-4.7': '$$$',
   'claude-sonnet-4.6': '$$',
@@ -421,43 +433,17 @@ const MODEL_COST_TIER: Record<string, '$' | '$$' | '$$$'> = {
 };
 
 /**
- * Models we surface before pi-ai's catalog ships a built-in entry for them.
- * ModelRegistry merges custom models from models.json by provider+id (custom
- * wins, built-ins otherwise preserved), so seeding here adds the model without
- * touching Anthropic's built-in models or its Pro/Max OAuth wiring — which a
- * `registerProvider('anthropic', …)` call would wipe (full replacement).
- *
- * Specs verified against Anthropic's docs (May 2026): claude-opus-4-8 matches
- * 4.7 — 1M-token context (no beta header), 128k max output, adaptive thinking,
- * vision, $5/$25 per Mtok with 90% cache-read / 1.25x cache-write. `api` and
- * `baseUrl` are omitted: for a built-in provider, parseModels() inherits them
- * from the provider's built-in defaults (anthropic-messages, api.anthropic.com).
- *
- * claude-fable-5 specs match upstream pi's generated catalog (earendil-works/pi
- * commit 66f432c, June 2026): same API surface as Opus 4.7/4.8 plus one new
- * constraint — an explicit `thinking: {type: "disabled"}` is a 400; the param
- * must be omitted when thinking is off.
- *
- * ADAPTIVE-THINKING PATCH (patches/@mariozechner+pi-ai+0.70.6.patch): pinned
- * pi-ai 0.70.6 decides adaptive vs. budget thinking by a hardcoded model-id
- * substring list (opus-4-6/4-7, sonnet-4-6) and ignores the
- * `compat.forceAdaptiveThinking` flag that upstream added in 0.75.5 — so the
- * flag is omitted above (it would be a no-op). Neither bridge model is in
- * that list, so without the patch both fall back to budget-based thinking,
- * which these models reject (`budget_tokens` is removed on 4.8/Fable;
- * observed on 4.8 as blank follow-up replies) plus the deprecated
- * interleaved-thinking beta header; fable-5 additionally 400s on the explicit
- * disabled-thinking param when thinking is off. The patch teaches
- * supportsAdaptiveThinking / mapThinkingLevelToEffort about opus-4-8 and
- * fable-5, and omits `thinking` for fable-5 when off. It is pinned to 0.70.6:
- * bumping pi-ai silently drops it (the version-stamped filename stops
- * matching), so re-cut it on any bump. At pi-ai >= 0.77.0 (rescoped to
- * @earendil-works) drop the patch and these bridge entries — both models are
- * built-ins there carrying forceAdaptiveThinking.
- *
- * Remove an entry once the pinned pi-ai release includes it as a built-in.
+ * Models that pre-0.80 modmixer seeded into the user's models.json because
+ * pinned pi-ai 0.70.6 didn't know them yet ("bridge models", written by the
+ * old seedBridgeModels — see git history). pi 0.80.x ships both as built-ins
+ * carrying the full adaptive-thinking metadata (thinkingLevelMap,
+ * compat.forceAdaptiveThinking) the seeded copies lack — and ModelRegistry
+ * lets a models.json entry win over the built-in with the same provider+id,
+ * so a stale seeded copy would strip that metadata and break thinking
+ * requests. Matched structurally (exact objects we wrote, ignoring key
+ * order) so a user's hand-edited entry is never removed.
  */
-const BRIDGE_MODELS: Record<string, Array<Record<string, unknown>>> = {
+const STALE_BRIDGE_MODELS: Record<string, Array<Record<string, unknown>>> = {
   anthropic: [
     {
       id: 'claude-fable-5',
@@ -480,45 +466,67 @@ const BRIDGE_MODELS: Record<string, Array<Record<string, unknown>>> = {
   ],
 };
 
+/** Key-order-insensitive deep equality for plain JSON values. */
+function jsonEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (Array.isArray(a) && Array.isArray(b)) {
+    return a.length === b.length && a.every((v, i) => jsonEqual(v, b[i]));
+  }
+  if (
+    typeof a === 'object' && a !== null &&
+    typeof b === 'object' && b !== null &&
+    !Array.isArray(a) && !Array.isArray(b)
+  ) {
+    const ka = Object.keys(a);
+    const kb = Object.keys(b);
+    return (
+      ka.length === kb.length &&
+      ka.every((k) =>
+        jsonEqual(
+          (a as Record<string, unknown>)[k],
+          (b as Record<string, unknown>)[k],
+        ),
+      )
+    );
+  }
+  return false;
+}
+
 /**
- * Idempotently merge BRIDGE_MODELS into the user's models.json so the registry
- * picks them up on load/refresh. Only adds entries that are missing by
- * provider+id — never edits or removes anything the user (or pi's /models) put
- * there. Bad JSON is left untouched so we don't clobber user data; the registry
- * surfaces parse errors of its own accord.
+ * One-time cleanup: strip exactly the bridge-model entries the old seeder
+ * wrote from the user's models.json. Anything else — user-added models,
+ * hand-edited copies of the seeded entries — is left untouched. Bad JSON is
+ * left alone so we don't clobber user data; the registry surfaces parse
+ * errors of its own accord.
  */
-function seedBridgeModels(modelsJsonPath: string): void {
+function removeStaleBridgeModels(modelsJsonPath: string): void {
   try {
+    if (!fs.existsSync(modelsJsonPath)) return;
     let config: {
-      providers?: Record<string, { models?: Array<{ id?: string }> }>;
-    } = {};
-    if (fs.existsSync(modelsJsonPath)) {
-      try {
-        config = JSON.parse(fs.readFileSync(modelsJsonPath, 'utf8'));
-      } catch {
-        // Malformed file — leave it for the user/registry to surface, don't
-        // overwrite their content.
-        return;
-      }
+      providers?: Record<string, { models?: Array<Record<string, unknown>> }>;
+    };
+    try {
+      config = JSON.parse(fs.readFileSync(modelsJsonPath, 'utf8'));
+    } catch {
+      return;
     }
-    const providers = (config.providers ??= {});
     let changed = false;
-    for (const [provider, models] of Object.entries(BRIDGE_MODELS)) {
-      const entry = (providers[provider] ??= {});
-      const list = (entry.models ??= []);
-      for (const model of models) {
-        if (!list.some((m) => m.id === model.id)) {
-          list.push(model as { id?: string });
-          changed = true;
-        }
+    for (const [provider, staleModels] of Object.entries(STALE_BRIDGE_MODELS)) {
+      const list = config.providers?.[provider]?.models;
+      if (!list) continue;
+      const kept = list.filter(
+        (m) => !staleModels.some((stale) => jsonEqual(m, stale)),
+      );
+      if (kept.length !== list.length) {
+        config.providers![provider]!.models = kept;
+        changed = true;
       }
     }
     if (changed) {
-      fs.mkdirSync(path.dirname(modelsJsonPath), { recursive: true });
       fs.writeFileSync(modelsJsonPath, JSON.stringify(config, null, 2));
     }
   } catch (err) {
-    console.error('seedBridgeModels failed:', err);
+    console.error('removeStaleBridgeModels failed:', err);
   }
 }
 
@@ -573,9 +581,9 @@ export type OAuthEvent =
 
 /**
  * Inlined from pi-coding-agent's session-manager (the function exists but is
- * not re-exported from the package's public barrel in 0.70.6). Same encoding
- * scheme so SessionManager methods that compute paths internally land on the
- * same files we manage.
+ * not re-exported from the package's public barrel as of 0.80.3). Same
+ * encoding scheme so SessionManager methods that compute paths internally
+ * land on the same files we manage.
  */
 function getDefaultSessionDir(cwd: string, agentDir: string): string {
   const safePath = `--${cwd.replace(/^[/\\]/, '').replace(/[/\\:]/g, '-')}--`;
@@ -584,7 +592,7 @@ function getDefaultSessionDir(cwd: string, agentDir: string): string {
   return sessionDir;
 }
 
-/** Inlined from pi-coding-agent (also not re-exported in 0.70.6). */
+/** Inlined from pi-coding-agent (also not re-exported as of 0.80.3). */
 export function toolDefinitionFromAgentTool(
   tool: AgentTool<any>,
 ): ToolDefinition<any, unknown> {
@@ -738,7 +746,7 @@ export class AgentHost {
       ),
     );
     const modelsJsonPath = path.join(this.agentDir, 'models.json');
-    seedBridgeModels(modelsJsonPath);
+    removeStaleBridgeModels(modelsJsonPath);
     this.modelRegistry = ModelRegistry.create(this.authStorage, modelsJsonPath);
     this.settingsManager = SettingsManager.create(this.cwd, this.agentDir);
     // ModMixer deliberately does not use the harness's app-level auto-retry.
@@ -1158,6 +1166,9 @@ export class AgentHost {
       () => [...attachmentRoots],
       { live: convo.live === true, game: convo.game },
     ).map((tool) => toolDefinitionFromAgentTool(tool));
+    // 'max' is modmixer's own top rung — lower it onto pi's scale here (see
+    // lib/thinking-levels.ts). The persisted value stays 'max'.
+    const piThinking = toPiThinking(model, thinkingLevel);
     const { session } = await createAgentSession({
       cwd: sessionCwd,
       agentDir: this.agentDir,
@@ -1166,8 +1177,8 @@ export class AgentHost {
       settingsManager: this.settingsManager,
       sessionManager,
       resourceLoader,
-      model,
-      thinkingLevel,
+      model: piThinking.model,
+      thinkingLevel: piThinking.level,
       tools: this.allowedToolNames,
       customTools,
     });
@@ -1594,22 +1605,41 @@ export class AgentHost {
     }
     setConvModel(conversationId, selection);
     const entry = this.sessions.get(conversationId);
-    if (entry) await entry.session.setModel(model);
+    if (entry) {
+      // Re-lower the persisted level onto the new model: a 'max' chat needs
+      // the max-effort map stamped onto this model too (and a non-adaptive
+      // model must not inherit it).
+      const level =
+        getConversation(conversationId)?.thinkingLevel ??
+        loadSettings().thinkingLevel;
+      const piThinking = toPiThinking(model, level);
+      await entry.session.setModel(piThinking.model ?? model);
+      entry.session.setThinkingLevel(piThinking.level);
+    }
   }
 
   /**
    * Switch one chat's reasoning effort. Pi clamps internally against the
    * model's available levels, so passing "xhigh" to Kimi quietly becomes
    * "high" inside the session — the persisted value is the user's intent,
-   * not necessarily what the next turn runs at.
+   * not necessarily what the next turn runs at. 'max' is lowered onto pi at
+   * this boundary (lib/thinking-levels.ts); switching between 'max' and
+   * 'xhigh' also swaps the session's model instance between the max-effort
+   * copy and the pristine registry one, so 'xhigh' never inherits the
+   * remapped effort.
    */
-  setConversationThinkingLevel(
+  async setConversationThinkingLevel(
     conversationId: string,
     level: ThinkingLevel,
-  ): void {
+  ): Promise<void> {
     setConvThinkingLevel(conversationId, level);
     const entry = this.sessions.get(conversationId);
-    if (entry) entry.session.setThinkingLevel(level);
+    if (entry) {
+      const model = this.resolveModel(getConversation(conversationId)?.model);
+      const piThinking = toPiThinking(model ?? undefined, level);
+      if (piThinking.model) await entry.session.setModel(piThinking.model);
+      entry.session.setThinkingLevel(piThinking.level);
+    }
   }
 
   /**
@@ -1624,7 +1654,10 @@ export class AgentHost {
       const model = this.resolveModel(convo?.model);
       if (!model) continue;
       try {
-        await entry.session.setModel(model);
+        const level = convo?.thinkingLevel ?? loadSettings().thinkingLevel;
+        const piThinking = toPiThinking(model, level);
+        await entry.session.setModel(piThinking.model ?? model);
+        entry.session.setThinkingLevel(piThinking.level);
       } catch (err) {
         console.error('Failed to swap session model after auth change:', err);
       }
@@ -2035,6 +2068,27 @@ export class AgentHost {
             message: 'Paste the authorization code from your browser:',
             placeholder: 'Authorization code',
           }),
+        // Device-code flows (GitHub Copilot, Codex headless) hand back a
+        // user code + verification URL instead of a callback redirect. Reuse
+        // the authInfo affordance the renderer already renders for onAuth.
+        onDeviceCode: (info) => {
+          void shell.openExternal(info.verificationUri);
+          this.emitOAuth({
+            type: 'login-progress',
+            providerId,
+            message: `Enter code ${info.userCode} in your browser to sign in.`,
+            authInfo: {
+              url: info.verificationUri,
+              instructions: `Your one-time code: ${info.userCode}`,
+            },
+          });
+        },
+        // The only selector pi issues today is Codex's browser-vs-device-code
+        // login method, where the first option is the browser flow — the only
+        // behavior that existed before the callback was added, and the right
+        // one for a desktop app. Answer with the first option rather than
+        // growing a selector UI until a flow actually needs a real choice.
+        onSelect: (prompt) => Promise.resolve(prompt.options[0]?.id),
       });
       this.emitOAuth({ type: 'login-success', providerId });
       this.emitOAuth({ type: 'links-changed' });
@@ -2489,7 +2543,12 @@ export class AgentHost {
     if (!model) throw new Error(`unknown anthropic model: ${args.modelId}`);
     const auth = await this.modelRegistry.getApiKeyAndHeaders(model);
     if (!auth.ok) throw new Error(auth.error);
-    const result = await complete(
+    // pi-ai's Models API (the old global complete() is deprecated and its
+    // /compat entrypoint slated for deletion upstream). The request-scoped
+    // apiKey participates in provider auth resolution, and the Anthropic
+    // layer detects OAuth tokens by shape and adds its beta headers itself;
+    // getApiKeyAndHeaders' headers merge on top for any registry extras.
+    const result = await this.demoModels().completeSimple(
       model,
       {
         systemPrompt: args.system,
@@ -2505,6 +2564,18 @@ export class AgentHost {
       .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
       .map((b) => b.text)
       .join('');
+  }
+
+  /**
+   * Lazy one-per-host Models collection for demoComplete's one-shot calls.
+   * Provider construction is cheap (lazy stubs) but there's no reason to pay
+   * it on every launch for a MODMIXER_DEMO-only path.
+   */
+  private demoModelsInstance: Models | null = null;
+
+  private demoModels(): Models {
+    this.demoModelsInstance ??= builtinModels();
+    return this.demoModelsInstance;
   }
 
   async shutdown(): Promise<void> {

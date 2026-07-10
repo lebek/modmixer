@@ -79,7 +79,7 @@ const api = {
     invoke('modmixer:settings:set-analytics-opt-in', optIn),
   setTheme: (theme: import('./agent/settings').ThemePreference) =>
     invoke('modmixer:settings:set-theme', theme),
-  setThinkingLevel: (level: import('@mariozechner/pi-agent-core').ThinkingLevel) =>
+  setThinkingLevel: (level: import('./lib/thinking-levels.js').MixerThinkingLevel) =>
     invoke('modmixer:settings:set-thinking-level', level),
   setMultiChat: (enabled: boolean) =>
     invoke('modmixer:settings:set-multi-chat', enabled),
@@ -131,7 +131,7 @@ const api = {
   ) => invoke('modmixer:conversations:set-model', conversationId, selection),
   setConversationThinkingLevel: (
     conversationId: string,
-    level: import('@mariozechner/pi-agent-core').ThinkingLevel,
+    level: import('./lib/thinking-levels.js').MixerThinkingLevel,
   ) =>
     invoke('modmixer:conversations:set-thinking-level', conversationId, level),
   /**

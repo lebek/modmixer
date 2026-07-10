@@ -33,14 +33,18 @@ import {
   SessionManager,
   createAgentSession,
   type AgentSession,
-} from '@mariozechner/pi-coding-agent';
-import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
+} from '@earendil-works/pi-coding-agent';
+import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
 import {
   AgentHost,
   buildCustomTools,
   toolDefinitionFromAgentTool,
 } from '../../src/agent/agent-host.js';
 import { buildSystemPrompt } from '../../src/agent/system-prompt.js';
+import {
+  toPiThinking,
+  type MixerThinkingLevel,
+} from '../../src/lib/thinking-levels.js';
 import { ScopedResourceLoader } from '../../src/agent/resource-loader.js';
 import { launchModeHint } from '../../src/agent/launch-mode.js';
 import type { ConversationScope } from '../../src/agent/conversations.js';
@@ -378,6 +382,12 @@ async function runOneTurn(
     promptForVariant(systemPrompt, variant, live),
     [],
   );
+  // Same boundary translation as AgentHost.constructSession: modmixer's
+  // 'max' becomes pi 'xhigh' on a max-effort model copy.
+  const piThinking = toPiThinking(
+    model,
+    (cfg.thinkingLevel as MixerThinkingLevel) ?? 'high',
+  );
   const { session } = (await createAgentSession({
     cwd,
     agentDir,
@@ -386,8 +396,8 @@ async function runOneTurn(
     settingsManager: (host as any).settingsManager,
     sessionManager,
     resourceLoader,
-    model,
-    thinkingLevel: (cfg.thinkingLevel as any) ?? 'high',
+    model: piThinking.model,
+    thinkingLevel: piThinking.level,
     tools: (host as any).allowedToolNames,
     customTools,
   })) as { session: AgentSession };
@@ -524,6 +534,10 @@ async function main(): Promise<void> {
         cwd,
       );
       const resourceLoader = new ScopedResourceLoader(systemPrompt, []);
+      const piThinking = toPiThinking(
+        model,
+        (cfg.thinkingLevel as MixerThinkingLevel) ?? 'high',
+      );
       const { session } = (await createAgentSession({
         cwd,
         agentDir,
@@ -532,8 +546,8 @@ async function main(): Promise<void> {
         settingsManager: (host as any).settingsManager,
         sessionManager,
         resourceLoader,
-        model,
-        thinkingLevel: (cfg.thinkingLevel as any) ?? 'high',
+        model: piThinking.model,
+        thinkingLevel: piThinking.level,
         tools: (host as any).allowedToolNames,
         customTools,
       })) as { session: AgentSession };

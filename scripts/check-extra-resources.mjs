@@ -47,12 +47,16 @@ const RUNTIME_PROVIDED = new Set(['electron']);
 // extraResource entry flattens to resources/node_modules/, so a bare
 // require()/import() of the package from the packaged main.js resolves by
 // directory walk-up out of the asar — no resourcesPath dual-resolve needed.
-// Used for packages whose loader does a bare import we cannot intercept from
-// our own code (e.g. @silvia-odwyer/photon-node, loaded deep inside
-// @mariozechner/pi-coding-agent's read tool). Staged by stagePhotonNodeModules
-// in forge.config.ts; satisfied here only when `dist/node_modules` is present
-// in extraResource.
-const STAGED_VIA_NODE_MODULES = new Set(['@silvia-odwyer/photon-node']);
+// Staged by stagePiNodeModules in forge.config.ts (which also computes and
+// stages the packages' full runtime dependency closure); satisfied here only
+// when `dist/node_modules` is present in extraResource. The
+// /^@earendil-works\//-pattern externals are staged the same way but are a
+// regex, which the string-literal extractor below never surfaces — they're
+// covered by stagePiNodeModules' roots list.
+const STAGED_VIA_NODE_MODULES = new Set([
+  '@silvia-odwyer/photon-node',
+  'typebox',
+]);
 
 // Per-staged-package deps that are listed in package.json#dependencies but
 // are NOT required at runtime (build-time tools, prebuild fetchers, type-

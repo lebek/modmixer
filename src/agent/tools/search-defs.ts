@@ -1,6 +1,6 @@
 import { Type } from 'typebox';
 import type { TObject } from 'typebox';
-import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
+import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
 import path from 'node:path';
 import { openIndexDb } from '../index/db.js';
 import { getIndexPaths } from '../index/paths.js';

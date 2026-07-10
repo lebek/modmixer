@@ -6,7 +6,7 @@ import {
   createSyntheticSourceInfo,
   type Skill,
   type SkillFrontmatter,
-} from '@mariozechner/pi-coding-agent';
+} from '@earendil-works/pi-coding-agent';
 
 /**
  * Global power-user config lives in a home-directory dotfolder, NOT under

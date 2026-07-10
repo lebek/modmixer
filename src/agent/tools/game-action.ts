@@ -1,5 +1,5 @@
 import { Type } from 'typebox';
-import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
+import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
 import { getLiveServer } from '../live/server.js';
 import { buildActionAssembly } from '../live/build.js';
 import type { ConversationScope } from '../conversations.js';

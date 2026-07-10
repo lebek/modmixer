@@ -1,0 +1,44 @@
+diff --git a/node_modules/@earendil-works/pi-ai/package.json b/node_modules/@earendil-works/pi-ai/package.json
+index ce4613c..dbd5fb6 100644
+--- a/node_modules/@earendil-works/pi-ai/package.json
++++ b/node_modules/@earendil-works/pi-ai/package.json
+@@ -13,27 +13,33 @@
+ 	"exports": {
+ 		".": {
+ 			"types": "./dist/index.d.ts",
+-			"import": "./dist/index.js"
++			"import": "./dist/index.js",
++			"default": "./dist/index.js"
+ 		},
+ 		"./compat": {
+ 			"types": "./dist/compat.d.ts",
+-			"import": "./dist/compat.js"
++			"import": "./dist/compat.js",
++			"default": "./dist/compat.js"
+ 		},
+ 		"./providers/*": {
+ 			"types": "./dist/providers/*.d.ts",
+-			"import": "./dist/providers/*.js"
++			"import": "./dist/providers/*.js",
++			"default": "./dist/providers/*.js"
+ 		},
+ 		"./api/*": {
+ 			"types": "./dist/api/*.d.ts",
+-			"import": "./dist/api/*.js"
++			"import": "./dist/api/*.js",
++			"default": "./dist/api/*.js"
+ 		},
+ 		"./oauth": {
+ 			"types": "./dist/oauth.d.ts",
+-			"import": "./dist/oauth.js"
++			"import": "./dist/oauth.js",
++			"default": "./dist/oauth.js"
+ 		},
+ 		"./bedrock-provider": {
+ 			"types": "./dist/bedrock-provider.d.ts",
+-			"import": "./dist/bedrock-provider.js"
++			"import": "./dist/bedrock-provider.js",
++			"default": "./dist/bedrock-provider.js"
+ 		}
+ 	},
+ 	"bin": {

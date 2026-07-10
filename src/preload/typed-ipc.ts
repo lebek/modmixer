@@ -1,5 +1,6 @@
 import { ipcRenderer, type IpcRendererEvent } from 'electron';
-import type { AgentMessage, ThinkingLevel } from '@mariozechner/pi-agent-core';
+import type { AgentMessage } from '@earendil-works/pi-agent-core';
+import type { MixerThinkingLevel as ThinkingLevel } from '../lib/thinking-levels.js';
 import type {
   Consent,
   LocalProvider,
@@ -68,7 +69,7 @@ import type {
 
 export interface AgentEventEnvelope {
   conversationId: string | null;
-  event: import('@mariozechner/pi-coding-agent').AgentSessionEvent;
+  event: import('@earendil-works/pi-coding-agent').AgentSessionEvent;
 }
 
 export interface RegistryEnvelope {
@@ -159,7 +160,7 @@ export interface Channels {
   'modmixer:agent:release-idle': (conversationId: string) => void;
   'modmixer:agent:get-context-usage': (
     conversationId: string,
-  ) => import('@mariozechner/pi-coding-agent').ContextUsage | null;
+  ) => import('@earendil-works/pi-coding-agent').ContextUsage | null;
   // Demo-video harness only — handler registered behind MODMIXER_DEMO=1.
   'modmixer:demo:complete': (args: {
     modelId: string;

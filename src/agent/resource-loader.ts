@@ -3,7 +3,7 @@ import {
   type Extension,
   type LoadExtensionsResult,
   type ResourceLoader,
-} from '@mariozechner/pi-coding-agent';
+} from '@earendil-works/pi-coding-agent';
 
 /**
  * Minimal ResourceLoader that returns a single, externally-supplied system
@@ -15,6 +15,17 @@ import {
  * don't ship any of that — ModMixer's system prompt is composed in code from
  * the conversation scope. This loader keeps the AgentSession happy without
  * spinning up that machinery.
+ *
+ * Considered at pi 0.80.x and rejected: DefaultResourceLoader with the no*
+ * flags + extensionFactories. Even fully flagged off, its reload() still
+ * runs the extension package manager and settings-sourced extension
+ * resolution against agentDir — meaning a user's pi settings.json could
+ * inject extensions into ModMixer sessions. A custom ResourceLoader is the
+ * documented SDK seam for exactly this hermetic setup (docs/sdk.md), so this
+ * class is the deliberate choice, not a stopgap. Revisit only if upstream
+ * exports loadExtensionFromFactory at the package root (it's internal as of
+ * 0.80.3), which would let the extension shells in snapshot-extension.ts /
+ * strip-thinking-extension.ts become plain factories.
  *
  * The system prompt is fixed for the lifetime of the loader. Scope changes
  * (e.g. a legacy folder-less conversation being bound to a mod on first open —

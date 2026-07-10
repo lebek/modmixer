@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import type { AgentMessage } from '@mariozechner/pi-agent-core';
+import type { AgentMessage } from '@earendil-works/pi-agent-core';
 import { cn } from '@/lib/cn';
 import { extractText } from '@/lib/agent-utils';
 

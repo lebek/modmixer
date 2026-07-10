@@ -2,7 +2,7 @@ import { app, nativeImage } from 'electron';
 import path from 'node:path';
 import fsp from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import type { ImageContent } from '@mariozechner/pi-ai';
+import type { ImageContent } from '@earendil-works/pi-ai';
 import type { AttachmentInput, PreparedAttachment } from './types.js';
 
 /**

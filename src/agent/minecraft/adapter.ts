@@ -7,7 +7,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { Type } from 'typebox';
-import type { AgentToolResult } from '@mariozechner/pi-agent-core';
+import type { AgentToolResult } from '@earendil-works/pi-agent-core';
 import { getGame } from '../games/registry.js';
 import {
   getWorkspacePaths,

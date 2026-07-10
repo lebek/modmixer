@@ -1,6 +1,6 @@
 import path from 'node:path';
 import fs from 'node:fs';
-import { formatSkillsForPrompt } from '@mariozechner/pi-coding-agent';
+import { formatSkillsForPrompt } from '@earendil-works/pi-coding-agent';
 import { detectRimWorldPaths, detectGameVersionMajorMinorSync } from './paths.js';
 import { readUserInstructionsSync, discoverUserSkillsSync } from './user-config.js';
 import { getWorkspacePaths, parseAbout } from './workspace.js';

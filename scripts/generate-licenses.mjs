@@ -3,7 +3,7 @@
 // ships Electron's LICENSE and LICENSES.chromium.html at the package root;
 // this file covers everything Vite rolls up from package.json#dependencies.
 //
-// The pi-mono packages (@mariozechner/*) don't ship a LICENSE file in their
+// The pi packages (@earendil-works/*) don't ship a LICENSE file in their
 // npm tarballs, so we embed the upstream MIT text inline.
 //
 // Wired in as a Forge generateAssets hook, and the output is included via
@@ -52,9 +52,9 @@ const MPL_2_0_LICENSE = readFileSync(
 );
 
 const LICENSE_OVERRIDES = {
-  '@mariozechner/pi-agent-core': PI_MONO_LICENSE,
-  '@mariozechner/pi-ai': PI_MONO_LICENSE,
-  '@mariozechner/pi-coding-agent': PI_MONO_LICENSE,
+  '@earendil-works/pi-agent-core': PI_MONO_LICENSE,
+  '@earendil-works/pi-ai': PI_MONO_LICENSE,
+  '@earendil-works/pi-coding-agent': PI_MONO_LICENSE,
   '@resvg/resvg-wasm': MPL_2_0_LICENSE,
 };
 

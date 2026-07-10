@@ -6,7 +6,7 @@
 // Player.log parsing is no longer the source of truth.
 
 import { Type } from 'typebox';
-import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
+import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
 import { getMonitorServer } from '../monitor/server.js';
 
 const Params = Type.Object({

@@ -3,7 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import type { ThinkingLevel } from '@mariozechner/pi-agent-core';
+import type { MixerThinkingLevel as ThinkingLevel } from '../lib/thinking-levels.js';
 import { sanitizeAuthorHandle } from '../lib/identifiers.js';
 import type { GameId } from './games/types.js';
 import { resolveGameId } from './games/registry.js';
@@ -31,22 +31,8 @@ export interface LocalProvider {
 
 export type ThemePreference = 'dark' | 'light' | 'auto';
 
-export const THINKING_LEVELS: ThinkingLevel[] = [
-  'off',
-  'minimal',
-  'low',
-  'medium',
-  'high',
-  'xhigh',
-  'max',
-];
-
-function isThinkingLevel(value: unknown): value is ThinkingLevel {
-  return (
-    typeof value === 'string' &&
-    (THINKING_LEVELS as readonly string[]).includes(value)
-  );
-}
+export { THINKING_LEVELS } from '../lib/thinking-levels.js';
+import { isThinkingLevel } from '../lib/thinking-levels.js';
 
 export interface Consent {
   /** Consent version the user accepted. Matches CURRENT_CONSENT_VERSION at acceptance time. */

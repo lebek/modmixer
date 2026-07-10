@@ -6,7 +6,7 @@
  * `ctx` so this module never imports agent-host.ts (avoids an import cycle).
  */
 import { Type, type Static } from 'typebox';
-import type { AgentToolResult } from '@mariozechner/pi-agent-core';
+import type { AgentToolResult } from '@earendil-works/pi-agent-core';
 import { isRimWorldRunning, quitRimWorld } from './game.js';
 import { prepareDebugSession } from './prefs.js';
 import { shipAndLaunch } from './ship.js';

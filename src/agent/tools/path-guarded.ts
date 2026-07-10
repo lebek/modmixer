@@ -5,13 +5,13 @@ import {
   createLsTool,
   createReadTool,
   createWriteTool,
-} from '@mariozechner/pi-coding-agent';
+} from '@earendil-works/pi-coding-agent';
 import type {
   AgentTool,
   AgentToolResult,
   AgentToolUpdateCallback,
-} from '@mariozechner/pi-agent-core';
-import type { Api, Model } from '@mariozechner/pi-ai';
+} from '@earendil-works/pi-agent-core';
+import type { Api, Model } from '@earendil-works/pi-ai';
 import path from 'node:path';
 import { homedir } from 'node:os';
 import { assertPathAllowed } from '../security/path-policy.js';

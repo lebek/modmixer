@@ -1,8 +1,5 @@
 import { defineConfig } from 'vite';
 
-// Bundle ESM-only deps (pi-agent-core, pi-ai, typebox) into the main process
-// output so the CJS Electron main can require() them.
-//
 // steamworks.js is external: it's a native module whose .node binding and
 // sibling Steam SDK libs (libsteam_api.dylib, steam_api64.dll, libsteam_api.so)
 // must be resolved from disk at runtime — main.ts loads it from
@@ -13,6 +10,19 @@ export default defineConfig({
       external: [
         'electron',
         'steamworks.js',
+        // The pi agent packages (and typebox, their schema library, which
+        // modmixer's tools also import) must NOT be bundled as of pi 0.80.x:
+        // the OAuth flows load through deliberately bundler-proof dynamic
+        // imports, extensions load via jiti, and disk assets resolve against
+        // import.meta.url — all of which only work from real on-disk
+        // node_modules. pi ships ESM-only with import-only exports maps; the
+        // patches/ shims add a "default" condition so the CJS main can
+        // require(esm) them. Packaged builds ship the whole dependency
+        // closure at resources/node_modules (see stagePiNodeModules in
+        // forge.config.ts), where bare-specifier walk-up resolution out of
+        // the asar finds it — the same mechanism photon-node already uses.
+        /^@earendil-works\//,
+        'typebox',
         // Native module — .node binding can't be bundled by Rollup. Loaded
         // from process.resourcesPath/better-sqlite3 in packaged builds.
         'better-sqlite3',

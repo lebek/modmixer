@@ -1,6 +1,7 @@
 import { useCallback, useSyncExternalStore } from 'react';
-import type { AgentMessage, ThinkingLevel } from '@mariozechner/pi-agent-core';
-import type { AgentSessionEvent } from '@mariozechner/pi-coding-agent';
+import type { AgentMessage } from '@earendil-works/pi-agent-core';
+import type { MixerThinkingLevel as ThinkingLevel } from './lib/thinking-levels.js';
+import type { AgentSessionEvent } from '@earendil-works/pi-coding-agent';
 import type { AgentEventEnvelope } from './preload';
 import type { Conversation } from './agent/conversations';
 import type { ModelSelection } from './agent/settings';

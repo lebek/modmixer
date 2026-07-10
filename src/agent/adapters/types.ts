@@ -15,7 +15,7 @@
  * adding a game means implementing this interface, which the type checker then
  * forces to be complete — no more "forgot to gate" call sites.
  */
-import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
+import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
 import type { TObject } from 'typebox';
 import type {
   GameDefinition,

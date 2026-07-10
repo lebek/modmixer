@@ -1,0 +1,20 @@
+diff --git a/node_modules/@earendil-works/pi-agent-core/package.json b/node_modules/@earendil-works/pi-agent-core/package.json
+index d0f9d5a..d7b294c 100644
+--- a/node_modules/@earendil-works/pi-agent-core/package.json
++++ b/node_modules/@earendil-works/pi-agent-core/package.json
+@@ -8,11 +8,13 @@
+ 	"exports": {
+ 		".": {
+ 			"types": "./dist/index.d.ts",
+-			"import": "./dist/index.js"
++			"import": "./dist/index.js",
++			"default": "./dist/index.js"
+ 		},
+ 		"./node": {
+ 			"types": "./dist/node.d.ts",
+-			"import": "./dist/node.js"
++			"import": "./dist/node.js",
++			"default": "./dist/node.js"
+ 		},
+ 		"./package.json": "./package.json"
+ 	},

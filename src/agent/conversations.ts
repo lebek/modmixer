@@ -1,7 +1,7 @@
 import { app } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
-import type { ThinkingLevel } from '@mariozechner/pi-agent-core';
+import type { MixerThinkingLevel as ThinkingLevel } from '../lib/thinking-levels.js';
 import type { ModelSelection } from './settings.js';
 import type { GameId } from './games/types.js';
 

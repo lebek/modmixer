@@ -3,7 +3,7 @@ import {
   type AgentEndEvent,
   type Extension,
   type ExtensionContext,
-} from '@mariozechner/pi-coding-agent';
+} from '@earendil-works/pi-coding-agent';
 import { messageText } from '../lib/agent-utils.js';
 import { commitTurn } from './snapshots.js';
 
