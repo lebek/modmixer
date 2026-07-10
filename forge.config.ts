@@ -239,6 +239,58 @@ async function stagePiNodeModules() {
       recursive: true,
     });
   }
+  await pruneForeignNativeAddons(stageRoot);
+}
+
+// Drop native addons built for a different OS from the staged pi tree. The
+// closure bundles prebuilt .node binaries for every platform: pi-tui ships
+// native/{darwin,win32}/prebuilds/…, and napi packages ship one .node per OS.
+// On Windows signtool refuses to sign a non-PE binary ("This file format
+// cannot be signed because it is not recognized") and fails the entire package
+// step; on every platform the foreign ones are dead weight the runtime never
+// loads (require() only pulls the matching-OS binary). Classify by magic bytes
+// rather than directory names so this stays correct however upstream lays out
+// its prebuilds — it was a new pi-tui prebuild layout that first broke this.
+async function pruneForeignNativeAddons(root: string): Promise<void> {
+  const target =
+    process.platform === 'win32' ? 'pe'
+    : process.platform === 'darwin' ? 'macho'
+    : 'elf';
+  const classify = (b: Buffer): 'pe' | 'macho' | 'elf' | 'unknown' => {
+    if (b.length >= 2 && b[0] === 0x4d && b[1] === 0x5a) return 'pe'; // "MZ"
+    if (
+      b.length >= 4 &&
+      b[0] === 0x7f && b[1] === 0x45 && b[2] === 0x4c && b[3] === 0x46 // \x7fELF
+    ) return 'elf';
+    if (b.length >= 4) {
+      // Mach-O thin (32/64, either endianness) or universal ("fat") binaries.
+      const magic = b.readUInt32BE(0);
+      if (
+        magic === 0xfeedface || magic === 0xcefaedfe || // 32-bit
+        magic === 0xfeedfacf || magic === 0xcffaedfe || // 64-bit
+        magic === 0xcafebabe || magic === 0xbebafeca    // fat
+      ) return 'macho';
+    }
+    return 'unknown';
+  };
+  const entries = await fs.readdir(root, { recursive: true });
+  for (const rel of entries) {
+    if (!rel.endsWith('.node')) continue;
+    const file = path.join(root, rel);
+    const head = Buffer.alloc(4);
+    const fh = await fs.open(file, 'r');
+    try {
+      await fh.read(head, 0, 4, 0);
+    } finally {
+      await fh.close();
+    }
+    const kind = classify(head);
+    // Keep target-OS binaries and anything unrecognized (never guess a real
+    // addon into deletion); only drop binaries positively identified as foreign.
+    if (kind !== 'unknown' && kind !== target) {
+      await fs.rm(file, { force: true });
+    }
+  }
 }
 
 // Azure Trusted Signing wiring. The release workflow installs the
