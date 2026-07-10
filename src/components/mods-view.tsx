@@ -27,6 +27,8 @@ export function ModsView({
   const visible = mods
     .filter((m) => resolveGameId(m.prefs.game) === game)
     .sort(byUpdatedDesc);
+  // A mod counts as published once it has a Workshop item id backing it.
+  const publishedCount = visible.filter((m) => m.publishedFileId != null).length;
   // Launching quits/starts RimWorld in the main process and takes several
   // seconds — keep the button disabled with a busy label until it settles
   // (errors are surfaced by the handler itself).
@@ -45,6 +47,13 @@ export function ModsView({
   return (
     <div className="flex-1 overflow-auto px-8 py-8">
       <div className="mx-auto max-w-5xl">
+        {visible.length > 0 && (
+          <div className="mb-8 flex items-center gap-12 border-b border-line pb-6">
+            <Stat label="Mods created" value={visible.length} />
+            <Stat label="Published" value={publishedCount} />
+          </div>
+        )}
+
         <div className="mb-6 flex items-center justify-between">
           <div>
             <h2 className="font-display text-xl font-medium text-ink">
@@ -100,17 +109,20 @@ export function ModsView({
             ))}
           </div>
         )}
-
-        <div className="mt-12">
-          <h3 className="font-display text-lg font-medium text-ink">
-            Community mods
-          </h3>
-          <p className="text-sm text-muted">
-            Coming soon — browse and install mods shared by other Modmixer
-            users.
-          </p>
-        </div>
       </div>
+    </div>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="flex flex-col">
+      <span className="font-display text-4xl font-medium leading-none text-ink">
+        {value}
+      </span>
+      <span className="mt-2 font-mono text-[11px] uppercase tracking-[0.18em] text-muted">
+        {label}
+      </span>
     </div>
   );
 }

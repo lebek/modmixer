@@ -1336,7 +1336,7 @@ function ThinkingPanel({ thinking, live }: { thinking: string; live: boolean }) 
 
 function ThinkingIndicator() {
   return (
-    <div className="flex items-center gap-2 py-0.5 font-mono text-[11px] text-subtle">
+    <div className="flex items-center gap-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.18em] text-subtle">
       <span className="inline-flex items-end gap-0.5">
         {[0, 140, 280].map((delay) => (
           <span
@@ -1346,7 +1346,7 @@ function ThinkingIndicator() {
           />
         ))}
       </span>
-      <span>thinking…</span>
+      <span>Thinking…</span>
     </div>
   );
 }
