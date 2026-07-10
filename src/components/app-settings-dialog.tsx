@@ -282,12 +282,11 @@ export function AppSettingsDialog({
                           className="mt-0.5"
                         />
                         <span className="text-sm text-ink">
-                          Share community lore
+                          Connect to community lore
                           <span className="mt-0.5 block text-xs text-muted">
-                            Uploads your modding lesson notes (e.g. "SoundDef
-                            volume scale is 0–100") to help other users — and
-                            pulls everyone else's lessons back so your agent
-                            gets smarter too.
+                            Trades your agent's modding lessons with everyone
+                            else's — you send fixes like "SoundDef volume scale
+                            is 0–100" and pull the whole community's back.
                           </span>
                         </span>
                       </label>

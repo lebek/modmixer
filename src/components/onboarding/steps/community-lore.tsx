@@ -32,7 +32,7 @@ export function CommunityLoreStep({
       stepIndex={stepIndex}
       totalSteps={total}
       eyebrow="Community lore"
-      title="Make Modmixer smarter together"
+      title="A shared memory for modders"
       subtitle="Modmixer collects hard-won modding lessons as it works. Sharing them helps every user."
       canContinue={loaded}
       continueLabel="Continue"
@@ -49,12 +49,12 @@ export function CommunityLoreStep({
           />
           <div className="min-w-0 flex-1">
             <div className="text-sm font-medium text-ink">
-              Share community lore
+              Connect to community lore
             </div>
             <p className="mt-1 text-xs leading-relaxed text-muted">
-              Uploads your modding lesson notes (e.g. a tricky API quirk you've
-              figured out) to help other users — and pulls everyone else's lessons
-              back so your agent gets smarter too. It's a two-way exchange.
+              Trades your agent's modding lessons with everyone else's — you
+              send fixes like "SoundDef volume scale is 0–100" and pull the
+              whole community's back.
             </p>
           </div>
         </label>
