@@ -240,6 +240,85 @@ async function stagePiNodeModules() {
     });
   }
   await pruneForeignNativeAddons(stageRoot);
+  await dedupeNestedPackages(stageRoot);
+}
+
+// pi-coding-agent ships an npm-shrinkwrap that nests its entire dependency
+// closure under its own node_modules/, duplicating packages that ALSO resolve
+// at the staged top level. @mistralai/mistralai in particular has pathological
+// generated file names (esm/models/operations/getchatcompletion…post.js) and,
+// nested that deep under resources/node_modules/@earendil-works/pi-coding-agent/
+// node_modules/@mistralai/, it pushed paths past Windows' 260-char MAX_PATH —
+// which made `nuget pack` inside the Squirrel maker fail with "the specified
+// path … is too long" and broke the v0.10.2 Windows build. Node module
+// resolution walks up to the top-level copy, so removing a nested duplicate
+// whose name AND version exactly match a top-level package is transparent, and
+// it brings the deepest path comfortably back under the limit.
+async function dedupeNestedPackages(root: string): Promise<void> {
+  const readVersion = async (dir: string): Promise<string | null> => {
+    try {
+      const pkg = JSON.parse(
+        await fs.readFile(path.join(dir, 'package.json'), 'utf8'),
+      ) as { version?: unknown };
+      return typeof pkg.version === 'string' ? pkg.version : null;
+    } catch {
+      return null;
+    }
+  };
+
+  // Map every top-level staged package (handling @scope/) to its version.
+  const topLevel = new Map<string, string>();
+  for (const entry of await fs.readdir(root, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    if (entry.name.startsWith('@')) {
+      const scopeDir = path.join(root, entry.name);
+      for (const sub of await fs.readdir(scopeDir, { withFileTypes: true })) {
+        if (!sub.isDirectory()) continue;
+        const v = await readVersion(path.join(scopeDir, sub.name));
+        if (v) topLevel.set(`${entry.name}/${sub.name}`, v);
+      }
+    } else {
+      const v = await readVersion(path.join(root, entry.name));
+      if (v) topLevel.set(entry.name, v);
+    }
+  }
+
+  // Every nested node_modules/ under the tree (root itself is excluded — it is
+  // the top level). Shallowest first so deleting a parent duplicate removes any
+  // deeper ones before we stat into them.
+  const nested = (await fs.readdir(root, { recursive: true, withFileTypes: true }))
+    .filter((d) => d.isDirectory() && d.name === 'node_modules')
+    .map((d) => path.join((d as { parentPath?: string; path?: string }).parentPath
+      ?? (d as { path: string }).path, d.name))
+    .sort((a, b) => a.length - b.length);
+
+  const dropIfDuplicate = async (name: string, dir: string): Promise<void> => {
+    const v = await readVersion(dir);
+    if (v && topLevel.get(name) === v) {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  };
+  for (const nm of nested) {
+    let pkgs;
+    try {
+      pkgs = await fs.readdir(nm, { withFileTypes: true });
+    } catch {
+      continue; // a shallower duplicate already removed this subtree
+    }
+    for (const p of pkgs) {
+      if (!p.isDirectory()) continue;
+      if (p.name.startsWith('@')) {
+        const scopeDir = path.join(nm, p.name);
+        for (const sub of await fs.readdir(scopeDir, { withFileTypes: true })) {
+          if (sub.isDirectory()) {
+            await dropIfDuplicate(`${p.name}/${sub.name}`, path.join(scopeDir, sub.name));
+          }
+        }
+      } else {
+        await dropIfDuplicate(p.name, path.join(nm, p.name));
+      }
+    }
+  }
 }
 
 // Drop native addons built for a different OS from the staged pi tree. The
