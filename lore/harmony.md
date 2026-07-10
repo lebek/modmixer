@@ -19,12 +19,14 @@ The canonical RimWorld pattern (since ~2020): your mod depends on Brrainz's "Har
 
 **.csproj:**
 ```xml
-<PackageReference Include="Lib.Harmony" Version="2.3.3" PrivateAssets="all">
+<PackageReference Include="Lib.Harmony" Version="2.4.1" PrivateAssets="all">
   <ExcludeAssets>runtime</ExcludeAssets>
 </PackageReference>
 ```
 
 `ExcludeAssets="runtime"` is the magic — it lets the build see HarmonyLib types (so you can write `[HarmonyPatch(...)]` etc.) but stops MSBuild from copying `0Harmony.dll` into your `Assemblies/` folder. The Brrainz mod provides the actual runtime DLL.
+
+*Pin exactly — don't guess:* the `2.4.1` above is not arbitrary. It MUST equal the exact `0Harmony.dll` version `brrainz.harmony` currently ships. As of RimWorld 1.6 (x64 and arm64) that is **2.4.1**, which is also the version ModMixer's own live/test harness bundles — so a mod pinned to 2.4.1 binds cleanly in the test loop *and* in players' games. Use this value directly; you do not need to inspect the DLL. Never use a floating `2.*` or a stale pin — see *"Never use a floating Lib.Harmony Version"* below for why a version mismatch silently kills every def in the mod.
 
 *Why it's tricky:* `PrivateAssets="all"` alone does NOT prevent the .dll being copied to output — it only prevents transitive dependency exposure. You need `ExcludeAssets="runtime"` to actually skip the runtime copy. Without it, your mod ships `0Harmony.dll` and conflicts with every other Harmony-using mod that does the same — players see `TypeLoadException` for `HarmonyLib.HarmonyPatch` at boot.
 
@@ -103,8 +105,9 @@ Recipe: Postfix-patch `UIRoot_Entry.UIRootUpdate` and drive your input handlers 
 RimWorld's Mono refuses to bind a typeref like `HarmonyLib.CodeInstruction` from `0Harmony, Version=2.4.2.0, PublicKeyToken=null` to a loaded `0Harmony, Version=2.4.1.0` — even though both are weakly-named. The result is a `ReflectionTypeLoadException` on `Assembly.GetTypes()` that kills your entire mod assembly. RimWorld swallows the exception silently and you only see it as a flood of `Type Avatar.X is not a Def type or could not be found` errors for every def in your Defs/ folder, plus one easy-to-miss `ReflectionTypeLoadException getting types in assembly X` line in Player.log.
 
 **Recipe:**
-1. Check what version of `0Harmony.dll` brrainz.harmony actually ships:
+1. Use the version `brrainz.harmony` currently ships: **2.4.1** (RimWorld 1.6, x64 and arm64) — the same version ModMixer's live/test harness bundles. In the common case you do NOT need to inspect the DLL; pin 2.4.1 and move on. Only re-check if you have a specific reason to believe a newer Harmony shipped — and then read the assembly version *properly*. The PowerShell one-liner below is Windows-only; on macOS/Linux use `monodis --assembly '<workshop>/2009463077/Current/Assemblies/0Harmony.dll'` (or `ikdasm`) and read its `.ver`. Do NOT `strings | grep` the raw DLL for a `\d.\d.\d.\d` pattern — it embeds many unrelated version tokens (System, mscorlib, …) and you'll pick the wrong one.
    ```powershell
+   # Windows only:
    [System.Reflection.AssemblyName]::GetAssemblyName('<workshop>\2009463077\Current\Assemblies\0Harmony.dll').Version
    ```
 2. Pin Lib.Harmony in your csproj to that EXACT version, not a floating range:

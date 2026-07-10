@@ -26,7 +26,7 @@ C# bridge (vendor/modmixer-bridge)
 The Modmixer Bridge is a small RimWorld mod that streams diagnostics over
 localhost TCP. It links against:
 
-  * Lib.Harmony 2.3.3 — MIT License
+  * Lib.Harmony 2.4.1 — MIT License
       https://github.com/pardeike/Harmony
   * RimWorld game assemblies (Assembly-CSharp, UnityEngine, etc.)
       Referenced at compile time only; not redistributed.
