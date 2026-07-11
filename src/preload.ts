@@ -173,6 +173,10 @@ const api = {
     folder: string,
     patch: Partial<import('./agent/workspace').AboutMetadata>,
   ) => invoke('modmixer:mods:write-about', folder, patch),
+  setModPrefs: (
+    folder: string,
+    patch: { pinned?: boolean; archived?: boolean },
+  ) => invoke('modmixer:mods:set-prefs', folder, patch),
   onModChanged: (
     handler: (env: import('./preload/typed-ipc').ModChangedEnvelope) => void,
   ) => on('modmixer:mod:changed', handler),

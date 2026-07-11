@@ -16,7 +16,7 @@ import {
   type WorkspaceMod,
 } from '../../agent/workspace.js';
 import { getAdapter } from '../../agent/adapters/index.js';
-import { readModPrefs } from '../../agent/mod-prefs.js';
+import { readModPrefs, writeModPrefs } from '../../agent/mod-prefs.js';
 import { readSchematic } from '../../agent/schematic.js';
 import { scanDefs } from '../../agent/defs-scan.js';
 import { emitModChanged } from '../../agent/mod-events.js';
@@ -96,6 +96,27 @@ export function registerModRoutes(ctx: RouteContext): void {
     await registry.refresh();
     return await listWorkspaceMods();
   });
+
+  // Home-tab pin/archive toggles. Purely a user-organization channel: it only
+  // rewrites the tiny prefs sidecar and returns the resolved prefs. It
+  // deliberately does NOT re-run listWorkspaceMods() (a full recursive
+  // filesystem walk of every mod) or emit mod:changed — nothing on disk
+  // changed but one JSON file, so the renderer just patches that one mod's
+  // prefs in place. Keeps a toggle O(1) even with hundreds of mods.
+  ipc.handle(
+    'modmixer:mods:set-prefs',
+    async (
+      _evt,
+      folder: string,
+      patch: { pinned?: boolean; archived?: boolean },
+    ) => {
+      // Archiving a mod clears its pin — a mod tucked in the archive shouldn't
+      // also claim a spot at the top of the list.
+      const next =
+        patch.archived === true ? { ...patch, pinned: false } : patch;
+      return writeModPrefs(folder, next);
+    },
+  );
 
   ipc.handle('modmixer:workspace:paths', () => getWorkspacePaths());
 

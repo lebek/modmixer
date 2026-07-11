@@ -34,6 +34,15 @@ export interface ModPrefs {
    */
   game: GameId;
   /**
+   * Home-tab organization toggles the user sets from the mod tile. `pinned`
+   * floats the mod to the top of the Home list; `archived` tucks it into the
+   * collapsed Archive section at the bottom. Both default false. Independent
+   * flags, though the UI clears `pinned` when a mod is archived (a mod in the
+   * archive has no business floating to the top).
+   */
+  pinned: boolean;
+  archived: boolean;
+  /**
    * Modrinth project id (Minecraft mods), stamped on first publish. Reusing it
    * on the next publish updates the existing project (skipping re-review)
    * rather than creating a new one, and it builds the public project URL
@@ -68,6 +77,8 @@ function defaults(): ModPrefs {
     trackOnLeaderboard: true,
     lastPublishedAt: null,
     game: DEFAULT_GAME_ID,
+    pinned: false,
+    archived: false,
   };
 }
 
@@ -89,6 +100,8 @@ function parsePrefs(raw: string): ModPrefs {
           ? parsed.lastPublishedAt
           : null,
       game: resolveGameId(parsed.game),
+      pinned: parsed.pinned === true,
+      archived: parsed.archived === true,
       modrinthProjectId:
         typeof parsed.modrinthProjectId === 'string'
           ? parsed.modrinthProjectId
@@ -138,6 +151,9 @@ export async function writeModPrefs(
         : current.lastPublishedAt,
     // game is set once at creation; only overwrite when explicitly patched.
     game: patch.game ? resolveGameId(patch.game) : current.game,
+    pinned: typeof patch.pinned === 'boolean' ? patch.pinned : current.pinned,
+    archived:
+      typeof patch.archived === 'boolean' ? patch.archived : current.archived,
     modrinthProjectId:
       'modrinthProjectId' in patch
         ? patch.modrinthProjectId

@@ -135,6 +135,25 @@ export function App() {
     setMods(list);
   }, []);
 
+  // Home-tab pin/archive toggles. The route only rewrites the prefs sidecar and
+  // hands back the resolved prefs, so we patch that one mod in place rather than
+  // re-fetching (and re-scanning) the whole workspace — a toggle stays O(1) even
+  // with hundreds of mods. On failure, reconcile with a full refresh.
+  const setModPrefs = useCallback(
+    async (folder: string, patch: { pinned?: boolean; archived?: boolean }) => {
+      try {
+        const prefs = await window.modmixer.setModPrefs(folder, patch);
+        setMods((prev) =>
+          prev.map((m) => (m.folder === folder ? { ...m, prefs } : m)),
+        );
+      } catch (err) {
+        console.error('setModPrefs failed:', err);
+        void refreshMods();
+      }
+    },
+    [refreshMods],
+  );
+
   useEffect(() => {
     void refreshMods();
     const offEvent = window.modmixer.onEvent((env) => {
@@ -789,6 +808,7 @@ export function App() {
           onNewMod={newMod}
           onImportMod={importMod}
           onLaunchLiveSession={launchLiveSession}
+          onSetModPrefs={setModPrefs}
         />
       )}
       {settingsSection && (

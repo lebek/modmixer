@@ -24,6 +24,7 @@ import type {
   WorkspaceMod,
   WorkspacePaths,
 } from '../agent/workspace';
+import type { ModPrefs } from '../agent/mod-prefs';
 import type {
   GameId,
   GameSetupSnapshot,
@@ -254,6 +255,10 @@ export interface Channels {
       incompatibleWith: string[];
     },
   ) => WorkspaceMod | null;
+  'modmixer:mods:set-prefs': (
+    folder: string,
+    patch: { pinned?: boolean; archived?: boolean },
+  ) => ModPrefs;
   'modmixer:workspace:paths': () => WorkspacePaths;
 
   // RimWorld game control — launch/quit/run-state + ModsConfig mod enable/disable.
