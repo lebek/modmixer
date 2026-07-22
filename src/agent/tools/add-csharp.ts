@@ -3,6 +3,7 @@ import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
 import fs from 'node:fs';
 import path from 'node:path';
 import { layRimworldCSharpScaffold } from '../rimworld/scaffold.js';
+import { deriveAssemblyName } from '../rimworld/assembly-names.js';
 import { detectRimWorldPaths } from '../paths.js';
 
 const Params = Type.Object({});
@@ -30,7 +31,7 @@ export function createAddCSharpTool(
     name: 'add_csharp',
     label: 'Add C# project',
     description:
-      "Add a buildable C# project to this mod: Source/ModSource.csproj + a Mod.cs stub, targeting net472 and wired to RimWorld's Assembly-CSharp.dll. Call this ONCE, before writing any .cs, when the mod needs runtime code (Harmony patches, a custom ThingComp/Verb/GameComponent, etc.). Most mods are XML-only and do NOT need it. Idempotent: a no-op if the project already exists. After it runs, write your .cs files under Source/ and build_mod compiles them.",
+      "Add a buildable C# project to this mod: Source/<ModName>.csproj + a Mod.cs stub, targeting net472 and wired to RimWorld's Assembly-CSharp.dll. The assembly is named after this mod (unique across your mods) so it can't collide with another mod's DLL. Call this ONCE, before writing any .cs, when the mod needs runtime code (Harmony patches, a custom ThingComp/Verb/GameComponent, etc.). Most mods are XML-only and do NOT need it. Idempotent: a no-op if the project already exists. After it runs, write your .cs files under Source/ and build_mod compiles them.",
     parameters: Params,
     async execute(): Promise<AgentToolResult<AddCSharpDetails>> {
       const sourceDir = path.join(cwd, 'Source');
@@ -54,7 +55,8 @@ export function createAddCSharpTool(
         };
       }
       const { managedDir } = detectRimWorldPaths();
-      await layRimworldCSharpScaffold(cwd, { managedDir });
+      const assemblyName = await deriveAssemblyName(cwd);
+      await layRimworldCSharpScaffold(cwd, { managedDir, assemblyName });
       const note = managedDir
         ? ''
         : ' NOTE: RimWorld install was not detected, so the .csproj HintPaths are empty — the build will fail until RimWorld is installed via Steam.';
@@ -62,7 +64,7 @@ export function createAddCSharpTool(
         content: [
           {
             type: 'text',
-            text: `Added a C# project: Source/ModSource.csproj + Source/Mod.cs (net472, wired to Assembly-CSharp). Write your code under Source/ and build_mod to compile.${note}`,
+            text: `Added a C# project: Source/${assemblyName}.csproj + Source/Mod.cs (net472, assembly "${assemblyName}", wired to Assembly-CSharp). Write your code under Source/ and build_mod to compile.${note}`,
           },
         ],
         details: { sourceDir, created: true },
