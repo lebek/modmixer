@@ -18,6 +18,11 @@ import {
 } from '../build-error-hints.js';
 import { findExistingDotnet, dotnetEnv } from '../dotnet-provision.js';
 import { launchModeHint } from '../launch-mode.js';
+import {
+  findAssemblyCollisions,
+  formatCollisionWarning,
+  reconcileFallbackAssemblyName,
+} from './assembly-names.js';
 import type { BuildModDetails } from '../adapters/types.js';
 
 export async function buildRimworldMod(
@@ -32,6 +37,23 @@ export async function buildRimworldMod(
     throw new Error(
       `No C# project in ${sourceDir}. This mod is XML-only — call add_csharp to lay down a buildable Source/ project before building, or skip build_mod entirely for a pure-XML mod.`,
     );
+  }
+  // If add_csharp ran before the mod was named, its assembly is a throwaway
+  // folder-id name (Mod<hex>). Now that we're building, the mod almost certainly
+  // has a real name — rename the assembly to match so the shipped DLL isn't
+  // garbage. Save-safe (identity only, no code touched); runs before the build
+  // so this build emits the correctly-named DLL. Best-effort.
+  let renameNote = '';
+  try {
+    const renamed = await reconcileFallbackAssemblyName(modDir);
+    if (renamed) {
+      renameNote =
+        `\n\nRenamed the assembly ${renamed.from} → ${renamed.to} to match the ` +
+        `mod's name (the folder-id placeholder was assigned because add_csharp ` +
+        `ran before the mod was named). The old ${renamed.from}.dll was removed.`;
+    }
+  } catch (err) {
+    console.warn('[build_mod] assembly-name reconcile failed:', err);
   }
   // Use the SDK that setup already provisioned — never download mid-build (a
   // build silently hanging on a toolchain download is confusing). If it isn't
@@ -72,6 +94,18 @@ export async function buildRimworldMod(
       console.warn('[build_mod] hint extraction failed:', err);
     }
   }
+  // Flag any assembly identity this mod shares with a sibling workspace mod —
+  // RimWorld loads one DLL per identity and silently skips the rest, so a
+  // collision means a mod mysteriously doesn't load with no error. Best-effort:
+  // a scan failure must never block the build result.
+  let collisionWarning = '';
+  try {
+    collisionWarning = formatCollisionWarning(
+      await findAssemblyCollisions(modDir),
+    );
+  } catch (err) {
+    console.warn('[build_mod] assembly-collision check failed:', err);
+  }
   const status =
     result.exitCode === 0
       ? 'BUILD SUCCEEDED'
@@ -82,6 +116,8 @@ export async function buildRimworldMod(
     }` +
     formatFindings(lintFindings) +
     formatHints(errorHints) +
+    renameNote +
+    collisionWarning +
     // Only on a green build: a red build's next step is fixing errors, not
     // testing, so a launch reminder there is just noise. The hint itself is
     // worded to NOT imply the green build means "ready to test".
