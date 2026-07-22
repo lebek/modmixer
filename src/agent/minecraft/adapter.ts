@@ -175,7 +175,7 @@ async function writeModMetadata(
  */
 async function createPlaceholder(
   modDir: string,
-  opts: { author: string },
+  opts: { author: string; license: string },
 ): Promise<void> {
   if (!isMinecraftTemplateAvailable()) return;
   await createMinecraftMod(modDir, {
@@ -183,6 +183,7 @@ async function createPlaceholder(
     modName: 'Untitled Mod',
     author: opts.author,
     description: '',
+    license: opts.license,
   });
 }
 

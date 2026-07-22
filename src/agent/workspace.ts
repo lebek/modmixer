@@ -550,10 +550,15 @@ export async function createUntitledMod(
   const folder = mintWorkspaceFolderId(workspaceDir);
   const modPath = path.join(workspaceDir, folder);
   await fsp.mkdir(modPath, { recursive: true });
-  const author = loadSettings().defaultAuthor || 'Modmixer User';
+  const settings = loadSettings();
+  const author = settings.defaultAuthor || 'Modmixer User';
   // The game's adapter owns its placeholder shape (RimWorld: About.xml + subdirs;
-  // Minecraft: a buildable NeoForge project from the vendored MDK).
-  await getAdapter(game).createPlaceholder(modPath, { author });
+  // Minecraft: a buildable NeoForge project from the vendored MDK) and persists
+  // the default license in its own home (prefs sidecar / gradle mod_license).
+  await getAdapter(game).createPlaceholder(modPath, {
+    author,
+    license: settings.defaultModLicense,
+  });
   // Record the target game immediately so the agent session bound to this mod
   // targets the right toolchain from message zero. Minecraft mods get their
   // Gradle/NeoForge project scaffolded by the agent's game-specific tool; the

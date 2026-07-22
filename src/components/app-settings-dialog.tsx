@@ -13,9 +13,11 @@ import type {
 } from '@/agent/settings';
 import type { ModelOption } from '@/agent/models';
 import type { UpdaterState } from '@/agent/updater';
+import { DEFAULT_LICENSE_ID } from '@/agent/licenses';
 import { applyTheme } from '@/lib/theme';
 import { ModelPicker } from './model-picker';
 import { ThinkingPicker } from './thinking-picker';
+import { LicensePicker } from './mod-publish/license-picker';
 import { GameIcon } from './game-icon';
 import { useGameSetup } from './use-game-setup';
 import { GameSetupBody } from './game-setup-body';
@@ -38,6 +40,7 @@ export function AppSettingsDialog({
 }) {
   const [section, setSection] = useState<SettingsSection>(initialSection);
   const [author, setAuthor] = useState<string>('');
+  const [modLicense, setModLicense] = useState<string>(DEFAULT_LICENSE_ID);
   const [analyticsOptIn, setAnalyticsOptIn] = useState<boolean>(false);
   const [theme, setTheme] = useState<ThemePreference>('dark');
   const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);
@@ -54,6 +57,7 @@ export function AppSettingsDialog({
   useEffect(() => {
     void window.modmixer.getSettings().then((s) => {
       setAuthor(s.defaultAuthor);
+      setModLicense(s.defaultModLicense);
       setAnalyticsOptIn(s.analyticsOptIn);
       setTheme(s.theme);
       setDefaultModel(s.model);
@@ -92,6 +96,11 @@ export function AppSettingsDialog({
     setTheme(next);
     applyTheme(next);
     await window.modmixer.setTheme(next);
+  };
+
+  const changeModLicense = async (next: string) => {
+    setModLicense(next);
+    await window.modmixer.setDefaultModLicense(next);
   };
 
   const changeMultiChat = async (next: boolean) => {
@@ -245,6 +254,21 @@ export function AppSettingsDialog({
                           {preview || 'author'}.ModName
                         </code>
                         ).
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="mb-1 block font-mono text-[10px] uppercase tracking-[0.18em] text-muted">
+                        Default mod license
+                      </label>
+                      <LicensePicker
+                        value={modLicense}
+                        onChange={(id) => void changeModLicense(id)}
+                        className="w-full rounded-md border border-line bg-paper px-2.5 py-1.5 text-sm text-ink focus:border-accent focus:outline-none"
+                      />
+                      <p className="mt-1.5 text-xs text-muted">
+                        New mods start with this license (it ships as a LICENSE
+                        file when you publish). Existing mods keep theirs.
                       </p>
                     </div>
 

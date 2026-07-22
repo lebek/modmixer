@@ -33,6 +33,8 @@ export interface MinecraftModIdentity {
   version?: string;
   /** reverse-DNS group, defaults to com.modmixer.<modId>. */
   groupId?: string;
+  /** SPDX license id for gradle mod_license, defaults to MIT. */
+  license?: string;
 }
 
 /**
@@ -159,7 +161,7 @@ export async function createMinecraftMod(
     mod_group_id: groupId,
     mod_authors: identity.author || 'Modmixer User',
     mod_description: (identity.description || '').replace(/\n/g, ' '),
-    mod_license: 'MIT',
+    mod_license: identity.license || 'MIT',
   });
   await fsp.writeFile(propsPath, patched, 'utf8');
 

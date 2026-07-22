@@ -41,6 +41,12 @@ export function registerSettingsRoutes(ctx: RouteContext): void {
   );
 
   ipc.handle(
+    'modmixer:settings:set-default-mod-license',
+    // The license new mods are created with; existing mods keep their own.
+    (_evt, license: string) => saveSettings({ defaultModLicense: license }),
+  );
+
+  ipc.handle(
     'modmixer:settings:set-analytics-opt-in',
     async (_evt, optIn: boolean) => {
       await setAnalyticsOptIn(optIn);

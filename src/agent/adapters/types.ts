@@ -194,7 +194,7 @@ export interface GameAdapter {
    */
   createPlaceholder(
     modDir: string,
-    opts: { author: string },
+    opts: { author: string; license: string },
   ): Promise<void>;
   /**
    * Build the agent's system prompt for this game and conversation scope. The

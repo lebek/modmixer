@@ -7,6 +7,7 @@ import type { MixerThinkingLevel as ThinkingLevel } from '../lib/thinking-levels
 import { sanitizeAuthorHandle } from '../lib/identifiers.js';
 import type { GameId } from './games/types.js';
 import { resolveGameId } from './games/registry.js';
+import { DEFAULT_LICENSE_ID } from './licenses.js';
 
 export interface ModelSelection {
   provider: string;
@@ -70,6 +71,14 @@ export interface Settings {
   model: ModelSelection | null;
   /** Sluggified author handle used as the prefix in generated packageIds. */
   defaultAuthor: string;
+  /**
+   * SPDX license id applied to newly created mods (both games). Threaded into
+   * createUntitledMod → the game adapter's createPlaceholder, so a fresh mod
+   * carries this license from message zero (RimWorld: prefs sidecar; Minecraft:
+   * gradle mod_license). '' means "no license". Existing mods keep their own
+   * license — same new-mods-only semantics as defaultAuthor. Defaults to MIT.
+   */
+  defaultModLicense: string;
   /**
    * Stable anonymous id for product analytics. Minted on first launch and
    * never tied to user account/email. Used as PostHog distinctId.
@@ -201,6 +210,7 @@ function computeDefaults(): Settings {
   return {
     model: null,
     defaultAuthor: sanitizeAuthorHandle(os.userInfo().username),
+    defaultModLicense: DEFAULT_LICENSE_ID,
     distinctId: randomUUID(),
     analyticsOptIn: true,
     consent: null,
@@ -250,6 +260,12 @@ function normalize(raw: unknown, defaults: Settings): Settings {
   const defaultAuthor = readString(obj.defaultAuthor);
   if (defaultAuthor !== undefined) {
     next.defaultAuthor = sanitizeAuthorHandle(defaultAuthor) || defaults.defaultAuthor;
+  }
+
+  // Allow '' here (unlike readString): an empty license id is a valid choice
+  // meaning "ship new mods with no license", and must survive a reload.
+  if (typeof obj.defaultModLicense === 'string') {
+    next.defaultModLicense = obj.defaultModLicense;
   }
 
   const distinctId = readString(obj.distinctId);

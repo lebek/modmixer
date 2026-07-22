@@ -101,7 +101,7 @@ async function writeModMetadata(
  */
 async function createPlaceholder(
   modDir: string,
-  opts: { author: string },
+  opts: { author: string; license: string },
 ): Promise<void> {
   const subdirs = ['About', 'Defs', 'Patches', 'Source', 'Textures'];
   await Promise.all(
@@ -112,6 +112,10 @@ async function createPlaceholder(
     author: opts.author,
   });
   await fsp.writeFile(path.join(modDir, 'About', 'About.xml'), aboutXml, 'utf8');
+  // License has no About.xml home — it lives in the prefs sidecar (and, on
+  // publish, a LICENSE file). Record the default now so the mod carries it from
+  // message zero, same as Minecraft's gradle mod_license.
+  await writeModPrefs(path.basename(modDir), { license: opts.license });
 }
 
 export const RimWorldAdapter: GameAdapter = {

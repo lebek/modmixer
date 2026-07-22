@@ -173,6 +173,7 @@ export interface Channels {
   'modmixer:settings:get': () => Settings;
   'modmixer:settings:set-model': (selection: ModelSelection) => Settings;
   'modmixer:settings:set-default-author': (author: string) => Settings;
+  'modmixer:settings:set-default-mod-license': (license: string) => Settings;
   'modmixer:settings:set-analytics-opt-in': (optIn: boolean) => Settings;
   'modmixer:settings:set-theme': (theme: ThemePreference) => Settings;
   'modmixer:settings:set-thinking-level': (level: ThinkingLevel) => Settings;

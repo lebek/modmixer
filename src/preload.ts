@@ -75,6 +75,8 @@ const api = {
     invoke('modmixer:settings:set-model', selection),
   setDefaultAuthor: (author: string) =>
     invoke('modmixer:settings:set-default-author', author),
+  setDefaultModLicense: (license: string) =>
+    invoke('modmixer:settings:set-default-mod-license', license),
   setAnalyticsOptIn: (optIn: boolean) =>
     invoke('modmixer:settings:set-analytics-opt-in', optIn),
   setTheme: (theme: import('./agent/settings').ThemePreference) =>
