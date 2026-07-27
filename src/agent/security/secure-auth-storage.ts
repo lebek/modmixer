@@ -331,9 +331,18 @@ export class SafeStorageCredentialStore implements CredentialStore {
         result: parseCredentials(current),
       }));
     } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error('[modmixer:auth] Failed to reload credentials:', err);
       this.data = {};
+      // The host is constructed before `app.ready`, and pre-ready
+      // `safeStorage.isEncryptionAvailable()` is always false on Windows/Linux
+      // — so a populated `auth.enc` can't be decrypted yet and the backend
+      // throws by design. That's expected, not a failure: this constructor-time
+      // call primes an empty cache and `AgentHost.primeAfterReady()` reloads
+      // once the keyring is up. Only a failure *after* ready is a real problem
+      // (e.g. a Linux box with no keyring), so keep the loud log for that.
+      if (app.isReady()) {
+        // eslint-disable-next-line no-console
+        console.error('[modmixer:auth] Failed to reload credentials:', err);
+      }
     }
   }
 
