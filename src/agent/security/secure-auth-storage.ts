@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  statSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -96,19 +97,34 @@ export class SafeStorageAuthBackend implements AuthStorageBackend {
   /**
    * Read the on-disk JSON, performing a one-time migration from any legacy
    * plaintext `auth.json` to the encrypted `auth.enc`. Returns the decoded
-   * JSON content as a string (the same shape pi's FileAuthStorageBackend
-   * returns, so AuthStorage.parseStorageData can consume it untouched).
+   * JSON content as a string, or undefined when there is genuinely nothing
+   * stored yet.
+   *
+   * THROWS when a non-empty `auth.enc` exists but can't be read (keyring
+   * unavailable, or a blob sealed by a different app identity). That
+   * distinction matters: callers under `withLock` turn what they read into
+   * the *replacement* blob, so returning "no credentials" for a file we
+   * simply couldn't open would persist that emptiness and wipe every
+   * provider's credential on one transient keychain hiccup. Read-only
+   * callers (`SafeStorageCredentialStore.reload`) catch this and degrade to
+   * an empty view without writing.
    */
   private readDecrypted(): string | undefined {
-    if (existsSync(this.encPath)) {
-      if (!this.isEncryptionAvailable()) return undefined;
+    // ensureLockableFile() touches a zero-byte file so proper-lockfile has a
+    // target on first run — that's "nothing stored", not a failure.
+    if (existsSync(this.encPath) && statSync(this.encPath).size > 0) {
+      if (!this.isEncryptionAvailable()) {
+        throw new Error(
+          'safeStorage is unavailable — refusing to read auth.enc as empty.',
+        );
+      }
       try {
         const blob = readFileSync(this.encPath);
         return safeStorage.decryptString(blob);
       } catch (err) {
         // eslint-disable-next-line no-console
         console.error('[modmixer:auth] Failed to decrypt auth.enc:', err);
-        return undefined;
+        throw err;
       }
     }
 
@@ -278,8 +294,10 @@ function parseCredentials(raw: string | undefined): CredentialData {
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
     return parsed as CredentialData;
   } catch {
-    // A corrupt/undecryptable blob is treated as "no credentials" rather than
-    // a hard failure — the user re-logins instead of the app failing to boot.
+    // Decrypted but not valid JSON — treat as "no credentials" rather than a
+    // hard failure, so the user re-logins instead of the app failing to boot.
+    // (An *undecryptable* blob is a different case: the backend throws, so a
+    // write path can never mistake it for an empty store.)
     return {};
   }
 }

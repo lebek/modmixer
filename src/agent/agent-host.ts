@@ -2010,6 +2010,13 @@ export class AgentHost {
    * here), for subscription providers we've never tested against modmixer,
    * and for its own hosted gateway. Showing those as one-click sign-ins
    * would promise support we haven't built.
+   *
+   * `linked` means "we hold a credential we can sign out of" — NOT pi's
+   * broader "is configured", which also counts an `ANTHROPIC_API_KEY` sitting
+   * in the user's shell. Conflating the two strands the user: the row renders
+   * Sign out, sign-out deletes a credential that was never there, the env var
+   * keeps the row lit, and the Sign in button is unreachable. `source` still
+   * reports 'environment' so the UI can show that state on its own.
    */
   listOAuthLinks(): OAuthLink[] {
     const out: OAuthLink[] = [];
@@ -2022,7 +2029,7 @@ export class AgentHost {
         id,
         name: oauth.name,
         label: providerLabel(id),
-        linked: status.configured,
+        linked: this.isProviderConfigured(id),
         source: status.source,
       });
     }
