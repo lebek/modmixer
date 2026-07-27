@@ -56,7 +56,6 @@ export function ModelPicker({
           <option key={m.key} value={m.key} className="font-mono">
             {m.recommended ? '★ ' : ''}
             {m.providerLabel} — {m.label}
-            {m.costTier ? ` ${m.costTier}` : ''}
           </option>
         ))}
       </select>

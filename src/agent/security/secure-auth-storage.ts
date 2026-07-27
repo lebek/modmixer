@@ -9,7 +9,11 @@ import {
 } from 'node:fs';
 import { dirname } from 'node:path';
 import lockfile from 'proper-lockfile';
-import type { AuthStorageBackend } from '@earendil-works/pi-coding-agent';
+import type {
+  Credential,
+  CredentialInfo,
+  CredentialStore,
+} from '@earendil-works/pi-ai';
 
 interface LockResult<T> {
   result: T;
@@ -17,7 +21,21 @@ interface LockResult<T> {
 }
 
 /**
- * AuthStorageBackend backed by Electron's safeStorage. Replaces pi's default
+ * Locked read-modify-write over the credential blob. Mirrors the shape pi's
+ * own `AuthStorageBackend` used to have — pi 0.82 stopped exporting that
+ * interface (and the `AuthStorage` class that consumed it) from its public
+ * entry point, so we declare the contract ourselves and pair it with
+ * `SafeStorageCredentialStore` below.
+ */
+interface AuthStorageBackend {
+  withLock<T>(fn: (current: string | undefined) => LockResult<T>): T;
+  withLockAsync<T>(
+    fn: (current: string | undefined) => Promise<LockResult<T>>,
+  ): Promise<T>;
+}
+
+/**
+ * Storage backend backed by Electron's safeStorage. Replaces pi's default
  * `FileAuthStorageBackend` which writes the JSON token blob plaintext.
  *
  * Storage layout:
@@ -247,5 +265,105 @@ export class SafeStorageAuthBackend implements AuthStorageBackend {
         }
       }
     }
+  }
+}
+
+/** On-disk shape: one credential per provider id, same as pi's auth.json. */
+type CredentialData = Record<string, Credential>;
+
+function parseCredentials(raw: string | undefined): CredentialData {
+  if (!raw || raw.trim().length === 0) return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    return parsed as CredentialData;
+  } catch {
+    // A corrupt/undecryptable blob is treated as "no credentials" rather than
+    // a hard failure — the user re-logins instead of the app failing to boot.
+    return {};
+  }
+}
+
+/**
+ * pi-ai `CredentialStore` over the encrypted backend above.
+ *
+ * pi 0.80 gave us this for free: `AuthStorage.fromStorage(backend)` wrapped a
+ * backend and pi's ModelRegistry consumed it. In 0.82 the credential layer
+ * became the pi-ai `CredentialStore` interface and `AuthStorage` stopped
+ * being exported, so we own the (small) adapter: parse the locked blob,
+ * serve reads from an in-memory copy, and route every write through
+ * `withLockAsync` so a concurrent OAuth refresh can't clobber the file.
+ *
+ * Reads are served from cache because pi calls `read()` on request paths and
+ * the underlying decrypt is a keychain round-trip. `reload()` re-primes that
+ * cache — see `AgentHost.primeAfterReady`, which calls it once safeStorage
+ * is actually available.
+ */
+export class SafeStorageCredentialStore implements CredentialStore {
+  private data: CredentialData = {};
+
+  constructor(private readonly backend: AuthStorageBackend) {
+    this.reload();
+  }
+
+  /** Re-read the encrypted blob into the in-memory cache. Never throws. */
+  reload(): void {
+    try {
+      this.data = this.backend.withLock((current) => ({
+        result: parseCredentials(current),
+      }));
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[modmixer:auth] Failed to reload credentials:', err);
+      this.data = {};
+    }
+  }
+
+  /**
+   * Synchronous cache peek for call sites that register providers during
+   * startup and can't await (pi's own `read()` is async because other
+   * implementations may hit the network).
+   */
+  peek(providerId: string): Credential | undefined {
+    return this.data[providerId];
+  }
+
+  async read(providerId: string): Promise<Credential | undefined> {
+    return this.data[providerId];
+  }
+
+  async list(): Promise<readonly CredentialInfo[]> {
+    return Object.entries(this.data).map(([providerId, credential]) => ({
+      providerId,
+      type: credential.type,
+    }));
+  }
+
+  async modify(
+    providerId: string,
+    fn: (current: Credential | undefined) => Promise<Credential | undefined>,
+  ): Promise<Credential | undefined> {
+    return this.backend.withLockAsync(async (current) => {
+      // Re-parse under the lock: another process may have refreshed a token
+      // since our cache was primed.
+      const data = parseCredentials(current);
+      const next = await fn(data[providerId]);
+      if (next === undefined) {
+        this.data = data;
+        return { result: data[providerId] };
+      }
+      data[providerId] = next;
+      this.data = data;
+      return { result: next, next: JSON.stringify(data, null, 2) };
+    });
+  }
+
+  async delete(providerId: string): Promise<void> {
+    await this.backend.withLockAsync(async (current) => {
+      const data = parseCredentials(current);
+      delete data[providerId];
+      this.data = data;
+      return { result: undefined, next: JSON.stringify(data, null, 2) };
+    });
   }
 }

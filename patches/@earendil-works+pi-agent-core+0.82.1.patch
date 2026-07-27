@@ -1,5 +1,5 @@
 diff --git a/node_modules/@earendil-works/pi-agent-core/package.json b/node_modules/@earendil-works/pi-agent-core/package.json
-index d0f9d5a..d7b294c 100644
+index b80ed79..335eccc 100644
 --- a/node_modules/@earendil-works/pi-agent-core/package.json
 +++ b/node_modules/@earendil-works/pi-agent-core/package.json
 @@ -8,11 +8,13 @@

@@ -3,9 +3,9 @@ import path from 'node:path';
 import fs from 'node:fs';
 import {
   AgentSession,
-  AuthStorage,
   CURRENT_SESSION_VERSION,
   ModelRegistry,
+  ModelRuntime,
   SessionManager,
   SettingsManager,
   createAgentSession,
@@ -16,12 +16,11 @@ import {
 } from '@earendil-works/pi-coding-agent';
 import type {
   Api,
+  AuthEvent,
+  AuthPrompt,
   ImageContent,
   Model,
   Models,
-  OAuthAuthInfo,
-  OAuthPrompt,
-  OAuthProviderId,
 } from '@earendil-works/pi-ai';
 import { builtinModels } from '@earendil-works/pi-ai/providers/all';
 import type {
@@ -50,6 +49,11 @@ import { createGameActionTool } from './tools/game-action.js';
 import { getWorkspaceMod } from './workspace.js';
 import { BRIDGE_PACKAGE_ID, removeBridgeInstall } from './bridge-install.js';
 import { getRegistry } from './registry/index.js';
+import {
+  HOSTED_PROVIDERS,
+  featuredModels,
+  resolveDefaultModel,
+} from './model-selection.js';
 import { createAddCSharpTool } from './tools/add-csharp.js';
 import { createSetModMetadataTool } from './tools/set-mod-metadata.js';
 import { createUpdateSchematicTool } from './tools/update-schematic.js';
@@ -71,7 +75,10 @@ import {
   createGuardedWriteTool,
 } from './tools/path-guarded.js';
 import { withConfirmation } from './security/with-confirmation.js';
-import { SafeStorageAuthBackend } from './security/secure-auth-storage.js';
+import {
+  SafeStorageAuthBackend,
+  SafeStorageCredentialStore,
+} from './security/secure-auth-storage.js';
 import { createRunTestCycleTool } from './tools/run-test-cycle.js';
 import { notifyTestStatusTool } from './tools/notify-test-status.js';
 import { sendToast } from './notifications.js';
@@ -272,8 +279,6 @@ const PROVIDER_LABELS: Record<string, string> = {
   anthropic: 'Claude',
   'openai-codex': 'ChatGPT',
   'github-copilot': 'GitHub Copilot',
-  'google-gemini-cli': 'Gemini',
-  'google-antigravity': 'Antigravity',
   openrouter: 'OpenRouter',
 };
 
@@ -343,94 +348,6 @@ function slugSupportsReasoning(slug: string): boolean {
 function providerLabel(provider: string): string {
   return PROVIDER_LABELS[provider] ?? provider;
 }
-
-/**
- * Per-provider curation: pi-ai knows about ~80 models across our supported
- * OAuth providers (claude-3-haiku from 2024, gpt-4-turbo, etc.) — most aren't
- * what someone picking "an AI to write RimWorld mods" wants. The picker shows
- * only the IDs listed here. Update when new flagships ship.
- *
- * `claude-fable-5` and `claude-opus-4-8` aren't in our pinned pi-ai catalog
- * yet (newest built-in is 4-7), so they're bridged in via BRIDGE_MODELS /
- * seedBridgeModels() below. Drop a bridge once pi-ai ships the built-in entry.
- */
-const FEATURED_MODELS: Record<string, string[]> = {
-  anthropic: [
-    'claude-fable-5',
-    'claude-opus-4-8',
-    'claude-opus-4-7',
-    'claude-sonnet-4-6',
-    'claude-haiku-4-5',
-  ],
-  'openai-codex': [
-    'gpt-5.6-sol',
-    'gpt-5.6-terra',
-    'gpt-5.6-luna',
-    'gpt-5.5',
-    'gpt-5.4',
-  ],
-  'github-copilot': [
-    'claude-opus-4.7',
-    'claude-sonnet-4.6',
-    'gpt-5.5',
-    'gemini-3.1-pro-preview',
-  ],
-  'google-gemini-cli': [
-    'gemini-3.1-pro-preview',
-    'gemini-2.5-pro',
-    'gemini-2.5-flash',
-  ],
-  'google-antigravity': [
-    'gemini-3.1-pro-high',
-    'claude-sonnet-4-6',
-    'claude-opus-4-6-thinking',
-  ],
-};
-
-/**
- * Per-provider default: a Sonnet-tier model — capable enough for real mod
- * work, cheap enough to leave running. Picked when the user hasn't chosen
- * one yet, so we don't strand them on the cheapest or burn through Opus
- * usage by accident. Must be present in FEATURED_MODELS for the same provider.
- */
-const DEFAULT_MODEL: Record<string, string> = {
-  anthropic: 'claude-sonnet-4-6',
-  'openai-codex': 'gpt-5.6-terra',
-  'github-copilot': 'claude-sonnet-4.6',
-  'google-gemini-cli': 'gemini-2.5-pro',
-  'google-antigravity': 'claude-sonnet-4-6',
-  openrouter: 'moonshotai/kimi-k2.6',
-};
-
-/**
- * Rough cost band shown next to each model in the picker. '$' = cheap/fast,
- * '$$' = mid (Sonnet-tier), '$$$' = flagship. These are coarse buckets, not
- * exact pricing — the goal is to help the user avoid accidentally selecting
- * the most expensive option.
- */
-const MODEL_COST_TIER: Record<string, '$' | '$$' | '$$$'> = {
-  // Anthropic
-  'claude-fable-5': '$$$',
-  'claude-opus-4-8': '$$$',
-  'claude-opus-4-7': '$$$',
-  'claude-sonnet-4-6': '$$',
-  'claude-haiku-4-5': '$',
-  'claude-opus-4-6-thinking': '$$$',
-  // OpenAI
-  'gpt-5.6-sol': '$$$',
-  'gpt-5.6-terra': '$$',
-  'gpt-5.6-luna': '$',
-  'gpt-5.5': '$$$',
-  'gpt-5.4': '$$',
-  // GitHub Copilot (uses dotted ids)
-  'claude-opus-4.7': '$$$',
-  'claude-sonnet-4.6': '$$',
-  // Google
-  'gemini-3.1-pro-preview': '$$$',
-  'gemini-3.1-pro-high': '$$$',
-  'gemini-2.5-pro': '$$',
-  'gemini-2.5-flash': '$',
-};
 
 /**
  * Models that pre-0.80 modmixer seeded into the user's models.json because
@@ -548,14 +465,13 @@ export interface OpenRouterConfig {
 
 export interface OAuthLink {
   id: string;
-  /** pi-mono's full provider name (e.g. "Anthropic (Claude Pro/Max)"). */
+  /** The provider's own full name (e.g. "Anthropic (Claude Pro/Max)"). */
   name: string;
   /** Short label we surface in the UI ("Claude", "ChatGPT"). */
   label: string;
   linked: boolean;
-  /** Where pi found credentials for this provider, if any. */
+  /** Where the credential for this provider was found, if any. */
   source?: 'stored' | 'runtime' | 'environment' | 'fallback' | 'models_json_key' | 'models_json_command';
-  usesCallbackServer: boolean;
 }
 
 export type OAuthEvent =
@@ -573,6 +489,13 @@ export type OAuthEvent =
       placeholder?: string;
       allowEmpty?: boolean;
     }
+  /**
+   * A prompt we asked for is no longer needed — pi cancelled it because
+   * something else resolved that login step (the browser callback beating a
+   * manual code paste). The renderer should dismiss the input box; the login
+   * itself is still in flight.
+   */
+  | { type: 'prompt-resolved'; providerId: string }
   | { type: 'login-success'; providerId: string }
   | { type: 'login-error'; providerId: string; message: string }
   | { type: 'login-cancelled'; providerId: string }
@@ -633,8 +556,15 @@ export class AgentHost {
   private readonly cwd: string;
   private readonly agentDir: string;
   private readonly sessionDir: string;
-  private readonly authStorage: AuthStorage;
-  private readonly modelRegistry: ModelRegistry;
+  private readonly credentials: SafeStorageCredentialStore;
+  /**
+   * Set by `primeAfterReady`. pi 0.82 made runtime construction async (it
+   * reads models.json and the persisted model-catalog overlay), and the host
+   * is constructed before `app.ready` — so the runtime is built at prime
+   * time, before the window exists and before any IPC handler can run.
+   */
+  private modelRuntime!: ModelRuntime;
+  private modelRegistry!: ModelRegistry;
   private readonly settingsManager: SettingsManager;
   private readonly allowedToolNames: string[];
 
@@ -739,15 +669,13 @@ export class AgentHost {
     // on macOS, DPAPI on Windows, libsecret on Linux). The backend migrates
     // any pre-existing plaintext `auth.json` to `auth.enc` on first read
     // and deletes the plaintext file once the encrypted copy is in place.
-    this.authStorage = AuthStorage.fromStorage(
+    this.credentials = new SafeStorageCredentialStore(
       new SafeStorageAuthBackend(
         path.join(this.agentDir, 'auth.enc'),
         path.join(this.agentDir, 'auth.json'),
       ),
     );
-    const modelsJsonPath = path.join(this.agentDir, 'models.json');
-    removeStaleBridgeModels(modelsJsonPath);
-    this.modelRegistry = ModelRegistry.create(this.authStorage, modelsJsonPath);
+    removeStaleBridgeModels(path.join(this.agentDir, 'models.json'));
     this.settingsManager = SettingsManager.create(this.cwd, this.agentDir);
     // ModMixer deliberately does not use the harness's app-level auto-retry.
     // A failed turn (e.g. an Anthropic 529 "overloaded") is surfaced in the
@@ -790,42 +718,86 @@ export class AgentHost {
   }
 
   /**
-   * Re-read AuthStorage from disk. Called from main.ts once `app.ready`
-   * fires — the host constructor runs before that, and on Linux/Windows
+   * Build the model runtime and re-read credentials from disk. Called from
+   * main.ts once `app.ready` fires and awaited before the window opens — the
+   * host constructor runs before that, and on Linux/Windows
    * `safeStorage.isEncryptionAvailable()` returns false until ready, so the
    * initial reload comes back empty even when the user has saved creds. A
    * post-ready prime() refresh makes those creds visible to the model
    * picker without forcing the user to re-login.
    */
-  primeAfterReady(): void {
+  async primeAfterReady(): Promise<void> {
     try {
-      this.authStorage.reload();
-      this.modelRegistry.refresh();
-      this.applyOpenRouterRegistration();
-      this.applyLocalProvidersRegistration();
+      this.credentials.reload();
+      // allowModelNetwork:false — construction stays offline so a slow or
+      // unreachable pi.dev can't delay the window. The persisted catalog
+      // overlay (models-store.json) is still read here, so yesterday's
+      // refresh is available immediately; today's happens in the background
+      // via refreshModelCatalog() below.
+      this.modelRuntime = await ModelRuntime.create({
+        credentials: this.credentials,
+        modelsPath: path.join(this.agentDir, 'models.json'),
+        modelsStorePath: path.join(this.agentDir, 'models-store.json'),
+        allowModelNetwork: false,
+      });
+      this.modelRegistry = new ModelRegistry(this.modelRuntime);
+      await this.applyOpenRouterRegistration();
+      await this.applyLocalProvidersRegistration();
     } catch (err) {
       console.error('AgentHost.primeAfterReady failed:', err);
     }
+    void this.refreshModelCatalog();
     // Best-effort catalogue prime: the cached pricing/modality maps are
     // consulted by the registration above. If the cache is empty or stale,
     // refresh in the background and re-register so subsequent turns pick up
     // real rates and accurate image support.
     if (isOpenRouterCatalogStale()) {
-      void fetchOpenRouterCatalog()
-        .then(() => {
-          try {
-            this.applyOpenRouterRegistration();
-          } catch (err) {
-            console.error(
-              'AgentHost: failed to re-register openrouter after catalogue fetch:',
-              err,
-            );
-          }
-        })
-        .catch(() => {
+      void (async () => {
+        try {
+          await fetchOpenRouterCatalog();
+        } catch {
           // Catalogue fetch is best-effort — failures just leave $0 rates and
           // text-only input in place until the next launch.
-        });
+          return;
+        }
+        try {
+          await this.applyOpenRouterRegistration();
+        } catch (err) {
+          console.error(
+            'AgentHost: failed to re-register openrouter after catalogue fetch:',
+            err,
+          );
+        }
+      })();
+    }
+  }
+
+  /**
+   * Pull the current model catalog from pi.dev in the background.
+   *
+   * pi ships a bundled catalog per release and overlays a remote one on top,
+   * so a model that ships after this build of modmixer (Opus 5 landing on an
+   * app pinned to an older pi) still reaches the picker without an update.
+   * pi persists the result to models-store.json, revalidates with an ETag,
+   * throttles itself to one check per four hours, and ignores remote entries
+   * older than the bundled catalog — so calling this on every launch and
+   * after each login is cheap.
+   *
+   * Best-effort by construction: on failure the last-known catalog stays in
+   * place and the next call retries.
+   */
+  private async refreshModelCatalog(): Promise<void> {
+    if (!this.modelRuntime) return;
+    try {
+      const result = await this.modelRuntime.refresh({ allowNetwork: true });
+      for (const [providerId, error] of result.errors) {
+        console.warn(`Model catalog refresh failed for ${providerId}:`, error);
+      }
+      // The picker reads the catalog synchronously; nudge the renderer to
+      // re-list now that new models may exist.
+      this.emitOAuth({ type: 'links-changed' });
+    } catch (err) {
+      console.error('AgentHost.refreshModelCatalog failed:', err);
     }
   }
 
@@ -855,7 +827,7 @@ export class AgentHost {
     return out;
   }
 
-  private applyOpenRouterRegistration(): void {
+  private async applyOpenRouterRegistration(): Promise<void> {
     const openrouterModels = this.getEffectiveOpenRouterModels();
     if (openrouterModels.length === 0) {
       // No models saved → don't touch pi's built-in openrouter list.
@@ -863,10 +835,10 @@ export class AgentHost {
     }
     // Pi's `registerProvider` validates that an apiKey is present whenever
     // models are defined (the value isn't actually consumed at request time
-    // — the real lookup goes through AuthStorage — but it has to be set).
-    // Pull it sync from AuthStorage, falling back to the env var so users
+    // — the real lookup goes through the credential store — but it has to be
+    // set). Pull it from the store, falling back to the env var so users
     // with `OPENROUTER_API_KEY` exported also get their slugs registered.
-    const cred = this.authStorage.get(OPENROUTER_PROVIDER);
+    const cred = await this.credentials.read(OPENROUTER_PROVIDER);
     const apiKey =
       cred?.type === 'api_key' ? cred.key : process.env.OPENROUTER_API_KEY;
     if (!apiKey) {
@@ -990,6 +962,22 @@ export class AgentHost {
   }
 
   /**
+   * Does this provider have credentials we stored ourselves?
+   *
+   * Deliberately narrower than pi's own notion of "configured": pi also
+   * counts a matching env var in the user's shell, which would leak an
+   * unrelated `ANTHROPIC_API_KEY` into the picker as a provider they never
+   * connected. Only 'stored' (auth.enc) and 'runtime' count here.
+   */
+  private isProviderConfigured(provider: string): boolean {
+    const status = this.modelRegistry.getProviderAuthStatus(provider);
+    return (
+      status.configured &&
+      (status.source === 'stored' || status.source === 'runtime')
+    );
+  }
+
+  /**
    * Build a fresh AgentSession bound to the given conversation. The
    * conversation's session file is loaded if it exists; otherwise a new
    * empty session file is created.
@@ -1012,16 +1000,14 @@ export class AgentHost {
     // the first linked provider over "first model registered," so a fresh
     // install lands on a sensible mid-tier model instead of whatever sorts
     // first.
-    for (const provider of Object.keys(FEATURED_MODELS)) {
-      if (!this.authStorage.getAuthStatus(provider).configured) continue;
-      const defaultId = DEFAULT_MODEL[provider];
-      if (!defaultId) continue;
-      const found = this.modelRegistry.find(provider, defaultId);
+    const all = this.modelRegistry.getAll();
+    for (const provider of HOSTED_PROVIDERS) {
+      if (!this.isProviderConfigured(provider)) continue;
+      const found = resolveDefaultModel(provider, all);
       if (found && this.modelRegistry.hasConfiguredAuth(found)) return found;
     }
     const available = this.modelRegistry.getAvailable();
     if (available.length > 0) return available[0];
-    const all = this.modelRegistry.getAll();
     return all[0] ?? null;
   }
 
@@ -1172,8 +1158,10 @@ export class AgentHost {
     const { session } = await createAgentSession({
       cwd: sessionCwd,
       agentDir: this.agentDir,
-      authStorage: this.authStorage,
-      modelRegistry: this.modelRegistry,
+      // pi 0.82 takes the model runtime alone — it owns both the catalog and
+      // credential resolution that authStorage + modelRegistry used to supply
+      // separately.
+      modelRuntime: this.modelRuntime,
       settingsManager: this.settingsManager,
       sessionManager,
       resourceLoader,
@@ -1670,32 +1658,26 @@ export class AgentHost {
 
   /**
    * Models surfaced in the picker. Two filters layered on `getAll()`:
-   * 1. Provider must have *stored* credentials (OAuth or explicit `auth.json`
-   *    API key). pi's `getAvailable()` would also include providers with
+   * 1. Provider must have *stored* credentials (OAuth or an explicit API
+   *    key). pi's `getAvailable()` would also include providers with
    *    matching env vars, but that leaks the user's shell environment and
    *    shows providers they never connected.
-   * 2. Model id must be in `FEATURED_MODELS` for that provider. Pi exposes
-   *    every model it knows about (~80 across our OAuth providers, including
-   *    Claude 3 Opus from 2024); we only want current-generation flagships.
-   *
-   * Within each provider, results follow the order of `FEATURED_MODELS`
-   * (best → fast/cheap), so the dropdown lands on a sensible default.
+   * 2. Within a provider, only the newest model of each family — see
+   *    `featuredModels`. Nothing here is pinned to a model id, so a flagship
+   *    that lands in pi's catalog after this build still shows up.
    */
   listAvailableModels(): ModelOption[] {
     const all = this.modelRegistry.getAll();
     const out: ModelOption[] = [];
-    for (const provider of Object.keys(FEATURED_MODELS)) {
-      if (!this.authStorage.getAuthStatus(provider).configured) continue;
-      for (const id of FEATURED_MODELS[provider]) {
-        const m = all.find((x) => x.provider === provider && x.id === id);
-        if (!m) continue;
+    for (const provider of HOSTED_PROVIDERS) {
+      if (!this.isProviderConfigured(provider)) continue;
+      for (const m of featuredModels(all.filter((x) => x.provider === provider))) {
         out.push({
           key: `${m.provider}/${m.id}`,
           provider: m.provider,
           providerLabel: providerLabel(m.provider),
           modelId: m.id,
           label: m.name,
-          costTier: MODEL_COST_TIER[m.id] ?? '$$',
           vision: m.input.includes('image'),
         });
       }
@@ -1749,7 +1731,8 @@ export class AgentHost {
   getOpenRouterConfig(): OpenRouterConfig {
     return {
       apiKeyConfigured:
-        this.authStorage.getAuthStatus(OPENROUTER_PROVIDER).source === 'stored',
+        this.modelRegistry.getProviderAuthStatus(OPENROUTER_PROVIDER).source ===
+        'stored',
       models: this.getEffectiveOpenRouterModels(),
       pinnedModels: [...PINNED_OR_MODELS],
     };
@@ -1758,14 +1741,18 @@ export class AgentHost {
   /** Pass `null` to clear the stored key. */
   async setOpenRouterApiKey(key: string | null): Promise<OpenRouterConfig> {
     if (key && key.trim().length > 0) {
-      this.authStorage.set(OPENROUTER_PROVIDER, {
+      await this.credentials.modify(OPENROUTER_PROVIDER, async () => ({
         type: 'api_key',
         key: key.trim(),
-      });
+      }));
     } else {
-      this.authStorage.remove(OPENROUTER_PROVIDER);
+      await this.credentials.delete(OPENROUTER_PROVIDER);
     }
-    this.applyOpenRouterRegistration();
+    // pi caches provider auth state in a snapshot refreshed off the
+    // credential store; without this the status we hand back below (and the
+    // picker's own view) would still describe the pre-write world.
+    await this.modelRuntime.refresh({ allowNetwork: false });
+    await this.applyOpenRouterRegistration();
     this.emitOAuth({ type: 'links-changed' });
     await this.refreshActiveModel();
     return this.getOpenRouterConfig();
@@ -1779,7 +1766,7 @@ export class AgentHost {
     const current = loadSettings().openrouterModels;
     if (current.includes(cleaned)) return this.getOpenRouterConfig();
     saveSettings({ openrouterModels: [...current, cleaned] });
-    this.applyOpenRouterRegistration();
+    await this.applyOpenRouterRegistration();
     this.emitOAuth({ type: 'links-changed' });
     return this.getOpenRouterConfig();
   }
@@ -1803,7 +1790,7 @@ export class AgentHost {
    * surface or swallow them.
    */
   async getOpenRouterCredits(): Promise<OpenRouterCredits | null> {
-    const cred = this.authStorage.get(OPENROUTER_PROVIDER);
+    const cred = await this.credentials.read(OPENROUTER_PROVIDER);
     const apiKey =
       cred?.type === 'api_key' ? cred.key : process.env.OPENROUTER_API_KEY;
     if (!apiKey) return null;
@@ -1818,7 +1805,7 @@ export class AgentHost {
     const next = current.filter((s) => s !== slug);
     if (next.length === current.length) return this.getOpenRouterConfig();
     saveSettings({ openrouterModels: next });
-    this.applyOpenRouterRegistration();
+    await this.applyOpenRouterRegistration();
     this.emitOAuth({ type: 'links-changed' });
     await this.refreshActiveModel();
     return this.getOpenRouterConfig();
@@ -1834,14 +1821,16 @@ export class AgentHost {
    * model-less provider config anyway, and a "configured but empty" entry
    * surfaces no picker rows.
    */
-  private applyLocalProvidersRegistration(): void {
+  private async applyLocalProvidersRegistration(): Promise<void> {
     const { localProviders } = loadSettings();
     for (const provider of localProviders) {
-      this.registerOneLocalProvider(provider);
+      await this.registerOneLocalProvider(provider);
     }
   }
 
-  private registerOneLocalProvider(provider: LocalProvider): void {
+  private async registerOneLocalProvider(
+    provider: LocalProvider,
+  ): Promise<void> {
     const name = localProviderName(provider.id);
     if (provider.models.length === 0) {
       // Nothing to register; ensure any previous registration is dropped so a
@@ -1849,7 +1838,7 @@ export class AgentHost {
       this.modelRegistry.unregisterProvider(name);
       return;
     }
-    const cred = this.authStorage.get(name);
+    const cred = await this.credentials.read(name);
     const apiKey =
       cred?.type === 'api_key' && cred.key ? cred.key : LOCAL_PROVIDER_PLACEHOLDER_KEY;
     const zero: OpenRouterCost = {
@@ -1901,12 +1890,13 @@ export class AgentHost {
     const current = loadSettings().localProviders;
     saveSettings({ localProviders: [...current, provider] });
     if (input.apiKey && input.apiKey.trim().length > 0) {
-      this.authStorage.set(localProviderName(provider.id), {
-        type: 'api_key',
-        key: input.apiKey.trim(),
-      });
+      const key = input.apiKey.trim();
+      await this.credentials.modify(
+        localProviderName(provider.id),
+        async () => ({ type: 'api_key', key }),
+      );
     }
-    this.registerOneLocalProvider(provider);
+    await this.registerOneLocalProvider(provider);
     this.emitOAuth({ type: 'links-changed' });
     return this.getLocalProviders();
   }
@@ -1933,12 +1923,16 @@ export class AgentHost {
     if (patch.apiKey !== undefined) {
       const name = localProviderName(id);
       if (patch.apiKey && patch.apiKey.trim().length > 0) {
-        this.authStorage.set(name, { type: 'api_key', key: patch.apiKey.trim() });
+        const key = patch.apiKey.trim();
+        await this.credentials.modify(name, async () => ({
+          type: 'api_key',
+          key,
+        }));
       } else {
-        this.authStorage.remove(name);
+        await this.credentials.delete(name);
       }
     }
-    this.registerOneLocalProvider(merged);
+    await this.registerOneLocalProvider(merged);
     this.emitOAuth({ type: 'links-changed' });
     await this.refreshActiveModel();
     return this.getLocalProviders();
@@ -1950,7 +1944,7 @@ export class AgentHost {
     if (next.length === current.length) return this.getLocalProviders();
     saveSettings({ localProviders: next });
     const name = localProviderName(id);
-    this.authStorage.remove(name);
+    await this.credentials.delete(name);
     this.modelRegistry.unregisterProvider(name);
     this.emitOAuth({ type: 'links-changed' });
     await this.refreshActiveModel();
@@ -1967,7 +1961,7 @@ export class AgentHost {
     const next = [...current];
     next[idx] = { ...next[idx], models: [...next[idx].models, cleaned] };
     saveSettings({ localProviders: next });
-    this.registerOneLocalProvider(next[idx]);
+    await this.registerOneLocalProvider(next[idx]);
     this.emitOAuth({ type: 'links-changed' });
     return this.getLocalProviders();
   }
@@ -1981,7 +1975,7 @@ export class AgentHost {
     const next = [...current];
     next[idx] = { ...next[idx], models: filtered };
     saveSettings({ localProviders: next });
-    this.registerOneLocalProvider(next[idx]);
+    await this.registerOneLocalProvider(next[idx]);
     this.emitOAuth({ type: 'links-changed' });
     await this.refreshActiveModel();
     return this.getLocalProviders();
@@ -2008,19 +2002,31 @@ export class AgentHost {
       .filter((id): id is string => typeof id === 'string' && id.length > 0);
   }
 
-  /** Provider catalog merged with current link status, for the settings UI. */
+  /**
+   * Provider catalog merged with current link status, for the settings UI.
+   *
+   * Scoped to `HOSTED_PROVIDERS` rather than every provider pi can log into:
+   * pi 0.82 added OAuth for OpenRouter (which has its own BYO-key section
+   * here), for subscription providers we've never tested against modmixer,
+   * and for its own hosted gateway. Showing those as one-click sign-ins
+   * would promise support we haven't built.
+   */
   listOAuthLinks(): OAuthLink[] {
-    return this.authStorage.getOAuthProviders().map((p) => {
-      const status = this.authStorage.getAuthStatus(p.id);
-      return {
-        id: p.id,
-        name: p.name,
-        label: providerLabel(p.id),
+    const out: OAuthLink[] = [];
+    for (const id of HOSTED_PROVIDERS) {
+      const provider = this.modelRuntime.getProvider(id);
+      const oauth = provider?.auth.oauth;
+      if (!provider || !oauth) continue;
+      const status = this.modelRegistry.getProviderAuthStatus(id);
+      out.push({
+        id,
+        name: oauth.name,
+        label: providerLabel(id),
         linked: status.configured,
         source: status.source,
-        usesCallbackServer: p.usesCallbackServer ?? false,
-      };
-    });
+      });
+    }
+    return out;
   }
 
   async loginOAuth(providerId: string): Promise<void> {
@@ -2038,21 +2044,64 @@ export class AgentHost {
     this.emitOAuth({ type: 'login-start', providerId });
 
     try {
-      await this.authStorage.login(providerId as OAuthProviderId, {
+      // pi 0.82 collapsed the old per-event callback bag (onAuth, onProgress,
+      // onPrompt, onDeviceCode, onSelect, onManualCodeInput) into one
+      // AuthInteraction: `notify` for anything we just display, `prompt` for
+      // anything that needs an answer back. The behaviors below are the same
+      // ones the callback version implemented.
+      await this.modelRuntime.login(providerId, 'oauth', {
         signal: abort.signal,
-        onAuth: (info: OAuthAuthInfo) => {
-          void shell.openExternal(info.url);
-          this.emitOAuth({
-            type: 'login-progress',
-            providerId,
-            message: 'Opening your browser to sign in…',
-            authInfo: { url: info.url, instructions: info.instructions },
-          });
+        notify: (event: AuthEvent) => {
+          switch (event.type) {
+            case 'auth_url':
+              void shell.openExternal(event.url);
+              this.emitOAuth({
+                type: 'login-progress',
+                providerId,
+                message: 'Opening your browser to sign in…',
+                authInfo: { url: event.url, instructions: event.instructions },
+              });
+              break;
+            // Device-code flows (GitHub Copilot, Codex headless) hand back a
+            // user code + verification URL instead of a callback redirect.
+            // Reuse the authInfo affordance the renderer already renders.
+            case 'device_code':
+              void shell.openExternal(event.verificationUri);
+              this.emitOAuth({
+                type: 'login-progress',
+                providerId,
+                message: `Enter code ${event.userCode} in your browser to sign in.`,
+                authInfo: {
+                  url: event.verificationUri,
+                  instructions: `Your one-time code: ${event.userCode}`,
+                },
+              });
+              break;
+            case 'progress':
+            case 'info':
+              this.emitOAuth({
+                type: 'login-progress',
+                providerId,
+                message: event.message,
+              });
+              break;
+          }
         },
-        onProgress: (message: string) => {
-          this.emitOAuth({ type: 'login-progress', providerId, message });
-        },
-        onPrompt: (prompt: OAuthPrompt) => {
+        prompt: (prompt: AuthPrompt) => {
+          // The only selector pi issues today is Codex's browser-vs-device-code
+          // login method, where the first option is the browser flow — the only
+          // behavior that existed before the callback was added, and the right
+          // one for a desktop app. Answer with the first option rather than
+          // growing a selector UI until a flow actually needs a real choice.
+          if (prompt.type === 'select') {
+            return Promise.resolve(prompt.options[0]?.id ?? '');
+          }
+          if (prompt.type === 'manual_code') {
+            return this.awaitPrompt(providerId, {
+              message: 'Paste the authorization code from your browser:',
+              placeholder: 'Authorization code',
+            });
+          }
           // Modmixer targets individual users, not orgs. pi's GitHub Copilot
           // flow opens with a "GitHub Enterprise URL/domain" prompt; auto-answer
           // it with "" (→ github.com) so it never reaches the UI. It's also the
@@ -2063,36 +2112,12 @@ export class AgentHost {
           }
           return this.awaitPrompt(providerId, prompt);
         },
-        onManualCodeInput: () =>
-          this.awaitPrompt(providerId, {
-            message: 'Paste the authorization code from your browser:',
-            placeholder: 'Authorization code',
-          }),
-        // Device-code flows (GitHub Copilot, Codex headless) hand back a
-        // user code + verification URL instead of a callback redirect. Reuse
-        // the authInfo affordance the renderer already renders for onAuth.
-        onDeviceCode: (info) => {
-          void shell.openExternal(info.verificationUri);
-          this.emitOAuth({
-            type: 'login-progress',
-            providerId,
-            message: `Enter code ${info.userCode} in your browser to sign in.`,
-            authInfo: {
-              url: info.verificationUri,
-              instructions: `Your one-time code: ${info.userCode}`,
-            },
-          });
-        },
-        // The only selector pi issues today is Codex's browser-vs-device-code
-        // login method, where the first option is the browser flow — the only
-        // behavior that existed before the callback was added, and the right
-        // one for a desktop app. Answer with the first option rather than
-        // growing a selector UI until a flow actually needs a real choice.
-        onSelect: (prompt) => Promise.resolve(prompt.options[0]?.id),
       });
       this.emitOAuth({ type: 'login-success', providerId });
       this.emitOAuth({ type: 'links-changed' });
       await this.refreshActiveModel();
+      // A newly linked provider may have a catalog we've never fetched.
+      void this.refreshModelCatalog();
     } catch (err) {
       if (abort.signal.aborted) {
         this.emitOAuth({ type: 'login-cancelled', providerId });
@@ -2135,29 +2160,54 @@ export class AgentHost {
   }
 
   async logoutOAuth(providerId: string): Promise<void> {
-    this.authStorage.logout(providerId);
+    await this.modelRuntime.logout(providerId);
     this.emitOAuth({ type: 'logout', providerId });
     this.emitOAuth({ type: 'links-changed' });
     await this.refreshActiveModel();
   }
 
+  /**
+   * Surface a login prompt in the renderer and wait for the user's answer.
+   *
+   * `prompt.signal` is pi's per-prompt cancellation: a `manual_code` prompt
+   * races the callback server, and pi aborts the prompt when the browser
+   * redirect wins. Honouring it is what dismisses the "paste your code" box
+   * instead of leaving it up over a login that already succeeded.
+   */
   private awaitPrompt(
     providerId: string,
-    prompt: OAuthPrompt,
+    prompt: { message: string; placeholder?: string; signal?: AbortSignal },
   ): Promise<string> {
     return new Promise<string>((resolve, reject) => {
       if (!this.pendingOAuth || this.pendingOAuth.providerId !== providerId) {
         reject(new Error('No active login for this provider.'));
         return;
       }
+      if (prompt.signal?.aborted) {
+        reject(new Error('Prompt cancelled.'));
+        return;
+      }
       this.pendingOAuth.resolvePrompt = resolve;
       this.pendingOAuth.rejectPrompt = reject;
+      prompt.signal?.addEventListener(
+        'abort',
+        () => {
+          if (this.pendingOAuth?.rejectPrompt !== reject) return;
+          this.pendingOAuth.resolvePrompt = null;
+          this.pendingOAuth.rejectPrompt = null;
+          this.emitOAuth({ type: 'prompt-resolved', providerId });
+          reject(new Error('Prompt cancelled.'));
+        },
+        { once: true },
+      );
       this.emitOAuth({
         type: 'prompt-needed',
         providerId,
         message: prompt.message,
         placeholder: prompt.placeholder,
-        allowEmpty: prompt.allowEmpty,
+        // pi 0.82's AuthPrompt has no allow-empty flag; the one prompt we let
+        // through to the UI is a code paste, which is never empty.
+        allowEmpty: false,
       });
     });
   }

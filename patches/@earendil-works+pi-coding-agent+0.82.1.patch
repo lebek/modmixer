@@ -1,5 +1,5 @@
 diff --git a/node_modules/@earendil-works/pi-coding-agent/package.json b/node_modules/@earendil-works/pi-coding-agent/package.json
-index bce2eda..cbe5019 100644
+index 3ba3d1f..af05f05 100644
 --- a/node_modules/@earendil-works/pi-coding-agent/package.json
 +++ b/node_modules/@earendil-works/pi-coding-agent/package.json
 @@ -14,10 +14,12 @@

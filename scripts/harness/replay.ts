@@ -391,8 +391,7 @@ async function runOneTurn(
   const { session } = (await createAgentSession({
     cwd,
     agentDir,
-    authStorage: (host as any).authStorage,
-    modelRegistry: (host as any).modelRegistry,
+    modelRuntime: (host as any).modelRuntime,
     settingsManager: (host as any).settingsManager,
     sessionManager,
     resourceLoader,
@@ -464,7 +463,9 @@ async function main(): Promise<void> {
   await app.whenReady();
   // Headless: never open a window.
   const host = new AgentHost(() => null);
-  host.primeAfterReady();
+  // Awaited: prime() builds the pi model runtime (async since pi 0.82), and
+  // everything below reads the catalog it produces.
+  await host.primeAfterReady();
 
   const reg = (host as any).modelRegistry;
   const model =
@@ -541,8 +542,7 @@ async function main(): Promise<void> {
       const { session } = (await createAgentSession({
         cwd,
         agentDir,
-        authStorage: (host as any).authStorage,
-        modelRegistry: (host as any).modelRegistry,
+        modelRuntime: (host as any).modelRuntime,
         settingsManager: (host as any).settingsManager,
         sessionManager,
         resourceLoader,

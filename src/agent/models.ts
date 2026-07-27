@@ -8,12 +8,6 @@ export interface ModelOption {
   modelId: string;
   /** Short label for the dropdown row ("Sonnet 4.5"). */
   label: string;
-  /**
-   * Rough cost band: '$' = cheap/fast, '$$' = mid, '$$$' = flagship. Omitted
-   * for user-supplied entries (e.g. OpenRouter slugs) where we don't curate
-   * pricing.
-   */
-  costTier?: '$' | '$$' | '$$$';
   /** Surfaced as a "★ Recommended —" prefix in the picker; sorted first. */
   recommended?: boolean;
   /**

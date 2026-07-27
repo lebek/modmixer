@@ -416,14 +416,19 @@ const createWindow = () => {
   }
 };
 
-app.on('ready', () => {
+app.on('ready', async () => {
   installAssetProtocolHandler();
   initTelemetry();
   track({ name: 'app_started' });
   // safeStorage is only guaranteed available after `ready` on Linux/Windows.
   // The AgentHost constructor ran earlier with an empty cache; refresh it now
   // so previously-stored OAuth creds become visible to the model picker.
-  host.primeAfterReady();
+  //
+  // Awaited before the window opens: prime() is also where the pi model
+  // runtime is built (async since pi 0.82), and every model/auth IPC handler
+  // the renderer can call needs it in place. It stays offline, so this does
+  // not wait on the network.
+  await host.primeAfterReady();
   createWindow();
   // Unified game-tagged setup progress: mirror RimWorld's index progress onto
   // the game-setup channel, and pipe that channel (both games) to the renderer.

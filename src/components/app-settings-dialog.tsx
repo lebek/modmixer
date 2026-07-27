@@ -836,6 +836,9 @@ function ProvidersSection() {
             allowEmpty: event.allowEmpty,
           });
           break;
+        case 'prompt-resolved':
+          setPrompt(null);
+          break;
         case 'login-success':
           setBusyId(null);
           setProgress(null);
