@@ -20,6 +20,22 @@ import { initSentry } from './agent/sentry.js';
 // non-trivial (pi-mono touches the network).
 initSentry();
 
+// pi's Anthropic OAuth spins up a loopback callback server to catch the
+// post-approval redirect (http://localhost:53692/callback?code=…). It binds
+// that server to 127.0.0.1 by default, but Windows resolves `localhost` to
+// IPv6 ::1 first, so the browser's redirect hits ::1, finds nothing, and the
+// code is never captured — leaving the user stuck at the manual paste box.
+// Binding dual-stack (`::` accepts both ::1 and IPv4-mapped 127.0.0.1) makes
+// auto-capture work regardless of which family the browser picks. Must be set
+// before pi's anthropic OAuth flow module evaluates (it reads this into a
+// module-level const via getProviderEnvValue on first `loadAnthropicOAuth()`),
+// which only happens at/after app-ready — so setting it here is early enough.
+// The window is short and the callback validates PKCE `state`, so the brief
+// all-interfaces bind is not a meaningful exposure.
+if (!process.env.PI_OAUTH_CALLBACK_HOST) {
+  process.env.PI_OAUTH_CALLBACK_HOST = '::';
+}
+
 import { AgentHost } from './agent/agent-host.js';
 import {
   hasCurrentConsent,
