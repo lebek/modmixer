@@ -411,15 +411,20 @@ async function syncChatsIntoState(folder: string): Promise<void> {
 async function stageAllChanges(folder: string): Promise<void> {
   const args = repoArgs(folder);
   const matrix = await gitStatusMatrix(args);
+  // Adds are batched into one call: each gitAdd invocation rewrites the
+  // entire .git/index, so per-file adds cost O(files) index rewrites per
+  // turn. Removals stay per-file (rare, and remove takes no array).
+  const toAdd: string[] = [];
   for (const [filepath, , workdir, stage] of matrix) {
     if (workdir === 0) {
       if (stage !== 0) {
         await gitRemove({ ...args, filepath });
       }
     } else {
-      await gitAdd({ ...args, filepath });
+      toAdd.push(filepath);
     }
   }
+  if (toAdd.length > 0) await gitAdd({ ...args, filepath: toAdd });
 }
 
 // =========================================================================
@@ -730,12 +735,22 @@ export async function cleanupModHistory(
     await ensureRepo(folder);
     const idx = await readIndex(folder);
     migrateCapMarkers(idx, Date.now());
-    const { kept } = selectSavesToKeep(idx.saves, {
+    const { kept, droppedCount } = selectSavesToKeep(idx.saves, {
       keepAutos: KEEP_AUTOSAVES,
       includePreCap: true,
     });
     idx.saves = kept;
     await writeIndex(folder, idx);
+    // Nothing trimmed this run and no unreachable garbage pending (from
+    // capped rows, deleted saves, or abandoned restore branches) → a repo
+    // rewrite would spend a lot of I/O to keep 100% of the bytes. Skip it;
+    // just drop the derived worktree copy.
+    if (droppedCount === 0 && (idx.prunedSinceCompact ?? 0) === 0) {
+      const dir = modSnapshotDir(folder);
+      const before = await dirSizeBytes(dir);
+      await pruneStateWorktree(folder);
+      return { freedBytes: Math.max(0, before - (await dirSizeBytes(dir))) };
+    }
     const freedBytes = await compactLocked(folder);
     return { freedBytes };
   });
@@ -820,6 +835,10 @@ async function pruneUnreachableSaves(
     }
   }
   if (kept.length === idx.saves.length) return;
+  // The abandoned branch's objects are now unreachable garbage — count the
+  // dropped rows so cleanup/auto-compaction knows a rewrite is worthwhile.
+  idx.prunedSinceCompact =
+    (idx.prunedSinceCompact ?? 0) + (idx.saves.length - kept.length);
   idx.saves = kept;
   await writeIndex(folder, idx);
   events.emit('changed', { folder, saves: idx.saves });
@@ -854,11 +873,12 @@ export async function deleteSave(folder: string, sha: string): Promise<void> {
     const before = idx.saves.length;
     idx.saves = idx.saves.filter((s) => s.sha !== sha);
     if (idx.saves.length === before) return;
+    // Git objects stay in the bare repo until the next compaction (auto-
+    // triggered, or the Storage cleanup) rewrites it — count the orphaned
+    // row so those paths know there's something to reclaim.
+    idx.prunedSinceCompact = (idx.prunedSinceCompact ?? 0) + 1;
     await writeIndex(folder, idx);
     events.emit('changed', { folder, saves: idx.saves });
-    // Git objects stay in the bare repo until the next compaction
-    // (auto-triggered by the forward cap, or the Storage cleanup) rewrites
-    // it. Cheap; not worth compacting eagerly for one row.
   });
 }
 
@@ -888,6 +908,13 @@ export interface SnapshotUsageRow {
   manualCount: number;
   /** Rows the Storage cleanup would drop (autosaves beyond the cap). */
   trimmableCount: number;
+  /**
+   * True when cleanup has something to reclaim: trimmable rows, or
+   * unreachable objects already orphaned by deletes/restores/the cap.
+   * False → cleanup would rewrite the repo to free ~nothing; the UI leaves
+   * such rows unchecked by default.
+   */
+  reclaimPending: boolean;
 }
 
 /** Usage row joined with workspace identity (done in the route layer). */
@@ -947,6 +974,7 @@ export async function snapshotUsage(): Promise<{
       saveCount: idx.saves.length,
       manualCount: idx.saves.filter((s) => s.kind === 'manual').length,
       trimmableCount: droppedCount,
+      reclaimPending: droppedCount > 0 || (idx.prunedSinceCompact ?? 0) > 0,
     });
   }
   rows.sort((a, b) => b.bytes - a.bytes);

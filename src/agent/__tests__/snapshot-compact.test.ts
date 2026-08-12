@@ -220,6 +220,7 @@ describe('compactSnapshotDir', () => {
 
       const objectsBefore = looseObjectCount(gitdir);
       const sizeBefore = await dirSizeBytes(dir);
+      const origHead = await gitReadCommit({ fs, gitdir, oid: c5 });
       const result = await compactSnapshotDir(dir);
       assert.ok(result, 'compaction should run against a v2 manifest');
 
@@ -249,8 +250,11 @@ describe('compactSnapshotDir', () => {
       assert.equal(head, idx.saves[0].sha);
       const headCommit = await gitReadCommit({ fs, gitdir, oid: head });
       assert.deepEqual(headCommit.commit.parent, [idx.saves[1].sha]);
-      // Original save timestamp preserved on the rewritten commit.
-      assert.equal(headCommit.commit.author.timestamp, Math.floor(ts / 1000));
+      // Object-level rebuild: message, author, and tree carry over
+      // verbatim from the original commit — only the parent is rewritten.
+      assert.equal(headCommit.commit.message, origHead.commit.message);
+      assert.deepEqual(headCommit.commit.author, origHead.commit.author);
+      assert.equal(headCommit.commit.tree, origHead.commit.tree);
 
       // Content round-trip: the newest save restores byte-identically,
       // including the file c3 deleted staying deleted.

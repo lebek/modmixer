@@ -2,15 +2,13 @@ import path from 'node:path';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import {
-  add as gitAdd,
-  commit as gitCommit,
   init as gitInit,
-  readBlob as gitReadBlob,
-  remove as gitRemove,
-  statusMatrix as gitStatusMatrix,
-  walk as gitWalk,
-  TREE,
-  type WalkerEntry,
+  readCommit as gitReadCommit,
+  readObject as gitReadObject,
+  readTree as gitReadTree,
+  writeCommit as gitWriteCommit,
+  writeObject as gitWriteObject,
+  writeRef as gitWriteRef,
 } from 'isomorphic-git';
 import type { SaveRecord } from './snapshots.js';
 
@@ -28,8 +26,6 @@ import type { SaveRecord } from './snapshots.js';
  * suite can exercise it directly against scratch directories. snapshots.ts
  * owns folder→directory resolution, locking, and event emission.
  */
-
-const AUTHOR = { name: 'Modmixer', email: 'modmixer@local' };
 
 /** Old repo parked here during the swap; its presence marks an in-flight swap. */
 const OLD_REPO_NAME = 'repo.old.git';
@@ -172,49 +168,62 @@ async function readIndexFile(dir: string): Promise<SnapshotIndexFile | null> {
 }
 
 /**
- * Write a save's tree into `work/` by reading blobs straight out of the
- * repo's object store. Deliberately NOT a checkout: isomorphic-git's
- * checkout rewrites the gitdir's HEAD and index, and this repo must stay
- * byte-identical in case the compaction is rolled back.
+ * Copy one object from the old repo's store to the new one. Objects are
+ * content-addressed, so the loose-object file can be copied byte-for-byte
+ * — no inflate/re-hash/deflate. The API-level fallback (for objects that
+ * somehow live in a packfile — modmixer never writes packs) re-hashes
+ * through readObject/writeObject, which lands on the same oid.
  */
-async function materializeTree(
-  gitdir: string,
-  sha: string,
-  work: string,
+async function copyObject(
+  oldRepo: string,
+  newRepo: string,
+  oid: string,
+  seen: Set<string>,
 ): Promise<void> {
-  await gitWalk({
+  if (seen.has(oid)) return;
+  seen.add(oid);
+  const rel = path.join('objects', oid.slice(0, 2), oid.slice(2));
+  const src = path.join(oldRepo, rel);
+  const dest = path.join(newRepo, rel);
+  if (fs.existsSync(src)) {
+    await fsp.mkdir(path.dirname(dest), { recursive: true });
+    if (!fs.existsSync(dest)) await fsp.copyFile(src, dest);
+    return;
+  }
+  const { object, type } = await gitReadObject({
     fs,
-    gitdir,
-    trees: [TREE({ ref: sha })],
-    map: async (filepath, entries): Promise<undefined> => {
-      if (filepath === '.') return;
-      const [entry] = (entries ?? []) as (WalkerEntry | null)[];
-      if (!entry) return;
-      const dest = path.join(work, filepath);
-      if ((await entry.type()) === 'tree') {
-        await fsp.mkdir(dest, { recursive: true });
-        return;
-      }
-      const oid = await entry.oid();
-      const { blob } = await gitReadBlob({ fs, gitdir, oid });
-      await fsp.mkdir(path.dirname(dest), { recursive: true });
-      await fsp.writeFile(dest, Buffer.from(blob));
-      if ((await entry.mode()) === 0o100755) {
-        await fsp.chmod(dest, 0o755);
-      }
-    },
+    gitdir: oldRepo,
+    oid,
+    format: 'content',
+  });
+  await gitWriteObject({
+    fs,
+    gitdir: newRepo,
+    // format:'content' always yields a real object type, but readObject's
+    // union also carries its wire formats — narrow it for writeObject.
+    type: type as 'blob' | 'commit' | 'tree' | 'tag',
+    object: object as Uint8Array,
+    format: 'content',
   });
 }
 
-async function stageAll(work: string, gitdir: string): Promise<void> {
-  const args = { fs, dir: work, gitdir };
-  const matrix = await gitStatusMatrix(args);
-  for (const [filepath, , workdir, stage] of matrix) {
-    if (workdir === 0) {
-      if (stage !== 0) await gitRemove({ ...args, filepath });
-    } else {
-      await gitAdd({ ...args, filepath });
+/** Copy a tree and everything reachable from it (subtrees + blobs). */
+async function copyTreeObjects(
+  oldRepo: string,
+  newRepo: string,
+  treeOid: string,
+  seen: Set<string>,
+): Promise<void> {
+  if (seen.has(treeOid)) return;
+  await copyObject(oldRepo, newRepo, treeOid, seen);
+  const { tree } = await gitReadTree({ fs, gitdir: oldRepo, oid: treeOid });
+  for (const entry of tree) {
+    if (entry.type === 'tree') {
+      await copyTreeObjects(oldRepo, newRepo, entry.oid, seen);
+    } else if (entry.type === 'blob') {
+      await copyObject(oldRepo, newRepo, entry.oid, seen);
     }
+    // 'commit' entries are submodule gitlinks — no object to copy.
   }
 }
 
@@ -224,9 +233,13 @@ async function stageAll(work: string, gitdir: string): Promise<void> {
  * fully built under compact.tmp/ before an atomic-rename swap, and
  * recoverInterruptedCompaction can finish or undo a swap that died halfway.
  *
- * Kept saves are re-committed oldest→newest into a fresh linear history
- * (original commit timestamps preserved), and index.json is rewritten with
- * the remapped shas. If the pre-compaction HEAD's save row was deleted from
+ * Kept saves are rebuilt oldest→newest into a fresh linear history at the
+ * object level: trees and blobs are content-addressed, so they're copied
+ * into the new store byte-for-byte (no worktree, no re-hashing — this is
+ * what keeps compaction fast on slow filesystems), and only the commit
+ * objects are rewritten to splice the parent chain. Messages, authors, and
+ * timestamps carry over verbatim; index.json is rewritten with the
+ * remapped shas. If the pre-compaction HEAD's save row was deleted from
  * the manifest, the new HEAD becomes the newest kept save — the workspace
  * is canonical, so the next auto-save simply diffs against that.
  *
@@ -260,36 +273,42 @@ export async function compactSnapshotDir(
 
   const tmp = path.join(dir, TMP_NAME);
   const tmpRepo = path.join(tmp, 'repo.git');
-  const work = path.join(tmp, 'work');
   await fsp.rm(tmp, { recursive: true, force: true });
-  await fsp.mkdir(work, { recursive: true });
-  await gitInit({ fs, dir: work, gitdir: tmpRepo, defaultBranch: 'main' });
+  // init wants a worktree dir; tmp/ itself serves — nothing is ever
+  // checked out into it. (Not a bare init: the swapped-in repo must carry
+  // the same non-bare config the original had, since restores run
+  // checkout against it.)
+  await fsp.mkdir(tmp, { recursive: true });
+  await gitInit({ fs, dir: tmp, gitdir: tmpRepo, defaultBranch: 'main' });
 
-  // Manifest is newest-first; commit oldest-first so parents chain forward.
+  // Manifest is newest-first; rebuild oldest-first so parents chain
+  // forward. `seen` spans saves, so shared objects copy exactly once.
   const ordered = [...idx.saves].reverse();
   const shaMap = new Map<string, string>();
+  const seen = new Set<string>();
+  let parent: string | null = null;
   for (const rec of ordered) {
-    await fsp.rm(work, { recursive: true, force: true });
-    await fsp.mkdir(work, { recursive: true });
-    await materializeTree(repo, rec.sha, work);
-    await stageAll(work, tmpRepo);
-    const signature = {
-      ...AUTHOR,
-      timestamp: Math.floor(rec.timestamp / 1000),
-      timezoneOffset: 0,
-    };
-    const newSha = await gitCommit({
+    const { commit } = await gitReadCommit({ fs, gitdir: repo, oid: rec.sha });
+    await copyTreeObjects(repo, tmpRepo, commit.tree, seen);
+    // Drop any signature: it covered the original parent pointer, which is
+    // being rewritten. (Modmixer never signs; belt-and-braces.)
+    const unsigned = { ...commit };
+    delete unsigned.gpgsig;
+    const newSha = await gitWriteCommit({
       fs,
-      dir: work,
       gitdir: tmpRepo,
-      message:
-        rec.label?.trim() ||
-        (rec.kind === 'manual' ? 'manual save' : 'auto save'),
-      author: signature,
-      committer: signature,
+      commit: { ...unsigned, parent: parent ? [parent] : [] },
     });
     shaMap.set(rec.sha, newSha);
+    parent = newSha;
   }
+  await gitWriteRef({
+    fs,
+    gitdir: tmpRepo,
+    ref: 'refs/heads/main',
+    value: parent as string,
+    force: true,
+  });
 
   const newIdx: SnapshotIndexFile = {
     ...idx,
@@ -304,10 +323,6 @@ export async function compactSnapshotDir(
     JSON.stringify(newIdx, null, 2),
     'utf8',
   );
-  // The staging worktree is dead weight from here on; drop it before the
-  // swap so a roll-forward recovery never resurrects it.
-  await fsp.rm(work, { recursive: true, force: true });
-
   // The swap. See recoverInterruptedCompaction for the crash matrix.
   const oldRepo = path.join(dir, OLD_REPO_NAME);
   await fsp.rename(repo, oldRepo);

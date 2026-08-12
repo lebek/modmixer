@@ -27,7 +27,16 @@ export function StorageSection() {
   const refresh = async () => {
     const next = await window.modmixer.getSnapshotUsage();
     setReport(next);
-    setSelected(new Set(next.rows.map((row) => row.folder)));
+    // Pre-select only rows where cleanup would actually free something —
+    // a mod already inside the cap gets a pointless (and slow) repo
+    // rewrite, so it stays listed but unchecked.
+    setSelected(
+      new Set(
+        next.rows
+          .filter((row) => row.reclaimPending || row.orphaned)
+          .map((row) => row.folder),
+      ),
+    );
   };
 
   useEffect(() => {
@@ -164,7 +173,9 @@ export function StorageSection() {
                       : `${row.saveCount} save${row.saveCount === 1 ? '' : 's'}` +
                         (row.trimmableCount > 0
                           ? ` · ${row.trimmableCount} trimmable`
-                          : '')}
+                          : row.reclaimPending
+                            ? ' · reclaimable space'
+                            : ' · nothing to trim')}
                   </div>
                 </div>
                 {p && (
