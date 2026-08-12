@@ -377,6 +377,16 @@ const api = {
   onSnapshotsChanged: (
     handler: (event: import('./agent/snapshots').SnapshotsChangedEvent) => void,
   ) => on('modmixer:snapshots:changed', handler),
+  getSnapshotUsage: () => invoke('modmixer:snapshots:usage'),
+  cleanupSnapshots: (folders: string[]) =>
+    invoke('modmixer:snapshots:cleanup', folders),
+  onSnapshotCleanupProgress: (
+    handler: (
+      event: import('./agent/snapshots').SnapshotCleanupProgressEvent,
+    ) => void,
+  ) => on('modmixer:snapshots:cleanup-progress', handler),
+  dismissStorageBanner: (totalBytes: number) =>
+    invoke('modmixer:settings:dismiss-storage-banner', totalBytes),
 
   // Sessions — snapshot-restore for test mode and fix mode.
   getActiveSession: () => invoke('modmixer:session:get-active'),

@@ -188,6 +188,13 @@ export interface Settings {
    */
   autoLaunch: boolean;
   /**
+   * Snapshot-storage banner snooze: total snapshot bytes at the moment the
+   * user dismissed the "history is using N GB" banner. 0 = never dismissed.
+   * The banner re-appears only once usage has grown meaningfully past this
+   * (see App's STORAGE_BANNER constants), so a dismissal isn't a nag loop.
+   */
+  storageBannerDismissedAtBytes: number;
+  /**
    * Advanced/dangerous: when true, the confirmation gate auto-approves every
    * sensitive agent action (file edits, deletes, shell commands, game/install
    * changes) with no prompt. Off by default. Persists across restarts — the
@@ -226,6 +233,7 @@ function computeDefaults(): Settings {
     useCommunityLore: true,
     loreLastPushedAt: null,
     autoLaunch: false,
+    storageBannerDismissedAtBytes: 0,
     dangerouslySkipPermissions: false,
   };
 }
@@ -344,6 +352,14 @@ function normalize(raw: unknown, defaults: Settings): Settings {
   const dangerouslySkipPermissions = readBool(obj.dangerouslySkipPermissions);
   if (dangerouslySkipPermissions !== undefined) {
     next.dangerouslySkipPermissions = dangerouslySkipPermissions;
+  }
+
+  if (
+    typeof obj.storageBannerDismissedAtBytes === 'number' &&
+    Number.isFinite(obj.storageBannerDismissedAtBytes) &&
+    obj.storageBannerDismissedAtBytes >= 0
+  ) {
+    next.storageBannerDismissedAtBytes = obj.storageBannerDismissedAtBytes;
   }
 
   const model = readObjectShape<ModelSelection>(obj.model, {

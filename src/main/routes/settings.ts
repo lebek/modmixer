@@ -82,6 +82,14 @@ export function registerSettingsRoutes(ctx: RouteContext): void {
   );
 
   ipc.handle(
+    'modmixer:settings:dismiss-storage-banner',
+    // Records the snapshot usage at dismissal time; the banner only comes
+    // back after usage has grown meaningfully past this watermark.
+    (_evt, totalBytes: number) =>
+      saveSettings({ storageBannerDismissedAtBytes: Math.max(0, totalBytes) }),
+  );
+
+  ipc.handle(
     'modmixer:settings:set-auto-launch',
     // New-chats-only: takes effect for chats created after this point, since
     // the launch mode is baked into the system prompt at conversation

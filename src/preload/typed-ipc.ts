@@ -56,7 +56,13 @@ import type {
   ModrinthPublishResult,
   ModrinthPublishProgressEvent,
 } from '../agent/minecraft/modrinth';
-import type { SaveRecord, SnapshotsChangedEvent } from '../agent/snapshots';
+import type {
+  SaveRecord,
+  SnapshotCleanupProgressEvent,
+  SnapshotCleanupSummary,
+  SnapshotUsageReport,
+  SnapshotsChangedEvent,
+} from '../agent/snapshots';
 import type { ConfirmationRequest } from '../agent/security/confirmation-gate';
 import type { IndexSnapshot } from '../agent/index/main-bridge';
 import type { UpdaterState } from '../agent/updater';
@@ -178,6 +184,7 @@ export interface Channels {
   'modmixer:settings:set-theme': (theme: ThemePreference) => Settings;
   'modmixer:settings:set-thinking-level': (level: ThinkingLevel) => Settings;
   'modmixer:settings:set-multi-chat': (enabled: boolean) => Settings;
+  'modmixer:settings:dismiss-storage-banner': (totalBytes: number) => Settings;
   // Per-game setup (toolchain + code index) for Settings → Games. Dispatches to
   // getAdapter(game).setup; one uniform surface for every game.
   'modmixer:game-setup:rebuild': (
@@ -424,6 +431,8 @@ export interface Channels {
     mods: WorkspaceMod[];
     hydrated: HydratedConversation | null;
   };
+  'modmixer:snapshots:usage': () => SnapshotUsageReport;
+  'modmixer:snapshots:cleanup': (folders: string[]) => SnapshotCleanupSummary;
 
   // Sessions
   'modmixer:session:get-active': () => ActiveSession | null;
@@ -461,6 +470,7 @@ export interface Events {
   'modmixer:workshop:progress': PublishProgressEvent;
   'modmixer:modrinth:progress': ModrinthPublishProgressEvent & { folder: string };
   'modmixer:snapshots:changed': SnapshotsChangedEvent;
+  'modmixer:snapshots:cleanup-progress': SnapshotCleanupProgressEvent;
   'modmixer:oauth:event': OAuthEvent;
   'modmixer:confirm:request': ConfirmationRequest;
   'modmixer:index:progress': IndexProgressEvent;

@@ -23,8 +23,37 @@ import {
   type Conversation,
   type ModConversationsSlice,
 } from './conversations.js';
+import {
+  compactSnapshotDir,
+  dirSizeBytes,
+  migrateCapMarkers,
+  recoverInterruptedCompaction,
+  selectSavesToKeep,
+  type SnapshotIndexFile,
+} from './snapshot-compact.js';
 
 export type SaveKind = 'auto' | 'manual';
+
+/**
+ * Retention: how many un-labeled autosaves a mod keeps. Manual and labeled
+ * saves are never auto-pruned, and neither are saves that predate the cap
+ * (preCap) — those only go through the user-consented Storage cleanup.
+ */
+export const KEEP_AUTOSAVES = 15;
+/**
+ * Auto-compaction trigger: once the forward cap has dropped this many rows
+ * since the last compaction, the repo is rewritten in the background to
+ * actually free the bytes (dropping a manifest row alone frees nothing —
+ * isomorphic-git has no gc).
+ */
+const AUTO_COMPACT_MIN_PRUNED = 20;
+/**
+ * Skip auto-compaction for mods still carrying a large grandfathered
+ * backlog — rewriting hundreds of kept saves to reclaim a handful of capped
+ * ones isn't worth the churn. Those mods get compacted when the user runs
+ * the Storage cleanup (which also trims the backlog first).
+ */
+const AUTO_COMPACT_MAX_SAVES = 60;
 
 /**
  * One save in a mod's history. Pinned by sha — every save commits BOTH the
@@ -59,12 +88,15 @@ export interface SaveRecord {
    * saves where no new commit was made.
    */
   changes?: ChangeStats;
+  /**
+   * Save predates the autosave cap (stamped by migrateCapMarkers on the
+   * first write after updating). Grandfathered: exempt from the forward
+   * cap, only prunable via the explicit Storage cleanup.
+   */
+  preCap?: boolean;
 }
 
-interface IndexFile {
-  version: 2;
-  saves: SaveRecord[];
-}
+type IndexFile = SnapshotIndexFile;
 
 /**
  * Bumped from 1 → 2 when SaveRecord lost conversationId/entryId and the
@@ -151,7 +183,42 @@ const EXCLUDE_BASENAMES = new Set<string>([
   // Live-session build products (hot assemblies + one-shot scratch builds).
   // Versioned per-iteration DLLs, useless to roll back and big.
   '.live',
+  // Gradle/IDE cruft in Minecraft mods. The MDK's shipped .gitignore kept
+  // these out of the repo, but they were still copied into state/ every
+  // turn — build/ + run/ alone were ~95% of a Minecraft mod's snapshot dir.
+  '.gradle',
+  'build',
+  'run',
+  '.idea',
+  'out',
 ]);
+
+// =========================================================================
+// Per-mod serialization
+// =========================================================================
+
+/**
+ * Commits, restores, manifest edits, and compaction for one mod must never
+ * interleave — compaction swaps repo.git out from under the others. Chained
+ * promises per folder; errors don't poison the queue.
+ */
+const folderLocks = new Map<string, Promise<unknown>>();
+
+async function withFolderLock<T>(
+  folder: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const prev = folderLocks.get(folder) ?? Promise.resolve();
+  const next = prev.catch(() => undefined).then(fn);
+  const gate = next.catch(() => undefined);
+  folderLocks.set(folder, gate);
+  try {
+    return await next;
+  } finally {
+    // Only clear if no later op chained on after us.
+    if (folderLocks.get(folder) === gate) folderLocks.delete(folder);
+  }
+}
 
 // =========================================================================
 // Git (pure-JS via isomorphic-git)
@@ -222,17 +289,24 @@ async function isAncestor(
  * Lazy-init the repo + state/ worktree. The repo lives at repo.git/ and
  * the worktree at state/ — same split as the original `git --git-dir / --work-tree`
  * setup, just expressed via isomorphic-git's `dir` + `gitdir` args on every
- * call. If a v1-shaped snapshots dir (no state/ subdir) is found, the whole
- * thing is wiped — v1 saves can't be read by this version and only existed
- * for a few commits before this rewrite.
+ * call.
+ *
+ * A missing state/ used to be read as "v1 layout → wipe everything", which
+ * made deleting the (fully derived) state/ dir silently destroy a mod's
+ * history. v1 is now detected by its manifest instead: a v2 index.json next
+ * to the repo means the layout is current and state/ is simply recreated.
+ * Only a repo with no v2 manifest gets the legacy wipe.
  */
 async function ensureRepo(folder: string): Promise<void> {
   const dir = modSnapshotDir(folder);
   const repo = bareRepoPath(folder);
   const state = statePath(folder);
+  // Finish or undo any compaction swap that died mid-flight before anything
+  // reads repo.git.
+  await recoverInterruptedCompaction(dir);
   const repoExists = fs.existsSync(repo);
   const stateExists = fs.existsSync(state);
-  if (repoExists && !stateExists) {
+  if (repoExists && !stateExists && !(await indexFileIsV2(folder))) {
     // v1 layout — wipe and re-init on the new schema.
     await fsp.rm(dir, { recursive: true, force: true });
   }
@@ -240,8 +314,20 @@ async function ensureRepo(folder: string): Promise<void> {
     await fsp.mkdir(dir, { recursive: true });
     await fsp.mkdir(state, { recursive: true });
     await gitInit({ fs, dir: state, gitdir: repo, defaultBranch: 'main' });
-  } else if (!stateExists) {
+  } else if (!fs.existsSync(state)) {
     await fsp.mkdir(state, { recursive: true });
+  }
+}
+
+/** Raw v2-manifest sniff — readIndex() can't be used here because it maps
+ * every failure to an empty v2 shell, which is exactly the wrong answer for
+ * layout detection. */
+async function indexFileIsV2(folder: string): Promise<boolean> {
+  try {
+    const raw = await fsp.readFile(indexPath(folder), 'utf8');
+    return (JSON.parse(raw) as { version?: unknown }).version === FILE_VERSION;
+  } catch {
+    return false;
   }
 }
 
@@ -501,65 +587,158 @@ export async function commitTurn(
   folder: string,
   opts: CommitOpts = {},
 ): Promise<SaveRecord | null> {
+  return withFolderLock(folder, () => commitTurnLocked(folder, opts));
+}
+
+async function commitTurnLocked(
+  folder: string,
+  opts: CommitOpts,
+): Promise<SaveRecord | null> {
   if (!fs.existsSync(modWorkspacePath(folder))) return null;
   await ensureRepo(folder);
-  await syncModIntoState(folder);
-  await syncChatsIntoState(folder);
-  await stageAllChanges(folder);
+  try {
+    await syncModIntoState(folder);
+    await syncChatsIntoState(folder);
+    await stageAllChanges(folder);
 
-  const headBefore = await currentHeadSha(folder);
-  const clean = headBefore !== null && (await workingTreeIsClean(folder));
+    const headBefore = await currentHeadSha(folder);
+    const clean = headBefore !== null && (await workingTreeIsClean(folder));
 
-  if (clean && !opts.force) {
-    if (opts.kind !== 'manual') return null;
-    const idx = await readIndex(folder);
-    const existing = idx.saves.find((s) => s.sha === headBefore);
-    if (existing) {
-      existing.label = opts.label?.trim() || null;
-      existing.kind = 'manual';
-      existing.timestamp = Date.now();
+    if (clean && !opts.force) {
+      if (opts.kind !== 'manual') return null;
+      const idx = await readIndex(folder);
+      migrateCapMarkers(idx, Date.now());
+      const existing = idx.saves.find((s) => s.sha === headBefore);
+      if (existing) {
+        existing.label = opts.label?.trim() || null;
+        existing.kind = 'manual';
+        existing.timestamp = Date.now();
+        await writeIndex(folder, idx);
+        events.emit('changed', { folder, saves: idx.saves });
+        return existing;
+      }
+      const record: SaveRecord = {
+        sha: headBefore,
+        timestamp: Date.now(),
+        label: opts.label?.trim() || null,
+        kind: 'manual',
+      };
+      idx.saves.unshift(record);
       await writeIndex(folder, idx);
       events.emit('changed', { folder, saves: idx.saves });
-      return existing;
+      return record;
     }
+
+    const message =
+      opts.label?.trim() || (opts.kind === 'manual' ? 'manual save' : 'auto save');
+    const sha = await gitCommit({
+      ...repoArgs(folder),
+      message,
+      author: AUTHOR,
+    });
+    if (!sha) return null;
+    // Diff against the parent commit (headBefore) to surface "what changed
+    // in the mod folder since last save" in the UI. The first commit has no
+    // parent, so we pass null and the walk reports every blob as added.
+    const changes =
+      (await computeChangeStats(folder, headBefore, sha)) ?? undefined;
     const record: SaveRecord = {
-      sha: headBefore,
+      sha,
       timestamp: Date.now(),
       label: opts.label?.trim() || null,
-      kind: 'manual',
+      kind: opts.kind ?? 'auto',
+      preview: opts.preview?.trim() || undefined,
+      changes,
     };
+    const idx = await readIndex(folder);
+    // First write since the cap shipped stamps every pre-existing save as
+    // grandfathered — the forward cap below only ever prunes saves created
+    // after this boundary. Existing history is never trimmed without the
+    // user running the Storage cleanup.
+    migrateCapMarkers(idx, Date.now());
     idx.saves.unshift(record);
+    const { kept, droppedCount } = selectSavesToKeep(idx.saves, {
+      keepAutos: KEEP_AUTOSAVES,
+      includePreCap: false,
+    });
+    if (droppedCount > 0) {
+      idx.saves = kept;
+      idx.prunedSinceCompact =
+        (idx.prunedSinceCompact ?? 0) + droppedCount;
+    }
     await writeIndex(folder, idx);
     events.emit('changed', { folder, saves: idx.saves });
+    maybeScheduleAutoCompact(folder, idx);
     return record;
+  } finally {
+    await pruneStateWorktree(folder);
   }
+}
 
-  const message =
-    opts.label?.trim() || (opts.kind === 'manual' ? 'manual save' : 'auto save');
-  const sha = await gitCommit({
-    ...repoArgs(folder),
-    message,
-    author: AUTHOR,
+/**
+ * Drop state/'s contents after a commit or restore. state/ is fully derived
+ * — wiped and rebuilt from the workspace + chat sessions at the start of
+ * every commit — so keeping it populated between turns costs a full copy of
+ * the mod plus every chat JSONL per mod for nothing. The dir itself stays
+ * (ensureRepo uses its presence in layout checks).
+ */
+async function pruneStateWorktree(folder: string): Promise<void> {
+  try {
+    await fsp.rm(stateModPath(folder), { recursive: true, force: true });
+    await fsp.rm(stateChatsPath(folder), { recursive: true, force: true });
+  } catch (err) {
+    console.warn('[snapshots] failed to prune state worktree:', err);
+  }
+}
+
+/** Folders with an auto-compaction already queued behind the current op. */
+const autoCompactQueued = new Set<string>();
+
+function maybeScheduleAutoCompact(folder: string, idx: IndexFile): void {
+  if ((idx.prunedSinceCompact ?? 0) < AUTO_COMPACT_MIN_PRUNED) return;
+  if (idx.saves.length > AUTO_COMPACT_MAX_SAVES) return;
+  if (autoCompactQueued.has(folder)) return;
+  autoCompactQueued.add(folder);
+  // Chains onto the folder lock, so it runs after the commit that
+  // scheduled it releases — never concurrently with a commit or restore.
+  void withFolderLock(folder, () => compactLocked(folder))
+    .catch((err) =>
+      console.error('[snapshots] auto-compaction failed:', err),
+    )
+    .finally(() => autoCompactQueued.delete(folder));
+}
+
+/** Rewrite the repo to only the manifest's saves. Caller holds the lock. */
+async function compactLocked(folder: string): Promise<number> {
+  await ensureRepo(folder);
+  const result = await compactSnapshotDir(modSnapshotDir(folder));
+  await pruneStateWorktree(folder);
+  if (result) events.emit('changed', { folder, saves: result.saves });
+  return result?.freedBytes ?? 0;
+}
+
+/**
+ * The user-consented Storage cleanup: trim the manifest down to manual +
+ * labeled saves plus the KEEP_AUTOSAVES newest autosaves (grandfathered
+ * ones included this time — that's the consent), then compact the repo to
+ * actually free the bytes.
+ */
+export async function cleanupModHistory(
+  folder: string,
+): Promise<{ freedBytes: number }> {
+  return withFolderLock(folder, async () => {
+    await ensureRepo(folder);
+    const idx = await readIndex(folder);
+    migrateCapMarkers(idx, Date.now());
+    const { kept } = selectSavesToKeep(idx.saves, {
+      keepAutos: KEEP_AUTOSAVES,
+      includePreCap: true,
+    });
+    idx.saves = kept;
+    await writeIndex(folder, idx);
+    const freedBytes = await compactLocked(folder);
+    return { freedBytes };
   });
-  if (!sha) return null;
-  // Diff against the parent commit (headBefore) to surface "what changed
-  // in the mod folder since last save" in the UI. The first commit has no
-  // parent, so we pass null and the walk reports every blob as added.
-  const changes =
-    (await computeChangeStats(folder, headBefore, sha)) ?? undefined;
-  const record: SaveRecord = {
-    sha,
-    timestamp: Date.now(),
-    label: opts.label?.trim() || null,
-    kind: opts.kind ?? 'auto',
-    preview: opts.preview?.trim() || undefined,
-    changes,
-  };
-  const idx = await readIndex(folder);
-  idx.saves.unshift(record);
-  await writeIndex(folder, idx);
-  events.emit('changed', { folder, saves: idx.saves });
-  return record;
 }
 
 export interface RestoreResult {
@@ -577,6 +756,13 @@ export interface RestoreResult {
  * touch session JSONL files that pi may otherwise be writing to.
  */
 export async function restoreSnapshot(
+  folder: string,
+  sha: string,
+): Promise<RestoreResult> {
+  return withFolderLock(folder, () => restoreSnapshotLocked(folder, sha));
+}
+
+async function restoreSnapshotLocked(
   folder: string,
   sha: string,
 ): Promise<RestoreResult> {
@@ -607,6 +793,7 @@ export async function restoreSnapshot(
   // (their git objects survive only until the next gc). Their entries get
   // dropped here so the History panel reflects the live timeline.
   await pruneUnreachableSaves(folder, sha);
+  await pruneStateWorktree(folder);
   const slice = getModConversationsSlice(folder);
   const active =
     (slice.activeId &&
@@ -648,29 +835,120 @@ export async function renameSave(
   sha: string,
   label: string | null,
 ): Promise<SaveRecord | null> {
-  const idx = await readIndex(folder);
-  const save = idx.saves.find((s) => s.sha === sha);
-  if (!save) return null;
-  const trimmed = label?.trim() || null;
-  save.label = trimmed;
-  if (trimmed) save.kind = 'manual';
-  await writeIndex(folder, idx);
-  events.emit('changed', { folder, saves: idx.saves });
-  return save;
+  return withFolderLock(folder, async () => {
+    const idx = await readIndex(folder);
+    const save = idx.saves.find((s) => s.sha === sha);
+    if (!save) return null;
+    const trimmed = label?.trim() || null;
+    save.label = trimmed;
+    if (trimmed) save.kind = 'manual';
+    await writeIndex(folder, idx);
+    events.emit('changed', { folder, saves: idx.saves });
+    return save;
+  });
 }
 
 export async function deleteSave(folder: string, sha: string): Promise<void> {
-  const idx = await readIndex(folder);
-  const before = idx.saves.length;
-  idx.saves = idx.saves.filter((s) => s.sha !== sha);
-  if (idx.saves.length === before) return;
-  await writeIndex(folder, idx);
-  events.emit('changed', { folder, saves: idx.saves });
-  // Git object stays in the bare repo until a future gc. Cheap; not worth
-  // pruning eagerly.
+  return withFolderLock(folder, async () => {
+    const idx = await readIndex(folder);
+    const before = idx.saves.length;
+    idx.saves = idx.saves.filter((s) => s.sha !== sha);
+    if (idx.saves.length === before) return;
+    await writeIndex(folder, idx);
+    events.emit('changed', { folder, saves: idx.saves });
+    // Git objects stay in the bare repo until the next compaction
+    // (auto-triggered by the forward cap, or the Storage cleanup) rewrites
+    // it. Cheap; not worth compacting eagerly for one row.
+  });
 }
 
-/** Nuke the entire snapshots directory for a mod. Called from delete-mod. */
-export async function deleteAllSaves(folder: string): Promise<void> {
-  await fsp.rm(modSnapshotDir(folder), { recursive: true, force: true });
+/**
+ * Nuke the entire snapshots directory for a mod. Called from delete-mod and
+ * from the Storage cleanup for orphaned snapshot dirs. Returns the bytes
+ * that were on disk so cleanup can report what it freed.
+ */
+export async function deleteAllSaves(folder: string): Promise<number> {
+  return withFolderLock(folder, async () => {
+    const dir = modSnapshotDir(folder);
+    const bytes = await dirSizeBytes(dir);
+    await fsp.rm(dir, { recursive: true, force: true });
+    return bytes;
+  });
+}
+
+// =========================================================================
+// Storage usage
+// =========================================================================
+
+export interface SnapshotUsageRow {
+  folder: string;
+  /** Total on-disk bytes of snapshots/<folder>/ (repo + state + manifest). */
+  bytes: number;
+  saveCount: number;
+  manualCount: number;
+  /** Rows the Storage cleanup would drop (autosaves beyond the cap). */
+  trimmableCount: number;
+}
+
+/** Usage row joined with workspace identity (done in the route layer). */
+export interface SnapshotUsageModRow extends SnapshotUsageRow {
+  /** Mod display name; falls back to the folder for orphans. */
+  name: string;
+  /** True when no workspace mod exists for this snapshot dir anymore. */
+  orphaned: boolean;
+}
+
+export interface SnapshotUsageReport {
+  rows: SnapshotUsageModRow[];
+  totalBytes: number;
+  /** Retention constant, surfaced so UI copy can quote the real number. */
+  keepAutosaves: number;
+}
+
+export interface SnapshotCleanupProgressEvent {
+  folder: string;
+  status: 'working' | 'done' | 'error';
+  freedBytes?: number;
+  error?: string;
+}
+
+export interface SnapshotCleanupSummary {
+  freedBytes: number;
+  failures: number;
+}
+
+/**
+ * Walk every per-mod snapshot dir and measure it. Read-only; sizes are a
+ * point-in-time estimate (an agent turn mid-walk skews a row, harmlessly).
+ */
+export async function snapshotUsage(): Promise<{
+  rows: SnapshotUsageRow[];
+  totalBytes: number;
+}> {
+  let entries: fs.Dirent[] = [];
+  try {
+    entries = await fsp.readdir(snapshotsRoot(), { withFileTypes: true });
+  } catch {
+    return { rows: [], totalBytes: 0 };
+  }
+  const rows: SnapshotUsageRow[] = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const folder = entry.name;
+    const bytes = await dirSizeBytes(modSnapshotDir(folder));
+    const idx = await readIndex(folder);
+    const { droppedCount } = selectSavesToKeep(idx.saves, {
+      keepAutos: KEEP_AUTOSAVES,
+      includePreCap: true,
+    });
+    rows.push({
+      folder,
+      bytes,
+      saveCount: idx.saves.length,
+      manualCount: idx.saves.filter((s) => s.kind === 'manual').length,
+      trimmableCount: droppedCount,
+    });
+  }
+  rows.sort((a, b) => b.bytes - a.bytes);
+  return { rows, totalBytes: rows.reduce((sum, r) => sum + r.bytes, 0) };
 }

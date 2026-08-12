@@ -19,6 +19,7 @@ import type { RestoreResult } from './components/saves-view';
 import { SessionRecoveryDialog } from './components/session-recovery-dialog';
 import { appAlert, appConfirm } from './components/app-dialog';
 import type { BuildPanel } from './components/mod-build-sidebar';
+import { formatBytes } from './agent/index/format';
 import {
   dropConversation,
   isConversationBusy,
@@ -44,6 +45,11 @@ interface ModTab {
   buildPanel: BuildPanel;
 }
 
+/** Show the storage banner once save history crosses this. */
+const STORAGE_BANNER_THRESHOLD_BYTES = 2 * 1024 ** 3;
+/** After a dismissal, only re-show once usage has grown by this much. */
+const STORAGE_BANNER_REGROWTH_BYTES = 5 * 1024 ** 3;
+
 export function App() {
   const [view, setView] = useState<AppView>('mods');
   // The app-level active game: a lens over Home / Library / new-mod. NOT a
@@ -63,6 +69,10 @@ export function App() {
   const [recoveryShown, setRecoveryShown] = useState(false);
   const [multiChat, setMultiChat] = useState(false);
   const [skipPermissions, setSkipPermissions] = useState(false);
+  // Total snapshot bytes when the storage banner should show; null = hidden.
+  const [storageBannerBytes, setStorageBannerBytes] = useState<number | null>(
+    null,
+  );
   // Bumped after a chat is created/archived/restored so the sidebar's chat
   // list re-fetches. The list also self-refreshes off agent events.
   const [chatListRev, setChatListRev] = useState(0);
@@ -92,6 +102,32 @@ export function App() {
 
   useEffect(() => {
     void window.modmixer.getAppVersion().then(setAppVersion);
+  }, []);
+
+  // Storage banner: one deferred check per launch (the walk stats every
+  // snapshot dir, so keep it off the critical startup path). Shows when
+  // save history is heavy and either was never dismissed or has grown well
+  // past the dismissal watermark — a dismissal is not a nag loop.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          const [report, settings] = await Promise.all([
+            window.modmixer.getSnapshotUsage(),
+            window.modmixer.getSettings(),
+          ]);
+          const dismissedAt = settings.storageBannerDismissedAtBytes ?? 0;
+          const show =
+            report.totalBytes >= STORAGE_BANNER_THRESHOLD_BYTES &&
+            (dismissedAt === 0 ||
+              report.totalBytes >= dismissedAt + STORAGE_BANNER_REGROWTH_BYTES);
+          if (show) setStorageBannerBytes(report.totalBytes);
+        } catch {
+          // Usage probe failing must never affect startup.
+        }
+      })();
+    }, 5000);
+    return () => clearTimeout(timer);
   }, []);
 
   // A couple of toggles live in settings and need to take effect without a
@@ -751,6 +787,36 @@ export function App() {
           </button>
         </div>
       </header>
+
+      {storageBannerBytes !== null && (
+        <div className="flex items-center gap-3 border-b border-warning/40 bg-warning/5 px-4 py-1.5 text-[12px] text-ink">
+          <span>
+            Save history is using{' '}
+            <strong>{formatBytes(storageBannerBytes)}</strong> of disk space.
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              setStorageBannerBytes(null);
+              openSettings('storage');
+            }}
+            className="rounded-md border border-line bg-paper px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-ink transition-colors hover:bg-surface"
+          >
+            Review &amp; clean up
+          </button>
+          <span className="flex-1" />
+          <button
+            type="button"
+            onClick={() => {
+              void window.modmixer.dismissStorageBanner(storageBannerBytes);
+              setStorageBannerBytes(null);
+            }}
+            className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted transition-colors hover:text-ink"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {view === 'library' ? (
         getGame(resolveGameId(activeGame)).capabilities.steamWorkshop ? (

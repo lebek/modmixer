@@ -19,6 +19,7 @@ import { ModelPicker } from './model-picker';
 import { ThinkingPicker } from './thinking-picker';
 import { LicensePicker } from './mod-publish/license-picker';
 import { GameIcon } from './game-icon';
+import { StorageSection } from './storage-section';
 import { useGameSetup } from './use-game-setup';
 import { GameSetupBody } from './game-setup-body';
 import { getSelectableGames } from '@/agent/games/registry';
@@ -29,6 +30,7 @@ export type SettingsSection =
   | 'providers'
   | 'games'
   | 'appearance'
+  | 'storage'
   | 'advanced';
 
 export function AppSettingsDialog({
@@ -130,9 +132,11 @@ export function AppSettingsDialog({
         ? 'Appearance'
         : section === 'games'
           ? 'Games'
-          : section === 'advanced'
-            ? 'Advanced'
-            : 'General';
+          : section === 'storage'
+            ? 'Storage'
+            : section === 'advanced'
+              ? 'Advanced'
+              : 'General';
 
   return (
     <div
@@ -165,6 +169,11 @@ export function AppSettingsDialog({
             onClick={() => setSection('appearance')}
           />
           <SectionTab
+            label="Storage"
+            active={section === 'storage'}
+            onClick={() => setSection('storage')}
+          />
+          <SectionTab
             label="Advanced"
             active={section === 'advanced'}
             onClick={() => setSection('advanced')}
@@ -190,6 +199,7 @@ export function AppSettingsDialog({
               <AppearanceSection theme={theme} onChange={changeTheme} />
             )}
             {section === 'games' && <GamesSection />}
+            {section === 'storage' && <StorageSection />}
             {section === 'advanced' &&
               (!loaded ? (
                 <p className="text-sm text-muted">Loading…</p>
